@@ -93,7 +93,7 @@ def score(traj, u, cfg):
     end = traj[-1]
     clearance = min_clearance(traj)
 
-    # 충돌 궤적은 점수 계산 없이 탈락 (하드 제약)
+    # 충돌 궤적은 점수 계산 없이 탈락(->return None) (하드 제약)
     if cfg['collision_reject'] and clearance <= ROBOT_RADIUS + SAFETY_MARGIN:
         return None
 
@@ -105,23 +105,23 @@ def score(traj, u, cfg):
         # nav2 DWB의 GoalDist critic에 해당하는 항.
         d_start = np.linalg.norm(GOAL - traj[0][:2])    #distance btw start & goal.
         d_end = np.linalg.norm(to_goal)                 #distance btw end & goal.
-        span = V_MAX * (SIM_TIME if cfg['rollout'] else DT)
-        heading = (d_start - d_end) / span          # 직진 접근이면 ~1.0
-        clear_s = np.clip(clearance / CLEARANCE_REF, 0.0, 1.0)          #normalization for clearance.
-        vel_s = u[0] / V_MAX
+        span = V_MAX * (SIM_TIME if cfg['rollout'] else DT)                 #DT or SIM_TIME 동안 최대로 갈 수 있는 거리.
+        heading = (d_start - d_end) / span                                  # 직진 접근이면 ~1.0(ideal) - start와 end 시점 간 distance 차이가 클 수록 score가 커짐.
+        clear_s = np.clip(clearance / CLEARANCE_REF, 0.0, 1.0)              #normalization for clearance.
+        vel_s = u[0] / V_MAX                                                #normalization.
     else:
-        # 원본 방식: 목표 방향 벡터를 진행 방향에 정사영 -> 거리에 비례해 커진다
+        # 원본 방식(dynamic_window_approach.py): 목표 방향 벡터를 진행 방향에 정사영 - 방향 오차가 줄어들기만 해도 score 커짐 -> 제자리 회전만 하는 case 발생.
         heading = np.dot(to_goal, [np.cos(end[2]), np.sin(end[2])])
         clear_s = clearance
         vel_s = u[0]
 
     w_h, w_c, w_v = WEIGHTS
-    return w_h * heading + w_c * clear_s + w_v * vel_s
+    return w_h * heading + w_c * clear_s + w_v * vel_s          #return the cost function value.
 
 
 # ---------------------------------------------------------------- 속도 윈도우
 
-def velocity_window(v_cur, w_cur, cfg):
+def velocity_window(v_cur, w_cur, cfg):                         # 속도 공간에 대한 후보 생성.
     """후보로 삼을 (v, w) 범위. step1에서 dynamic window가 들어간다."""
     if cfg['accel_limit']:
         # 한 제어주기 동안 가속도로 도달 가능한 범위로만 제한
@@ -133,12 +133,13 @@ def velocity_window(v_cur, w_cur, cfg):
         # 원본: 매 스텝 전 범위를 훑는다 -> 0에서 1.0 m/s로 점프 가능
         v_lo, v_hi = 0.0, V_MAX
         w_lo, w_hi = -W_MAX, W_MAX
-    return np.linspace(v_lo, v_hi, N_V), np.linspace(w_lo, w_hi, N_W)
+    return np.linspace(v_lo, v_hi, N_V), np.linspace(w_lo, w_hi, N_W)   #lin_space -> start(_lo_) / stop(_hi)을 설정한 개수(N_)만큼 동일한 간격으로 나눔.
 
 
 # ---------------------------------------------------------------- 시뮬레이션
 
 def simulate(cfg):
+    #initialize (define)
     x = START.copy()
     v_cur, w_cur = 0.0, 0.0
 
@@ -147,11 +148,12 @@ def simulate(cfg):
     best_trajs = []          # 각 스텝에서 선택된 예측 궤적 (시각화용)
     rejected = 0
 
-    for _ in range(int(T_MAX / DT)):
-        if np.linalg.norm(GOAL - x[:2]) < GOAL_TOL:
+
+    for _ in range(int(T_MAX / DT)):    #for steps.
+        if np.linalg.norm(GOAL - x[:2]) < GOAL_TOL:         # reached case.
             break
 
-        vs, ws = velocity_window(v_cur, w_cur, cfg)
+        vs, ws = velocity_window(v_cur, w_cur, cfg)         # 속도 공간에 대한 후보 생성.
         best_score, best_u, best_traj = -np.inf, None, None
 
         for v in vs:
@@ -159,10 +161,10 @@ def simulate(cfg):
                 u = (v, w)
                 traj = rollout(x, u) if cfg['rollout'] else np.array([x, motion(x, u)])
                 s = score(traj, u, cfg)
-                if s is None:
+                if s is None:               # trajectory 생성 실패.
                     rejected += 1
                     continue
-                if s > best_score:
+                if s > best_score:          # update the best score.
                     best_score, best_u, best_traj = s, u, traj
 
         if best_u is None:
@@ -170,6 +172,7 @@ def simulate(cfg):
             best_u = (max(0.0, v_cur - A_MAX * DT), 0.0)
             best_traj = rollout(x, best_u) if cfg['rollout'] else np.array([x, motion(x, best_u)])
 
+        #update as calculated value.
         v_cur, w_cur = best_u
         x = motion(x, best_u)
         path.append(x[:2].copy())
@@ -198,8 +201,10 @@ def simulate(cfg):
     }
 
 
-# ---------------------------------------------------------------- 단계 정의
+# ---------------------------------------------------------------- 단계 정의 (단계 별로 각 plugin apply.)
 
+
+#steps의 각 plugin : cfg에 해당.
 STEPS = {
     'step0_baseline': dict(
         accel_limit=False, rollout=False, collision_reject=False, normalize=False,
@@ -243,6 +248,10 @@ def plot_one(ax, name, cfg, res):
     ax.set_xlim(-0.5, 6)
     ax.set_ylim(-0.5, 6)
 
+
+
+
+#### main func.
 
 def main():
     ap = argparse.ArgumentParser()
