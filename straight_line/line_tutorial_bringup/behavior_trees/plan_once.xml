@@ -1,0 +1,12 @@
+<!--
+  경로를 한 번만 계획하고 끝까지 따라간다. 복구(recovery) 동작도 없다.
+  컨트롤러가 경로를 얼마나 잘 따라가는지 그대로 보려고 쓴다.
+-->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <Sequence name="PlanOnceThenFollow">
+      <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+      <FollowPath path="{path}" controller_id="FollowPath"/>
+    </Sequence>
+  </BehaviorTree>
+</root>

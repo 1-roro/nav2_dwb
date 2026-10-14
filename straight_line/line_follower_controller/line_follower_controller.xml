@@ -1,0 +1,5 @@
+<library path="line_follower_controller">
+  <class type="line_follower_controller::LineFollowerController" base_class_type="nav2_core::Controller">
+    <description>Step-by-step path follower for straight line paths (tutorial).</description>
+  </class>
+</library>
