@@ -1,0 +1,16 @@
+<!--
+  기본 BT(navigate_to_pose_w_replanning_and_recovery.xml)처럼 1Hz 로 재계획한다.
+  비교를 위해 복구 동작은 뺐다.
+  직선 planner 는 매번 '로봇의 현재 위치 -> goal' 직선을 다시 그리므로,
+  컨트롤러가 경로에서 벗어나도 1초 뒤에는 새 경로 위에 서 있게 된다.
+-->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <PipelineSequence name="ReplanAt1Hz">
+      <RateController hz="1.0">
+        <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+      </RateController>
+      <FollowPath path="{path}" controller_id="FollowPath"/>
+    </PipelineSequence>
+  </BehaviorTree>
+</root>

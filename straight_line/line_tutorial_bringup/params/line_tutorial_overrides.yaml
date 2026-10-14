@@ -1,0 +1,69 @@
+# nav2_bringup/params/nav2_params.yaml (Humble 기본값) 위에 덮어쓸 부분만 적는다.
+# tutorial.launch.py 가 두 파일을 합친다.
+#   - 'plugin' 키가 있는 항목(GridBased, FollowPath)은 통째로 교체된다 (DWB/NavFn 파라미터가 섞이지 않게)
+#   - 나머지는 키 단위로 덮어쓴다
+# step 값은 launch 인자 planner_step:=N controller_step:=N 이 있으면 그것으로 다시 덮어쓴다.
+
+amcl:
+  ros__parameters:
+    # 스폰 위치(line_room 의 A 지점). RViz 에서 2D Pose Estimate 를 찍지 않아도 된다.
+    # tutorial.launch.py 가 x_pose / y_pose / yaw 인자 값으로 다시 덮어쓴다.
+    set_initial_pose: true
+    initial_pose:
+      x: -2.0
+      y: -1.0
+      z: 0.0
+      yaw: 0.0
+
+planner_server:
+  ros__parameters:
+    # NavFn 은 send_scenario.py 가 로봇을 시나리오 출발점까지 옮길 때만 쓴다
+    planner_plugins: ["GridBased", "NavFn"]
+    # 기본 BT 가 planner_id="GridBased" 로 부르므로 이름은 그대로 두고 플러그인만 바꾼다
+    GridBased:
+      plugin: "straight_line_planner::StraightLinePlanner"
+      step: 2                          # 0 endpoints / 1 interpolate / 2 oriented / 3 collision
+      interpolation_resolution: 0.1    # [m]
+      allow_unknown: true              # step 3: costmap 의 unknown 셀을 지나가도 되는가
+    NavFn:
+      plugin: "nav2_navfn_planner/NavfnPlanner"
+      tolerance: 0.5
+      use_astar: false
+      allow_unknown: true
+
+controller_server:
+  ros__parameters:
+    # RPP 는 send_scenario.py 의 출발점 이동용이자, 마지막 단계에서 비교할 기준 컨트롤러
+    controller_plugins: ["FollowPath", "RPP"]
+    # 기본 BT 가 controller_id="FollowPath" 로 부르므로 이름은 그대로 둔다
+    FollowPath:
+      plugin: "line_follower_controller::LineFollowerController"
+      step: 4                          # 0 goal_seek / 1 heading_track / 2 pure_pursuit / 3 rotate / 4 limits
+      desired_linear_vel: 0.25         # velocity_smoother 상한이 0.26 m/s
+      max_angular_vel: 1.0             # velocity_smoother 상한이 1.0 rad/s
+      k_heading: 1.5                   # C0, C1
+      k_cross_track: 2.0               # C1
+      lookahead_dist: 0.6              # C2+
+      rotate_to_heading_min_angle: 0.785   # C3+ [rad]
+      rotate_to_heading_angular_vel: 1.0   # C3+ [rad/s]
+      max_linear_accel: 0.5            # C4 [m/s^2]
+      max_angular_accel: 3.2           # C4 [rad/s^2]
+      approach_dist: 0.6               # C4 [m]
+      min_approach_linear_vel: 0.05    # C4 [m/s]
+      transform_tolerance: 0.1
+    RPP:
+      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+      desired_linear_vel: 0.25
+      lookahead_dist: 0.6
+      use_velocity_scaled_lookahead_dist: false
+      use_rotate_to_heading: true
+      rotate_to_heading_min_angle: 0.785
+      rotate_to_heading_angular_vel: 1.0
+      max_angular_accel: 3.2
+      allow_reversing: false
+      use_collision_detection: true
+      use_regulated_linear_velocity_scaling: true
+      use_cost_regulated_linear_velocity_scaling: false
+      approach_velocity_scaling_dist: 0.6
+      min_approach_linear_velocity: 0.05
+      transform_tolerance: 0.1
