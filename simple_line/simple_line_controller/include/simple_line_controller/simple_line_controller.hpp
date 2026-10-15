@@ -26,6 +26,7 @@ namespace simple_line_controller
 // 매 주기:
 //   1. 받은 경로에서 이미 지나온 부분을 잘라내고,
 //      local costmap 범위 안의 경로만 로봇 좌표계로 옮긴다
+//      (여러 goal 을 경유하는 꺾은선 경로도 그대로 따라간다)
 //   2. goal 의 xy 에 도착했으면       -> 제자리에서 goal yaw 로 회전
 //      경로 쪽으로 크게 틀어져 있으면  -> 제자리에서 경로 쪽으로 회전
 //      그 외                          -> pure pursuit (곡률 k = 2y / L^2)
@@ -89,6 +90,7 @@ private:
   double approach_dist_{0.6};
   double min_approach_linear_vel_{0.05};
   double transform_tolerance_{0.1};
+  double max_robot_pose_search_dist_{-1.0};   // <= 0 이면 local costmap 반폭
 
   double control_duration_{0.05};
   double speed_limit_{0.0};           // 0 = 제한 없음
