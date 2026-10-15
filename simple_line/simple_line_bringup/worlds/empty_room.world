@@ -1,0 +1,117 @@
+<?xml version="1.0"?>
+<!-- 6m x 6m empty room + one marker box (helps AMCL). Map: maps/empty_room.yaml -->
+<sdf version="1.6">
+  <world name="default">
+
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <scene>
+      <shadows>false</shadows>
+    </scene>
+
+    <gui fullscreen='0'>
+      <camera name='user_camera'>
+        <pose frame=''>0 0 12 0 1.570796 0</pose>
+        <view_controller>orbit</view_controller>
+        <projection_type>perspective</projection_type>
+      </camera>
+    </gui>
+
+    <physics type="ode">
+      <real_time_update_rate>1000.0</real_time_update_rate>
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1</real_time_factor>
+    </physics>
+
+    <model name="walls">
+      <static>true</static>
+      <link name="north">
+        <pose>0 3.05 0.25 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>6.2 0.1 0.5</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>6.2 0.1 0.5</size></box></geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/Grey</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="south">
+        <pose>0 -3.05 0.25 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>6.2 0.1 0.5</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>6.2 0.1 0.5</size></box></geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/Grey</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="east">
+        <pose>3.05 0 0.25 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>0.1 6.2 0.5</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.1 6.2 0.5</size></box></geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/Grey</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="west">
+        <pose>-3.05 0 0.25 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>0.1 6.2 0.5</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.1 6.2 0.5</size></box></geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/Grey</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+
+    <model name="marker_box">
+      <static>true</static>
+      <link name="link">
+        <pose>-2.2 2.2 0.25 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>0.4 0.4 0.5</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.4 0.4 0.5</size></box></geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/Grey</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>

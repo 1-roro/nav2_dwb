@@ -1,0 +1,5 @@
+<library path="simple_line_planner">
+  <class type="simple_line_planner::SimpleLinePlanner" base_class_type="nav2_core::GlobalPlanner">
+    <description>Straight line global planner (no obstacle checking).</description>
+  </class>
+</library>
