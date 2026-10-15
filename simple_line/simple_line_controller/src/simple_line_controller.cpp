@@ -72,6 +72,7 @@ void SimpleLineController::configure(
   param("approach_dist", approach_dist_);
   param("min_approach_linear_vel", min_approach_linear_vel_);
   param("transform_tolerance", transform_tolerance_);
+  param("max_robot_pose_search_dist", max_robot_pose_search_dist_);
 
   double controller_frequency = 20.0;
   node->get_parameter("controller_frequency", controller_frequency);
@@ -113,10 +114,26 @@ void SimpleLineController::setPlan(const nav_msgs::msg::Path & path)
 
 std::vector<SimpleLineController::Pose2D> SimpleLineController::localPlan(const Pose2D & robot)
 {
+  const auto * costmap = costmap_ros_->getCostmap();
+  const double max_dist =
+    std::max(costmap->getSizeInMetersX(), costmap->getSizeInMetersY()) / 2.0;
+
   // 1) 로봇에 가장 가까운 점 앞까지 잘라낸다 (path pruning)
+  //    경로 앞쪽에서 search_dist 만큼만 찾는다. 경로가 꺾여서 자기 자신과 교차하거나
+  //    되돌아오는 경우(여러 goal 경유), 경로 전체에서 찾으면 나중 구간의 점을 잡아
+  //    중간 구간을 건너뛴다.
+  const double search_dist =
+    max_robot_pose_search_dist_ > 0.0 ? max_robot_pose_search_dist_ : max_dist;
   size_t closest = 0;
   double best = std::numeric_limits<double>::max();
+  double travelled = 0.0;
   for (size_t i = 0; i < plan_.size(); ++i) {
+    if (i > 0) {
+      travelled += std::hypot(plan_[i].x - plan_[i - 1].x, plan_[i].y - plan_[i - 1].y);
+      if (travelled > search_dist) {
+        break;
+      }
+    }
     const double d = std::hypot(plan_[i].x - robot.x, plan_[i].y - robot.y);
     if (d < best) {
       best = d;
@@ -126,9 +143,6 @@ std::vector<SimpleLineController::Pose2D> SimpleLineController::localPlan(const 
   plan_.erase(plan_.begin(), plan_.begin() + static_cast<long>(closest));
 
   // 2) local costmap 범위 안의 연속 구간만 로봇 좌표계로 옮긴다
-  const auto * costmap = costmap_ros_->getCostmap();
-  const double max_dist =
-    std::max(costmap->getSizeInMetersX(), costmap->getSizeInMetersY()) / 2.0;
   const double c = std::cos(robot.yaw);
   const double s = std::sin(robot.yaw);
 
@@ -167,11 +181,14 @@ geometry_msgs::msg::TwistStamped SimpleLineController::computeVelocityCommands(
     throw nav2_core::PlannerException("SimpleLineController: no path inside the local costmap");
   }
 
-  // goal (경로의 마지막 점)을 로봇 좌표계로
+  // goal = 경로의 마지막 점.
+  // goal 까지 거리는 직선 거리가 아니라 '남은 경로 길이'로 잰다. 여러 goal 을 경유하는
+  // 꺾은선 경로에서는 최종 goal 이 가까이 보여도 아직 돌아야 할 구간이 남아 있을 수 있다.
   const Pose2D & g = plan_.back();
-  const double gdx = g.x - robot.x;
-  const double gdy = g.y - robot.y;
-  const double goal_dist = std::hypot(gdx, gdy);
+  double goal_dist = std::hypot(plan_.front().x - robot.x, plan_.front().y - robot.y);
+  for (size_t i = 1; i < plan_.size(); ++i) {
+    goal_dist += std::hypot(plan_[i].x - plan_[i - 1].x, plan_[i].y - plan_[i - 1].y);
+  }
   const double goal_yaw_err = normalizeAngle(g.yaw - robot.yaw);
 
   // goal checker 의 xy 허용오차 = '도착했다'고 보는 거리

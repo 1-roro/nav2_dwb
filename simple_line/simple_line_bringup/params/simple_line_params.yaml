@@ -33,3 +33,4 @@ controller_server:
       approach_dist: 0.6                   # goal 이 이 거리 안이면 감속 [m]
       min_approach_linear_vel: 0.05        # [m/s]
       transform_tolerance: 0.1             # [s]
+      max_robot_pose_search_dist: -1.0     # 가장 가까운 경로 점을 찾을 범위 [m], <= 0 이면 local costmap 반폭

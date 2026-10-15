@@ -27,14 +27,16 @@ simple_line/
 `src/simple_line_controller.cpp` 의 `computeVelocityCommands()`. 매 주기(기본 20Hz):
 
 1. **경로 정리**: 로봇 pose 를 경로 frame(map)으로 옮기고, 로봇에 가장 가까운 점 앞부분을 잘라낸다.
+   가장 가까운 점은 경로 앞쪽 `max_robot_pose_search_dist` 안에서만 찾는다 (꺾은선 경로가 자기 자신과
+   교차할 때 나중 구간으로 건너뛰지 않도록).
    남은 경로 중 local costmap 범위(기본 3m x 3m → 반경 1.5m) 안의 점만 로봇 좌표계로 바꾼다.
 2. **carrot 선택**: 로봇에서 `lookahead_dist` 이상 떨어진 첫 점. 없으면 마지막 점.
 3. **명령 계산** (위에서부터 먼저 맞는 것):
-   - goal 까지 거리 ≤ goal checker 의 xy 허용오차 → 제자리에서 goal yaw 로 회전
+   - goal 까지 남은 **경로 길이** ≤ goal checker 의 xy 허용오차 → 제자리에서 goal yaw 로 회전
    - carrot 방향이 `rotate_to_heading_min_angle` 보다 크게 틀어짐 → 제자리에서 carrot 쪽으로 회전
    - 그 외 → pure pursuit: 곡률 `k = 2·y / L²` (carrot 의 로봇 좌표 (x, y), `L² = x² + y²`), `w = v·k`
 4. **제한**
-   - goal 이 `approach_dist` 안이면 `v · 거리 / approach_dist` 로 감속 (하한 `min_approach_linear_vel`)
+   - goal 까지 남은 경로 길이가 `approach_dist` 안이면 `v · 거리 / approach_dist` 로 감속 (하한 `min_approach_linear_vel`)
    - 선가속도 `max_linear_accel`, 제자리 회전 시 각가속도 `max_angular_accel`
    - `|w|` 가 `max_angular_vel` 을 넘으면 v 도 같은 비율로 줄여 곡률(지나가는 원호)을 유지
    - `setSpeedLimit()` (speed filter 등)이 건 속도 제한 반영
@@ -53,6 +55,9 @@ RViz 확인용 토픽: `/simple_line/local_plan` (잘라 낸 경로), `/simple_l
 | `approach_dist` | 0.6 | goal 감속 시작 거리 [m] |
 | `min_approach_linear_vel` | 0.05 | 감속 하한 [m/s] |
 | `transform_tolerance` | 0.1 | TF 대기 시간 [s] |
+| `max_robot_pose_search_dist` | -1.0 | 가장 가까운 경로 점을 찾을 범위 [m]. 0 이하면 local costmap 반폭 |
+
+여러 goal 을 한 번에 보내 중간 goal 을 경유하는 방법은 [MULTI_GOAL.md](MULTI_GOAL.md) 에 정리했다.
 
 ## 빌드
 
