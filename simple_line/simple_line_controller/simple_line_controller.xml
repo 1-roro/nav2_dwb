@@ -1,0 +1,5 @@
+<library path="simple_line_controller">
+  <class type="simple_line_controller::SimpleLineController" base_class_type="nav2_core::Controller">
+    <description>Pure pursuit controller for straight line paths.</description>
+  </class>
+</library>
