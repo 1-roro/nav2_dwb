@@ -12,6 +12,7 @@
   <exec_depend>simple_line_planner</exec_depend>
   <exec_depend>simple_line_controller</exec_depend>
   <exec_depend>nav2_bringup</exec_depend>
+  <exec_depend>nav2_waypoint_follower</exec_depend>
   <exec_depend>turtlebot3_gazebo</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>

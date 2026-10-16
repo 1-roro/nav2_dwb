@@ -34,3 +34,14 @@ controller_server:
       min_approach_linear_vel: 0.05        # [m/s]
       transform_tolerance: 0.1             # [s]
       max_robot_pose_search_dist: -1.0     # 가장 가까운 경로 점을 찾을 범위 [m], <= 0 이면 local costmap 반폭
+
+waypoint_follower:
+  ros__parameters:
+    # follow_waypoints.py 가 쓰는 waypoint_follower 설정 (값은 Humble 기본값과 같다)
+    loop_rate: 20                          # goal 진행 상태를 확인하는 주기 [Hz]
+    stop_on_failure: false                 # false: goal 하나가 실패해도 다음 goal 로 계속 (실패한 index 는 결과로 알려 준다)
+    waypoint_task_executor_plugin: "wait_at_waypoint"
+    wait_at_waypoint:
+      plugin: "nav2_waypoint_follower::WaitAtWaypoint"
+      enabled: true
+      waypoint_pause_duration: 200         # 각 goal 에 도착한 뒤 기다리는 시간 [ms]
