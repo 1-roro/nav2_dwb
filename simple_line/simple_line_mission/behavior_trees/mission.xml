@@ -1,0 +1,67 @@
+<!--
+  경유 구간 + 작업 지점을 섞은 미션 (BehaviorTree.CPP v3, Nav2 Humble)
+
+  빈 방(simple_line_bringup) 기준. 로봇은 (-2.0, -1.0) 에서 +x 를 보고 출발한다.
+
+    출발 ──▶ (0,-1) 경유 ──▶ A(1.5,-1) 정지: 점검 3초
+         ──▶ (1.5,1.5) 경유 ──▶ B(-1,1.5) 정지: 360° 회전 + 보고 2초   (A → B 주행 중 0.5m 마다 스캔)
+         ──▶ 출발점 복귀
+
+  노드 종류
+    제어 노드  Sequence             자식을 차례로. 하나라도 FAILURE 면 FAILURE
+              Fallback             자식을 차례로. 하나라도 SUCCESS 면 SUCCESS (= 앞 자식이 실패하면 다음 자식)
+              Parallel             자식을 동시에. success_threshold 개가 SUCCESS 면 SUCCESS, 나머지는 halt
+    데코레이터 RetryUntilSuccessful 자식이 FAILURE 면 num_attempts 번까지 다시
+    Nav2 노드  NavigateThroughPoses 경유점을 멈추지 않고 지나 마지막 점에서 정지 (bt_navigator 에 요청)
+              NavigateToPose       한 점까지 가서 정지 (bt_navigator 에 요청)
+              Spin                 제자리 회전 (behavior_server 에 요청)
+    이 패키지  MakePose / MakePoses 문자열 "x,y[,yaw_deg]" → pose, blackboard 에 저장
+              DoWork               정지 상태 작업 (지금은 duration 초 대기)
+              ScanWhileMoving      주행 중 작업 (interval m 마다 위치 기록, halt 될 때까지 RUNNING)
+              Log                  로그 출력
+
+  {이름} 은 blackboard 변수다. MakePoses 가 output="{route_a}" 로 쓰고,
+  NavigateThroughPoses 가 goals="{route_a}" 로 읽는다.
+-->
+<root main_tree_to_execute="Mission">
+  <BehaviorTree ID="Mission">
+    <Sequence name="mission">
+
+      <!-- 0. 목표 위치 준비 (map frame). 경유점 yaw 는 생략하면 다음 점 방향 -->
+      <Sequence name="setup">
+        <MakePoses name="make_route_a" poses="0.0,-1.0; 1.5,-1.0,90" output="{route_a}"/>
+        <MakePoses name="make_route_b" poses="1.5,1.5; -1.0,1.5,180" output="{route_b}"/>
+        <MakePose name="make_home" pose="-2.0,-1.0,0" output="{home}"/>
+      </Sequence>
+
+      <!-- 1. 작업 지점 A: (0,-1) 을 멈추지 않고 지나 A 에서 정지 → 점검. 못 가면 건너뛴다 -->
+      <Fallback name="station_a">
+        <Sequence name="visit_a">
+          <NavigateThroughPoses name="go_a" goals="{route_a}"/>
+          <DoWork name="inspect_a" task="inspect A" duration="3.0"/>
+        </Sequence>
+        <Log name="skip_a" message="station A failed, skipping it"/>
+      </Fallback>
+
+      <!-- 2. 작업 지점 B: 가는 동안 스캔 (주행 중 작업) → B 에서 한 바퀴 둘러보고 보고 -->
+      <Fallback name="station_b">
+        <Sequence name="visit_b">
+          <Parallel name="go_b_scanning" success_threshold="1" failure_threshold="1">
+            <NavigateThroughPoses name="go_b" goals="{route_b}"/>
+            <ScanWhileMoving name="scan" interval="0.5"/>
+          </Parallel>
+          <Spin name="look_around" spin_dist="6.28" time_allowance="20" is_recovery="false"/>
+          <DoWork name="report_b" task="report B" duration="2.0"/>
+        </Sequence>
+        <Log name="skip_b" message="station B failed, skipping it"/>
+      </Fallback>
+
+      <!-- 3. 복귀: 경유점이 없으니 NavigateToPose. 실패하면 한 번 더 -->
+      <RetryUntilSuccessful name="retry_home" num_attempts="2">
+        <NavigateToPose name="go_home" goal="{home}"/>
+      </RetryUntilSuccessful>
+      <Log name="done" message="mission complete"/>
+
+    </Sequence>
+  </BehaviorTree>
+</root>
