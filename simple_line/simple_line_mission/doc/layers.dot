@@ -1,0 +1,58 @@
+// 미션 BT 가 Nav2 의 어디에 붙는지 (dot -Tpng -Gdpi=110 layers.dot -o layers.png)
+digraph layers {
+  graph [rankdir=TB, fontname="NanumGothic", bgcolor="white", pad=0.3, nodesep=0.4, ranksep=0.7,
+         newrank=true, labelloc=b, label=<<table border="0" cellspacing="0" cellpadding="4"><tr>
+           <td bgcolor="#fbdccf" border="1" color="#eb6834">&nbsp;이 저장소의 코드&nbsp;</td><td>&nbsp;&nbsp;</td>
+           <td bgcolor="#cde2fb" border="1" color="#2a78d6">&nbsp;Nav2 가 제공&nbsp;</td></tr></table>>];
+  node [shape=box, style="rounded,filled", fontname="NanumGothic", fontsize=12, fontcolor="#0b0b0b",
+        penwidth=1.5, margin="0.15,0.08"];
+  edge [color="#8a8984", penwidth=1.3, fontname="NanumGothic", fontsize=10, fontcolor="#52514e"];
+
+  // 왼쪽 열: 계층 이름
+  node [shape=plaintext, style="", fontsize=12, fontcolor="#52514e", margin=0];
+  L1 [label=<<b>상위 작업 계층</b><br/>무엇을, 어떤 순서로,<br/>실패하면 어떻게>];
+  L2 [label=<<b>bt_navigator</b><br/>goal 까지 어떻게 갈지<br/>(내부 BT: 재계획, recovery)>];
+  L3 [label=<<b>서버</b><br/>경로 계산, 경로 추종,<br/>제자리 동작>];
+  L4 [label=""];
+  L1 -> L2 -> L3 -> L4 [style=invis];
+
+  node [shape=box, style="rounded,filled", fontsize=12, fontcolor="#0b0b0b", margin="0.15,0.08"];
+  bt [label=<<b>mission_bt_runner</b><br/><font point-size="10">BehaviorTree.CPP v3 + mission.xml</font>>,
+      fillcolor="#fbdccf", color="#eb6834"];
+  py [label=<<b>mission_node.py</b><br/><font point-size="10">Python + BasicNavigator</font>>,
+      fillcolor="#fbdccf", color="#eb6834"];
+  ntp [label=<<b>navigate_through_poses</b><br/><font point-size="10">경유점은 지나가고 마지막 점에서 정지</font>>,
+       fillcolor="#cde2fb", color="#2a78d6"];
+  nt [label=<<b>navigate_to_pose</b><br/><font point-size="10">한 점까지 가서 정지</font>>,
+      fillcolor="#cde2fb", color="#2a78d6"];
+  planner [label=<<b>planner_server</b><br/><font point-size="10">GridBased = SimpleLinePlanner (이 저장소)</font>>,
+           fillcolor="#cde2fb", color="#2a78d6"];
+  controller [label=<<b>controller_server</b><br/><font point-size="10">FollowPath = SimpleLineController (이 저장소)</font>>,
+              fillcolor="#cde2fb", color="#2a78d6"];
+  behavior [label=<<b>behavior_server</b><br/><font point-size="10">spin, wait, backup ...</font>>,
+            fillcolor="#cde2fb", color="#2a78d6"];
+  robot [label=<<b>로봇</b><br/><font point-size="10">cmd_vel (velocity_smoother 거쳐서)</font>>,
+         fillcolor="#f0efec", color="#52514e"];
+
+  {rank=same; L1; bt; py}
+  {rank=same; L2; ntp; nt}
+  {rank=same; L3; planner; controller; behavior}
+  {rank=same; L4; robot}
+  L1 -> bt [style=invis];
+  bt -> py [arrowhead=none, style=dotted, label="  또는  "];
+  L2 -> ntp -> nt [style=invis];
+  L3 -> planner -> controller -> behavior [style=invis];
+
+  bt -> ntp [label=" NavigateThroughPoses"];
+  bt -> nt [label=" NavigateToPose"];
+  py -> ntp [style=dashed];
+  py -> nt [style=dashed];
+  bt -> behavior [label=" Spin"];
+  py -> behavior [style=dashed];
+  ntp -> planner [label=" ComputePath\l ThroughPoses\l"];
+  nt -> planner [label=" ComputePath\l ToPose\l"];
+  ntp -> controller [label=" FollowPath"];
+  nt -> controller;
+  controller -> robot;
+  behavior -> robot;
+}

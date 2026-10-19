@@ -6,7 +6,8 @@
 simple_line/
 ├── simple_line_planner/      nav2_core::GlobalPlanner  — start → goal 직선 경로
 ├── simple_line_controller/   nav2_core::Controller     — pure pursuit + 제자리 회전
-└── simple_line_bringup/      launch, 파라미터, 빈 방 월드(6m x 6m)
+├── simple_line_bringup/      launch, 파라미터, 빈 방 월드(6m x 6m)
+└── simple_line_mission/      경유 구간 + 작업 지점 미션 예제 (상위 작업 BT, Python 작업 노드)
 ```
 
 ## Planner — `simple_line_planner::SimpleLinePlanner`
@@ -58,6 +59,8 @@ RViz 확인용 토픽: `/simple_line/local_plan` (잘라 낸 경로), `/simple_l
 | `max_robot_pose_search_dist` | -1.0 | 가장 가까운 경로 점을 찾을 범위 [m]. 0 이하면 local costmap 반폭 |
 
 여러 goal 을 한 번에 보내 중간 goal 을 경유하는 방법은 [MULTI_GOAL.md](MULTI_GOAL.md) 에 정리했다.
+경유 구간과 작업 지점(정지 작업, 주행 중 작업)을 섞은 미션을 상위 작업 BT 와 Python 작업 노드로 만드는 방법은
+[MISSION_BT.md](MISSION_BT.md) 에 정리했다.
 
 ## 빌드
 
@@ -68,7 +71,7 @@ mkdir -p ~/nav2_ws/src && cd ~/nav2_ws/src
 git clone https://github.com/1-roro/nav2_dwb.git
 cd ~/nav2_ws
 rosdep install --from-paths src --ignore-src -y
-colcon build --symlink-install --packages-select simple_line_planner simple_line_controller simple_line_bringup
+colcon build --symlink-install --packages-select simple_line_planner simple_line_controller simple_line_bringup simple_line_mission
 source install/setup.bash
 ```
 
