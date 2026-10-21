@@ -1007,7 +1007,7 @@ simple_line/
         └── timeline.png                     실행 타임라인 (13-3 의 실행 기록으로 그림)
 ```
 
-
+```
 ROS 노드 /mission_bt   (실행 파일 mission_bt_runner)
  └ 미션 BT
     ├ Sequence, Fallback, Parallel, Retry          흐름만 정함. 밖으로 아무것도 안 보냄
@@ -1024,3 +1024,4 @@ ROS 노드 /bt_navigator                   ROS 노드 /behavior_server
 ROS 노드 /planner_server           ROS 노드 /controller_server
  └ 플러그인 SimpleLinePlanner         └ 플러그인 SimpleLineController
    (ROS 노드 아님, 서버가 부르는 클래스)  (20Hz 로 불려서 /cmd_vel_nav 토픽 발행)
+```
