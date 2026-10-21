@@ -592,6 +592,26 @@ BT 를 코드로 쓰는 일은 세 가지다.
 3. XML 로 **트리를 만들고 tick** 한다.
 
 ### 10-1. BT 노드 만들기 (`include/simple_line_mission/mission_nodes.hpp`, `src/mission_nodes.cpp`)
+**결과 node 구조.**
+```
+ROS 노드 /mission_bt   (실행 파일 mission_bt_runner)
+ └ 미션 BT
+    ├ Sequence, Fallback, Parallel, Retry          흐름만 정함. 밖으로 아무것도 안 보냄
+    ├ MakePose(s), DoWork, ScanWhileMoving, Log    이 ROS 노드 안에서 직접 처리
+    └ NavigateThroughPoses, NavigateToPose, Spin   다른 ROS 노드에 액션 goal 을 보내고 결과를 기다림
+              │ 액션                         │ 액션 (spin)
+              ▼                              ▼
+ROS 노드 /bt_navigator                   ROS 노드 /behavior_server
+ └ navigation BT (또 하나의 트리)
+    ├ PipelineSequence, RecoveryNode, RateController   흐름
+    └ ComputePathThroughPoses, FollowPath              다른 ROS 노드에 액션 goal
+              │ 액션                  │ 액션
+              ▼                       ▼
+ROS 노드 /planner_server           ROS 노드 /controller_server
+ └ 플러그인 SimpleLinePlanner         └ 플러그인 SimpleLineController
+   (ROS 노드 아님, 서버가 부르는 클래스)  (20Hz 로 불려서 /cmd_vel_nav 토픽 발행)
+```
+
 
 아래 코드는 발췌다 (선언과 정의를 한곳에 모으고 일부 줄을 뺐다).
 
@@ -1005,23 +1025,4 @@ simple_line/
         ├── mission_bt.png                   미션 BT 그림 (draw_bt.py 로 생성)
         ├── layers.dot / layers.png          계층 구조 그림
         └── timeline.png                     실행 타임라인 (13-3 의 실행 기록으로 그림)
-```
-
-```
-ROS 노드 /mission_bt   (실행 파일 mission_bt_runner)
- └ 미션 BT
-    ├ Sequence, Fallback, Parallel, Retry          흐름만 정함. 밖으로 아무것도 안 보냄
-    ├ MakePose(s), DoWork, ScanWhileMoving, Log    이 ROS 노드 안에서 직접 처리
-    └ NavigateThroughPoses, NavigateToPose, Spin   다른 ROS 노드에 액션 goal 을 보내고 결과를 기다림
-              │ 액션                         │ 액션 (spin)
-              ▼                              ▼
-ROS 노드 /bt_navigator                   ROS 노드 /behavior_server
- └ navigation BT (또 하나의 트리)
-    ├ PipelineSequence, RecoveryNode, RateController   흐름
-    └ ComputePathThroughPoses, FollowPath              다른 ROS 노드에 액션 goal
-              │ 액션                  │ 액션
-              ▼                       ▼
-ROS 노드 /planner_server           ROS 노드 /controller_server
- └ 플러그인 SimpleLinePlanner         └ 플러그인 SimpleLineController
-   (ROS 노드 아님, 서버가 부르는 클래스)  (20Hz 로 불려서 /cmd_vel_nav 토픽 발행)
 ```
