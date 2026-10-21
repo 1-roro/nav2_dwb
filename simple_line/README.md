@@ -58,9 +58,10 @@ RViz 확인용 토픽: `/simple_line/local_plan` (잘라 낸 경로), `/simple_l
 | `transform_tolerance` | 0.1 | TF 대기 시간 [s] |
 | `max_robot_pose_search_dist` | -1.0 | 가장 가까운 경로 점을 찾을 범위 [m]. 0 이하면 local costmap 반폭 |
 
-여러 goal 을 한 번에 보내 중간 goal 을 경유하는 방법은 [MULTI_GOAL.md](MULTI_GOAL.md) 에 정리했다.
-경유 구간과 작업 지점(정지 작업, 주행 중 작업)을 섞은 미션을 상위 작업 BT 와 Python 작업 노드로 만드는 방법은
-[MISSION_BT.md](MISSION_BT.md) 에 정리했다.
+여러 goal 을 도는 방법은 [MISSION_BT.md](MISSION_BT.md) 에 정리했다.
+
+- 1부: 명령 하나로 경유하기 (`NavigateThroughPoses`, `waypoint_follower`), 꺾은선을 위한 컨트롤러 동작
+- 2부: 경유 구간과 작업 지점(정지 작업, 주행 중 작업)을 섞은 미션 (상위 작업 BT, Python 작업 노드)
 
 ## 빌드
 
