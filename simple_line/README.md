@@ -6,9 +6,7 @@
 simple_line/
 ├── simple_line_planner/      nav2_core::GlobalPlanner  — start → goal 직선 경로
 ├── simple_line_controller/   nav2_core::Controller     — pure pursuit + 제자리 회전
-├── simple_line_bringup/      launch, 파라미터, 빈 방 월드(6m x 6m)
-├── simple_line_mission/      경유 구간 + 작업 지점 미션 예제 (상위 작업 BT, 작업 액션 서버/클라이언트, Python 작업 노드)
-└── simple_line_mission_msgs/ 미션 BT 에 보내는 작업 메시지와 액션 (Task.msg, ExecuteTask.action)
+└── simple_line_bringup/      launch, 파라미터, 빈 방 월드(6m x 6m), 여러 goal 경유 스크립트
 ```
 
 ## Planner — `simple_line_planner::SimpleLinePlanner`
@@ -59,11 +57,11 @@ RViz 확인용 토픽: `/simple_line/local_plan` (잘라 낸 경로), `/simple_l
 | `transform_tolerance` | 0.1 | TF 대기 시간 [s] |
 | `max_robot_pose_search_dist` | -1.0 | 가장 가까운 경로 점을 찾을 범위 [m]. 0 이하면 local costmap 반폭 |
 
-여러 goal 을 도는 방법은 [MISSION_BT.md](MISSION_BT.md) 에 정리했다.
+여러 goal 을 도는 방법:
 
-- 1부: 명령 하나로 경유하기 (`NavigateThroughPoses`, `waypoint_follower`), 꺾은선을 위한 컨트롤러 동작
-- 2부: 경유 구간과 작업 지점(정지 작업, 주행 중 작업)을 섞은 미션 (상위 작업 BT, Python 작업 노드).
-  좌표와 작업을 실행 중에 받아 BT 가 실행하는 방식도 있다: 토픽 (13장), 액션 (14장, 결과·취소·선점)
+- [MULTI_GOAL.md](MULTI_GOAL.md): 명령 하나로 경유하기 (`NavigateThroughPoses`, `waypoint_follower`), 꺾은선을 위한 컨트롤러 동작
+- [`../bt_navigator/`](../bt_navigator/README.md): 경유 구간과 작업 지점(정지 작업, 주행 중 작업)을 섞은 미션.
+  이 폴더의 planner / controller / launch 위에서 상위 작업 BT 가 Nav2 명령을 조합한다
 
 ## 빌드
 
@@ -74,11 +72,11 @@ mkdir -p ~/nav2_ws/src && cd ~/nav2_ws/src
 git clone https://github.com/1-roro/nav2_dwb.git
 cd ~/nav2_ws
 rosdep install --from-paths src --ignore-src -y
-colcon build --symlink-install --packages-select simple_line_planner simple_line_controller simple_line_bringup simple_line_mission_msgs simple_line_mission
+colcon build --symlink-install --packages-select simple_line_planner simple_line_controller simple_line_bringup
 source install/setup.bash
 ```
 
-`--packages-select` 를 빼면 같은 저장소의 `straight_line/` 패키지들도 같이 빌드된다. 패키지 이름이 달라서 같이 빌드해도 충돌하지 않는다.
+`--packages-select` 를 빼면 같은 저장소의 `straight_line/`, `bt_navigator/` 패키지들도 같이 빌드된다. 패키지 이름이 달라서 같이 빌드해도 충돌하지 않는다.
 
 ## 실행
 
