@@ -103,19 +103,9 @@ void TaskServer::stop(const std::string & reason)
 
 void TaskServer::start(const std::shared_ptr<GoalHandle> & goal)
 {
-  auto task = goal->get_goal()->task;
-  ++count_;
-  task_id_ = task.id.empty() ? "task" + std::to_string(count_) : task.id;
-  for (auto & pose : task.waypoints) {
-    if (pose.header.frame_id.empty()) {
-      pose.header.frame_id = "map";
-    }
-  }
-  // task.xml 의 {waypoints}, {task_id}, {action}, {duration}
-  blackboard_->set("waypoints", task.waypoints);
-  blackboard_->set("task_id", task_id_);
-  blackboard_->set("action", task.action);
-  blackboard_->set("duration", task.duration);
+  const auto & task = goal->get_goal()->task;
+  // task.xml 의 {waypoints} {task_id} {action} {duration}
+  task_id_ = writeTask(blackboard_, task, ++count_);
 
   logger_.clear();
   last_running_.clear();

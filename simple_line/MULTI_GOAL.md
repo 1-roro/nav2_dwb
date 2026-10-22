@@ -241,7 +241,7 @@ for (size_t i = 1; i < plan_.size(); ++i) goal_dist += 거리(plan_[i-1], plan_[
 다음 구간이 꺾이면 lookahead(0.6m) 지점의 carrot 이 다음 구간으로 넘어간다.
 
 - carrot 방향이 45°(`rotate_to_heading_min_angle`) 이하 → 호를 그리며 모서리를 돈다
-- 45° 초과 (예: 90° 모서리) → 모서리 근처에서 멈추고 제자리 회전 후 출발한다. 경유 goal 이라서 멈추는 것이 아니라 컨트롤러 동작이다 ([bt_navigator 미션의 실행 기록](../bt_navigator/README.md#10-1-미션-mission_bt_runner-mission_nodepy)에서 0.4초)
+- 45° 초과 (예: 90° 모서리) → 모서리 근처에서 멈추고 제자리 회전 후 출발한다. 경유 goal 이라서 멈추는 것이 아니라 컨트롤러 동작이다 ([bt_navigator 미션의 실행 기록](../bt_navigator/README.md#11-1-미션-mission_bt_runner-mission_nodepy)에서 0.4초)
 
 ### 경유 goal 을 정확히 밟지는 않는다
 

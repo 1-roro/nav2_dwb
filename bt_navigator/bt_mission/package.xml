@@ -3,7 +3,7 @@
 <package format="3">
   <name>bt_mission</name>
   <version>0.1.0</version>
-  <description>Example missions on Nav2 Humble: BehaviorTree.CPP runners (fixed mission, tasks from a topic, tasks from an ExecuteTask action server), task senders, and a Python task node.</description>
+  <description>Example missions on Nav2 Humble: BehaviorTree.CPP runners (fixed mission, tasks from a topic, tasks from an ExecuteTask action server, plain and nav2_behavior_tree::BtActionServer versions), task senders, and a Python task node.</description>
   <maintainer email="user@example.com">nav2_dwb</maintainer>
   <license>Apache-2.0</license>
 
@@ -20,11 +20,15 @@
   <depend>ament_index_cpp</depend>
   <depend>std_msgs</depend>
   <depend>bt_mission_msgs</depend>
+  <depend>nav2_util</depend>
+  <depend>rclcpp_lifecycle</depend>
 
   <exec_depend>simple_line_bringup</exec_depend>
   <exec_depend>nav2_simple_commander</exec_depend>
   <exec_depend>nav2_msgs</exec_depend>
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
 
   <test_depend>ament_cmake_gtest</test_depend>
 

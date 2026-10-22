@@ -19,6 +19,7 @@ bt_navigator/
 | 경유, 정지 작업, 주행 중 작업, 실패 처리를 섞은 미션 (좌표는 XML 안에) | `mission_bt_runner` (BT)<br>`mission_node.py` (Python) | 1~7 |
 | 위와 같되, 좌표와 작업을 실행 중에 토픽으로 받기 | `mission_bt_runner` (`task_loop.xml`)<br>+ `task_sender.py` | 8 |
 | 위와 같되, 작업을 액션으로 맡기기 (결과, 진행 상황, 취소, 선점) | `task_server` (`task.xml`)<br>+ `task_client.py` | 9 |
+| 위와 같되, 서버를 Nav2 의 `BtActionServer` 와 lifecycle 노드로 | `task_server_lifecycle.launch.py`<br>+ `task_client.py` | 10 |
 
 - 아래층(planner, controller, 시뮬레이션 launch)은 [`simple_line/`](../simple_line/README.md) 것을 그대로 쓴다.
 - 폴더 이름의 bt_navigator 는 Nav2 의 bt_navigator 노드를 바꾼다는 뜻이 아니다. Nav2 bt_navigator 는 그대로 두고, 이 폴더의 미션 BT 가 그 위에서 명령을 보낸다 (2장).
@@ -35,10 +36,11 @@ bt_navigator/
 - [7. 미션 실행](#7-미션-실행)
 - [8. 좌표를 토픽으로 받기 (task_loop.xml)](#8-좌표를-토픽으로-받기-task_loopxml)
 - [9. 액션으로 작업 맡기 (task_server, task.xml)](#9-액션으로-작업-맡기-task_server-taskxml)
-- [10. 확인한 것](#10-확인한-것)
-- [11. 어떤 방법을 쓸까](#11-어떤-방법을-쓸까)
-- [12. 주의할 점 (Humble)](#12-주의할-점-humble)
-- [13. 파일](#13-파일)
+- [10. Nav2 의 BtActionServer 로 만들기 (task_server_lifecycle)](#10-nav2-의-btactionserver-로-만들기-task_server_lifecycle)
+- [11. 확인한 것](#11-확인한-것)
+- [12. 어떤 방법을 쓸까](#12-어떤-방법을-쓸까)
+- [13. 주의할 점 (Humble)](#13-주의할-점-humble)
+- [14. 파일](#14-파일)
 
 ---
 
@@ -900,12 +902,127 @@ task>   -> t1: go (1.5,-1)           task>   -> t1: go (1.5,-1)
 
 - **실행은 한 번에 하나다.** 서버는 선점만 하고, 대기열은 보내는 쪽이 관리한다.
 - **feedback 의 `running` 은 BT 노드 이름이다.** 사람이 읽을 단계 이름이 필요하면 노드 이름을 그렇게 짓거나, feedback 에 필드를 더한다.
-- **Nav2 템플릿으로 옮길 수 있다.** Nav2 에는 이 구조를 위한 템플릿 `nav2_behavior_tree::BtActionServer` 가 있다 (bt_navigator 가 이것으로 만들어져 있다). lifecycle 노드여야 하고 navigator 구조에 맞춰야 하지만, 제품 수준으로 갈 때 옮겨 갈 만하다.
+- **Nav2 템플릿으로도 만들 수 있다.** Nav2 에는 이 구조를 위한 템플릿 `nav2_behavior_tree::BtActionServer` 가 있다 (bt_navigator 가 이것으로 만들어져 있다). 같은 일을 이 템플릿으로 한 버전과 비교는 10장에 있다.
 - **최종점 겹침에 주의한다.** 각 작업 안에서도 마지막 점이 앞 구간과 겹치지 않게 한다 ([MULTI_GOAL.md 4장](../simple_line/MULTI_GOAL.md#최종-goal-이-앞-구간과-겹치면-일찍-끝날-수-있다-humble)).
 
 ---
 
-## 10. 확인한 것
+## 10. Nav2 의 BtActionServer 로 만들기 (`task_server_lifecycle`)
+
+9장의 `task_server` 는 액션 서버와 tick 루프를 직접 만들었다. Nav2 에는 같은 일을 하는 템플릿 `nav2_behavior_tree::BtActionServer` 가 있고, bt_navigator 도 `navigate_to_pose`, `navigate_through_poses` 를 이것으로 받는다. 같은 `task.xml` 과 ExecuteTask 액션으로 이 템플릿을 쓴 버전을 옆에 만들었다. 클라이언트(`task_client.py`, `ros2 action send_goal`)는 그대로 쓴다.
+
+### 10-1. 실행
+
+```bash
+# 터미널 1: 0장의 launch
+# 터미널 2: Nav2 가 뜬 뒤에. 서버와 이 서버만 맡는 lifecycle_manager 를 같이 띄운다
+ros2 launch bt_mission task_server_lifecycle.launch.py
+# 터미널 3
+ros2 run bt_mission task_client.py
+```
+
+- lifecycle 노드라서 **configure → activate** 가 되어야 goal 을 받는다. launch 의 `lifecycle_manager_mission` 이 이 일을 한다.
+- lifecycle_manager 없이 직접 할 때:
+  ```bash
+  ros2 run bt_mission task_server_lifecycle
+  ros2 lifecycle set /task_server_lifecycle configure
+  ros2 lifecycle set /task_server_lifecycle activate
+  ```
+- `task_server` 와 액션 이름(`/execute_task`)이 같으므로 둘 중 하나만 띄운다.
+
+| 파라미터 | 기본값 | 설명 |
+|---|---|---|
+| `bt_xml` | `task.xml` | 실행할 트리 |
+| `plugin_lib_names` | Nav2 플러그인 4개 + `bt_mission_plugin` | 트리에서 쓰는 BT 노드가 들어 있는 라이브러리 |
+| `log_transitions` | true | 노드 상태 변화를 `[bt]` 로그로 출력 |
+| `bt_loop_duration` | 10 | tick 주기 [ms] (BtActionServer 파라미터, bt_navigator 와 같은 이름) |
+| `default_server_timeout` | 1000 | Nav2 BT 노드가 goal 응답 등을 기다리는 시간 [ms]. BtActionServer 기본은 20 인데 `task_server` 와 맞췄다 |
+| `wait_for_service_timeout` | 5000 | 트리를 만들 때 Nav2 액션 서버를 찾는 시간 [ms]. BtActionServer 기본은 1000 |
+
+### 10-2. 구조
+
+```
+task_server_lifecycle  (nav2_util::LifecycleNode, src/task_server_lifecycle.cpp)
+ └─ BtActionServer<ExecuteTask>  (nav2_behavior_tree, Nav2 가 제공)
+      ├─ SimpleActionServer   goal 수락, cancel, 실행 중에 온 goal 하나를 pending 으로 보관
+      ├─ BehaviorTreeEngine   plugin_lib_names 의 .so 로 노드 등록, 작업 스레드에서 10ms 마다 tick
+      ├─ blackboard           node, server_timeout, bt_loop_duration, wait_for_service_timeout
+      └─ RosTopicLogger       BT 노드 상태 변화 → behavior_tree_log 토픽
+    이 노드가 채우는 콜백: onGoalReceived, onLoop, onPreempt, onCompletion
+```
+
+| lifecycle 전이 | 하는 일 |
+|---|---|
+| configure | BtActionServer 생성 (액션 서버는 생기지만 아직 goal 을 거절). blackboard 에 `tf_buffer`, 타입 없는 `waypoints` 항목 (5-3) |
+| activate | 트리 생성 (Nav2 BT 노드가 Nav2 액션 서버를 찾는다), goal 받기 시작, lifecycle_manager 와 bond 연결 |
+| deactivate | 실행 중인 작업을 halt 하고 (Nav2 goal 취소) ABORTED("task server deactivated"). 이후 goal 은 거절 |
+| cleanup | 트리, 액션 서버 정리 |
+
+`task_server` 의 코드가 어디로 갔는지:
+
+| `task_server` (9장) | `task_server_lifecycle` |
+|---|---|
+| 직접 만든 노드는 코드에서 등록 (`registerAllNodes`) | `plugin_lib_names` 로만 등록한다. 그래서 직접 만든 노드를 플러그인 `bt_mission_plugin` 으로 빌드한다 (`src/bt_plugin.cpp` 의 `BT_REGISTER_NODES`) |
+| 수락 단계에서 점이 없는 goal 을 거절 | `onGoalReceived` 가 false 를 돌려주면 ABORTED |
+| `start()`: blackboard 에 작업 쓰기 | `onGoalReceived` → `startTask()`. 쓰는 함수(`writeTask`)는 같다 |
+| `step()`: tick, `publishFeedback()` | tick 은 BtActionServer, feedback 은 `onLoop` |
+| `step()`: 새 goal 이면 지금 작업을 끝내고 새 작업 시작 | `onPreempt`: `haltTree()`, `acceptPendingGoal()`, `startTask()` |
+| `step()`: cancel 이면 halt 후 CANCELED | BtActionServer 가 확인하고 halt. result 는 `onCompletion` 이 채운다 |
+| `finish()`: halt 후 succeed / abort / canceled | BtActionServer 가 `haltAllActions` 후 `onCompletion` 이 채운 result 로 보낸다 |
+| main: Ctrl-C 를 직접 받아 `stop()` | `nav2_util::LifecycleNode` 가 ROS 종료 직전에 deactivate → cleanup |
+| main: bt_navigator 가 active 가 될 때까지 기다림 | 기다리지 않는다. activate 때 Nav2 액션 서버를 못 찾으면 activate 가 실패한다 |
+
+### 10-3. 선점과 첫 feedback (`src/task_server_lifecycle.cpp`, 발췌)
+
+BtActionServer 는 실행 중에 새 goal 이 오면 pending 으로 두고, tick 마다 `onPreempt` 를 부른다. 아무것도 하지 않으면 지금 작업이 끝난 뒤 이어서 실행된다 (대기열 1칸). bt_navigator 는 여기서 goal 위치만 바꾸고 트리를 계속 돌린다. 작업은 action 에 따라 가지가 달라지므로, 여기서는 트리를 처음부터 다시 돌린다.
+
+```cpp
+void TaskServerLifecycle::onPreempt(ExecuteTask::Goal::ConstSharedPtr goal)
+{
+  if (bt_server_->getTree().rootNode()->status() != BT::NodeStatus::RUNNING) {
+    return;                              // 이번 tick 에 막 끝났으면 결과를 먼저 보낸다
+  }
+  ...
+  bt_server_->haltTree();                // 지금 작업의 노드를 멈춘다 (Nav2 goal 취소)
+  startTask(*bt_server_->acceptPendingGoal());   // 이전 goal 은 ABORTED (result 는 빈 값)
+}
+```
+
+- **선점된 goal 의 result 는 빈 값이다.** `acceptPendingGoal()` 안에서 SimpleActionServer 가 빈 result 로 ABORTED 를 보낸다. `task_server` 처럼 `"preempted by t2"` 를 실어 보낼 방법이 없다.
+- **트리가 막 끝난 tick 에는 받지 않는다.** 그 tick 에 받으면, 끝난 작업의 SUCCESS 가 새 goal 의 결과로 보내진다.
+- **첫 feedback 은 50ms 늦춘다.** BtActionServer 는 goal 을 수락하자마자 다른 스레드에서 tick 을 시작한다. 그래서 첫 feedback 이 수락 응답보다 먼저 도착하면, 클라이언트는 모르는 goal 의 것으로 버린다. gtest 를 10번 돌렸을 때 이렇게 버려진 feedback 이 8개였고, 50ms 늦춘 뒤에는 0개였다. `task_server` 는 수락한 goal 을 다음 step 에 시작해서 같은 문제를 피한다 (9-3).
+
+### 10-4. 두 버전 비교
+
+같은 날 같은 Nav2 서버에 같은 순서로 보낸 결과와, 같은 경우를 확인하는 gtest (11-3, 11-4) 결과다.
+
+| | `task_server` (직접 구현) | `task_server_lifecycle` (BtActionServer) |
+|---|---|---|
+| 작업 4개 (`mission.xml` 과 같은 것) | 모두 SUCCEEDED, 61.1 s | 모두 SUCCEEDED, 60.6 s |
+| 정상 / cancel / 이동 실패의 결과 | SUCCEEDED("done") / CANCELED("canceled") / ABORTED("go_look failed") | 같음 |
+| 선점된 작업 | ABORTED("preempted by t2") | ABORTED, message 빈 값 |
+| 점이 없는 작업 | 수락 단계에서 REJECTED | 수락된 뒤 ABORTED, message 빈 값 |
+| 작업 중 서버 Ctrl-C | ABORTED("task_server shutting down"). 신호 처리를 직접 짰다 | ABORTED("task server deactivated"). LifecycleNode 의 종료 처리 |
+| 시작 | 실행하면 bt_navigator 가 active 가 될 때까지 기다린다 | configure → activate 가 필요하다 (lifecycle_manager, launch 부터 active 까지 3.7초). Nav2 가 없으면 activate 실패 |
+| 서버가 죽었을 때 | 다른 노드는 알 수 없다 | lifecycle_manager 가 bond 로 4초 안에 알아챈다 (`SERVER task_server_lifecycle IS DOWN`) |
+| tick 하는 곳 | 실행 노드의 메인 루프. 요청 처리와 tick 이 한 스레드 | SimpleActionServer 의 작업 스레드. 콜백도 이 스레드에서 불린다 |
+| BT 상태 보기 | `[bt]` 로그 | `[bt]` 로그 + `behavior_tree_log` 토픽 (launch 에서 `mission/behavior_tree_log` 로 옮겼다. 안 옮기면 bt_navigator 의 것과 섞인다) |
+| 직접 만든 BT 노드 | 코드에서 등록 | 플러그인 .so 로 빌드 |
+| 테스트 | `step()` 을 직접 불러 한 단계씩 | 서버를 다른 스레드에서 spin. 가짜 Nav2 노드도 플러그인(`test_fake_nav2`)으로 |
+| 코드 (주석 포함) | 316 줄 (헤더 78, cpp 160, main 78) | 335 줄 (헤더 72, cpp 197, main 24, 플러그인 12, launch 30) |
+| 대기 중 프로세스 | 스레드 11, 메모리 49 MB | 스레드 12, 52 MB. lifecycle_manager 가 따로 스레드 12, 31 MB |
+
+이 Humble 버전(1.1.18)의 BtActionServer 에는 Groot 모니터링이 없다. BT 상태는 `behavior_tree_log` 토픽으로만 나온다.
+
+### 10-5. 어느 쪽을 쓸까
+
+- **코드 양은 거의 같다.** BtActionServer 가 액션 서버, 스레드, 취소 처리를 맡아 주는 대신 lifecycle 콜백, 플러그인 라이브러리, launch 가 생긴다.
+- **lifecycle 버전이 나은 경우**: Nav2 와 같이 켜고 끄고, 서버가 죽으면 알아야 할 때. Nav2 launch 를 직접 구성한다면 이 노드를 bt_navigator 와 같은 lifecycle_manager 의 `node_names` 뒤쪽에 넣어서, Nav2 가 active 가 된 다음에 activate 되게 할 수 있다.
+- **`task_server` 가 나은 경우**: 선점 이유 같은 정보를 result 로 보내야 할 때, 흐름을 한 파일에서 처음부터 끝까지 보고 싶을 때, 테스트를 단순하게 하고 싶을 때.
+
+---
+
+## 11. 확인한 것
 
 모두 같은 환경에서 확인했다.
 
@@ -915,7 +1032,7 @@ task>   -> t1: go (1.5,-1)           task>   -> t1: go (1.5,-1)
 
 Gazebo 자체(월드, 스폰, AMCL)에서는 돌려 보지 못했다.
 
-### 10-1. 미션 (`mission_bt_runner`, `mission_node.py`)
+### 11-1. 미션 (`mission_bt_runner`, `mission_node.py`)
 
 **단위 테스트** (`test/test_mission.cpp`, gtest 6개 통과): 실제 `mission.xml` 로 테스트한다. Nav2 노드 3개만 3 tick 뒤 정해 둔 결과를 내는 가짜로 바꿨다.
 
@@ -948,7 +1065,7 @@ BT 버전 실행 중 노드별 RUNNING 구간과 로봇 속도:
 - **`scan`**: `go_b` 와 같은 구간에 RUNNING 이고, `go_b` 가 끝나는 순간 halt 된다.
 - **작업 지점 정지 위치**: A, B 모두 goal 에서 0.22~0.24 m 앞에서 멈췄다. goal checker 의 `xy_goal_tolerance` 0.25 m 안에 들어오면 도착으로 보기 때문이다. 더 정확히 서야 하면 이 값을 줄인다.
 
-### 10-2. 토픽으로 받은 작업 (`task_loop.xml`, `task_sender.py`)
+### 11-2. 토픽으로 받은 작업 (`task_loop.xml`, `task_sender.py`)
 
 **단위 테스트** (`test/test_task_loop.cpp`, gtest 4개 통과): 실제 `task_loop.xml` 에 `mission/task` 토픽으로 Task 를 보내고, `mission/status` 와 노드 상태 변화를 본다. Nav2 노드만 가짜다.
 
@@ -971,7 +1088,7 @@ BT 버전 실행 중 노드별 RUNNING 구간과 로봇 속도:
 | 작업 중 `mission_bt_runner` Ctrl-C | Nav2 goal 취소, 로봇 정지 |
 | 입력 노드 Ctrl-C | 오류 없이 종료 (BT 는 받은 작업을 계속) |
 
-### 10-3. 액션으로 맡긴 작업 (`task_server`, `task_client.py`)
+### 11-3. 액션으로 맡긴 작업 (`task_server`, `task_client.py`)
 
 **단위 테스트** (`test/test_task_server.cpp`, gtest 6개 통과): 실제 `task.xml` 과 `TaskServer` 에 액션 클라이언트로 goal 을 보낸다. Nav2 노드만 가짜다.
 
@@ -999,9 +1116,35 @@ BT 버전 실행 중 노드별 RUNNING 구간과 로봇 속도:
 
 액션 버전을 만들면서 토픽 버전의 문제를 하나 찾아 고쳤다. `WaitForTask` 와 `Log` 가 상태 publisher 를 따로 쓰고 있어서, `"started"` 가 `"accepted"` 보다 먼저 도착하는 일이 있었다. 지금은 ROS 노드마다 publisher 하나를 같이 쓴다.
 
+### 11-4. BtActionServer 버전 (`task_server_lifecycle`)
+
+**단위 테스트** (`test/test_task_server_lifecycle.cpp`, gtest 7개 통과. 10번 반복해서 70/70): 11-3 과 같은 경우를 lifecycle 노드로 확인한다. 서버 노드는 다른 스레드에서 spin 하고, Nav2 노드는 가짜 플러그인(`test_fake_nav2`)으로 바꿨다. 직접 만든 노드는 `bt_mission_plugin` 을 그대로 쓴다.
+
+| 테스트 | 확인 내용 |
+|---|---|
+| `RunsATaskAndReportsFeedback` | inspect → SUCCEEDED("done"). feedback 의 `running` 이 `go_inspect` → `work`. waypoints 가 그대로 `goals` 로 |
+| `RunsTasksOneAfterAnother` | 작업 두 개 (scan, look_around) 를 차례로 → 둘 다 SUCCEEDED |
+| `NewGoalPreemptsTheRunningOne` | a 는 ABORTED (message 빈 값), a 의 이동 노드 halt, b 는 SUCCEEDED |
+| `CancelHaltsTheTask` | feedback `go_scan, scanning` → cancel → CANCELED("canceled"), 이동 노드 halt |
+| `FailedNavigationAbortsWithTheNodeName` | ABORTED("go_look failed"), 회전은 하지 않음 |
+| `TaskWithoutWaypointsIsAcceptedThenAborted` | 점이 없는 goal → 수락된 뒤 ABORTED (`task_server` 는 거절) |
+| `DeactivateStopsTheRunningTask` | 작업 중 deactivate → ABORTED("task server deactivated"), 이동 노드 halt. inactive 에서는 goal 거절 |
+
+**Nav2 서버로 실행**: launch 로 lifecycle_manager 와 같이 띄우고 11-3 과 같은 순서로 보냈다.
+
+| 항목 | 결과 |
+|---|---|
+| `mission.xml` 과 같은 작업 4개 | 모두 SUCCEEDED, 60.6 s (같은 날 `task_server` 61.1 s) |
+| t2 feedback | `go_scan, scanning` |
+| 선점 (`!go`) | t1 ABORTED (message 빈 값), 이어서 t2 SUCCEEDED |
+| `cancel` 명령 | t1 CANCELED("canceled"), bt_navigator 의 goal 취소, 로봇 정지 |
+| 클라이언트 Ctrl-C | t1 CANCELED, 로봇 정지 |
+| `ros2 action send_goal --feedback` | feedback `go_inspect` → `work`, SUCCEEDED |
+| 작업 중 서버 Ctrl-C | 클라이언트에 ABORTED("task server deactivated"), Nav2 goal 취소, 로봇 정지. 4초 뒤 lifecycle_manager 가 서버가 죽은 것을 알림 |
+
 ---
 
-## 11. 어떤 방법을 쓸까
+## 12. 어떤 방법을 쓸까
 
 | 상황 | 방법 |
 |---|---|
@@ -1009,6 +1152,7 @@ BT 버전 실행 중 노드별 RUNNING 구간과 로봇 속도:
 | 지점마다 멈춰서 같은 작업을 하고, 순서가 고정이다 | `waypoint_follower` ([MULTI_GOAL.md 5장](../simple_line/MULTI_GOAL.md#5-멈춰-가며-경유하기-waypoint_follower)). 작업은 task executor 플러그인으로 |
 | 경유, 정지 작업, 주행 중 작업, 실패 처리가 섞인다 | 상위 작업 계층 (이 문서) |
 | 위와 같고, 어디로 가서 무엇을 할지는 실행 중에 사람이나 서버가 정한다 | **`task_server` + ExecuteTask 액션 (9장)**. 결과, 취소, 선점이 표준으로 있다. 토픽 버전(8장)은 가장 단순한 형태 |
+| 위와 같고, 서버를 Nav2 처럼 lifecycle_manager 로 관리한다 | `task_server_lifecycle` (10장). 비교와 고르는 기준은 10-4, 10-5 |
 
 상위 작업 계층은 Python 으로 시작해서, 복잡해지면 BT 로 옮기는 것을 권한다.
 
@@ -1020,7 +1164,7 @@ BT 버전 실행 중 노드별 RUNNING 구간과 로봇 속도:
 | 주행 중 작업, 동시에 여러 일 | `Parallel` 로 선언 | 대기 루프 안에 직접 끼워 넣어야 한다 |
 | 실패 처리, 재시도 | `Fallback`, `RetryUntilSuccessful` 등 조합 | if / for 가 늘어난다 |
 | 중단 | `haltTree()` 한 번에 실행 중인 노드 모두 정리 | 상황마다 직접 취소 |
-| 테스트 | 가짜 노드로 로봇 없이 흐름 테스트 (10-1) | 따로 구조를 만들어야 한다 |
+| 테스트 | 가짜 노드로 로봇 없이 흐름 테스트 (11-1) | 따로 구조를 만들어야 한다 |
 | 재사용 | 만든 노드를 다른 미션 XML 에서도 쓴다 | 함수 재사용 |
 
 - **단계가 몇 개 안 되고 순서가 고정이면 Python 이 빠르다.** 프로토타입, 시연, 외부 서버가 순서를 정해 주는 경우가 여기에 해당한다.
@@ -1029,7 +1173,7 @@ BT 버전 실행 중 노드별 RUNNING 구간과 로봇 속도:
 
 ---
 
-## 12. 주의할 점 (Humble)
+## 13. 주의할 점 (Humble)
 
 - **최종 goal 이 앞 구간과 겹치면 안 된다.** `NavigateThroughPoses` 는 마지막 점 근처를 같은 방향으로 지나가면, 경유점이 남아 있어도 도착 처리할 수 있다 ([MULTI_GOAL.md 4장](../simple_line/MULTI_GOAL.md#최종-goal-이-앞-구간과-겹치면-일찍-끝날-수-있다-humble)).
   - `send_waypoints.py` 는 이것을 미리 검사한다.
@@ -1038,12 +1182,11 @@ BT 버전 실행 중 노드별 RUNNING 구간과 로봇 속도:
 - **도착 직후 회전 감속이 조금 남는다.** goal checker 가 도착을 판정한 직후에도 velocity_smoother 가 감속하는 0.2초 정도 각속도가 남았다 (최대 0.68 rad/s). 작업이 완전한 정지를 요구하면, 작업 노드 앞에 "속도가 0 인지" 확인하는 조건 노드를 두면 된다.
 - **토픽으로 받은 작업은 취소할 수 없다.** 받은 순서대로 끝까지 실행한다 (8-6). 취소가 필요하면 액션 버전(9장)을 쓴다.
 - **goals 포트 타입, tick 주기**: 5-3 을 본다.
+- **`task_server` 와 `task_server_lifecycle` 은 같이 띄우지 않는다.** 둘 다 `/execute_task` 액션을 연다.
 
 ---
 
----
-
-## 13. 파일
+## 14. 파일
 
 ```
 bt_navigator/
@@ -1058,13 +1201,18 @@ bt_navigator/
     ├── include/bt_mission/
     │   ├── mission_nodes.hpp                직접 만든 BT 노드 선언 (포트 포함)
     │   ├── bt_common.hpp                    노드 등록, blackboard, bt_navigator 대기, 상태 로거
-    │   └── task_server.hpp                  ExecuteTask 액션 서버 + BT 실행 (9장)
+    │   ├── task_server.hpp                  ExecuteTask 액션 서버 + BT 실행 (9장)
+    │   └── task_server_lifecycle.hpp        같은 일을 BtActionServer + lifecycle 노드로 (10장)
     ├── src/
     │   ├── mission_nodes.cpp                MakePose(s), DoWork, ScanWhileMoving, Log, WaitForTask
-    │   ├── bt_common.cpp                    mission_bt_runner 와 task_server 가 같이 쓰는 준비 코드
+    │   ├── bt_common.cpp                    실행 노드들이 같이 쓰는 준비 코드 (노드 등록, 작업 → blackboard)
     │   ├── mission_bt_runner.cpp            XML 하나를 끝날 때까지 tick (mission.xml, task_loop.xml)
     │   ├── task_server.cpp                  goal 수락, 선점, 취소, feedback, result
-    │   └── task_server_main.cpp             task_server 실행 노드
+    │   ├── task_server_main.cpp             task_server 실행 노드
+    │   ├── task_server_lifecycle.cpp        BtActionServer 콜백 (10장)
+    │   ├── task_server_lifecycle_main.cpp   task_server_lifecycle 실행 노드
+    │   └── bt_plugin.cpp                    직접 만든 BT 노드를 플러그인 bt_mission_plugin 으로 (10장)
+    ├── launch/task_server_lifecycle.launch.py   task_server_lifecycle + lifecycle_manager
     ├── scripts/
     │   ├── mission_node.py                  mission.xml 과 같은 미션의 Python 버전 (BasicNavigator)
     │   ├── task_sender.py                   8장의 입력 노드: Task 토픽 보내기, 상태 출력
@@ -1073,10 +1221,11 @@ bt_navigator/
     │   ├── test_mission.cpp                 gtest: 위치 문자열 해석 + mission.xml 흐름
     │   ├── test_task_loop.cpp               gtest: Task 토픽 → task_loop.xml 흐름
     │   ├── test_task_server.cpp             gtest: ExecuteTask 액션 → task.xml (선점, 취소, feedback)
-    │   └── test_fakes.hpp                   테스트가 같이 쓰는 가짜 Nav2 노드
+    │   ├── test_task_server_lifecycle.cpp   gtest: 같은 경우를 task_server_lifecycle 로
+    │   └── test_fakes.hpp / .cpp            테스트가 같이 쓰는 가짜 Nav2 노드 (플러그인 test_fake_nav2)
     ├── tools/draw_bt.py                     XML → 그림 (graphviz)
     └── doc/
         ├── mission_bt.png, task_loop.png, task.png   BT 그림 (draw_bt.py 로 생성)
         ├── layers.dot / layers.png          계층 구조 그림
-        └── timeline.png                     실행 타임라인 (10-1 의 실행 기록으로 그림)
+        └── timeline.png                     실행 타임라인 (11-1 의 실행 기록으로 그림)
 ```

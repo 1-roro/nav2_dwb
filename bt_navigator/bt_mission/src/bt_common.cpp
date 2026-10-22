@@ -16,15 +16,21 @@ using namespace std::chrono_literals;
 namespace bt_mission
 {
 
+const std::vector<std::string> & nav2BtPlugins()
+{
+  static const std::vector<std::string> libs{
+    "nav2_navigate_to_pose_action_bt_node",       // <NavigateToPose>
+    "nav2_navigate_through_poses_action_bt_node",  // <NavigateThroughPoses>
+    "nav2_spin_action_bt_node",                    // <Spin>
+    "nav2_wait_action_bt_node",                    // <Wait>
+  };
+  return libs;
+}
+
 void registerAllNodes(BT::BehaviorTreeFactory & factory)
 {
   BT::SharedLibrary loader;
-  for (const char * lib : {
-      "nav2_navigate_to_pose_action_bt_node",       // <NavigateToPose>
-      "nav2_navigate_through_poses_action_bt_node",  // <NavigateThroughPoses>
-      "nav2_spin_action_bt_node",                    // <Spin>
-      "nav2_wait_action_bt_node"})                   // <Wait>
-  {
+  for (const auto & lib : nav2BtPlugins()) {
     factory.registerFromPlugin(loader.getOSName(lib));
   }
   registerNodes(factory);
@@ -42,6 +48,22 @@ BT::Blackboard::Ptr createBlackboard(
     "bt_loop_duration", std::chrono::milliseconds(static_cast<int>(1000.0 / tick_hz)));
   blackboard->set<std::chrono::milliseconds>("wait_for_service_timeout", 5000ms);
   return blackboard;
+}
+
+std::string writeTask(
+  const BT::Blackboard::Ptr & blackboard, bt_mission_msgs::msg::Task task, int count)
+{
+  const std::string task_id = task.id.empty() ? "task" + std::to_string(count) : task.id;
+  for (auto & pose : task.waypoints) {
+    if (pose.header.frame_id.empty()) {
+      pose.header.frame_id = "map";
+    }
+  }
+  blackboard->set("waypoints", task.waypoints);
+  blackboard->set("task_id", task_id);
+  blackboard->set("action", task.action);
+  blackboard->set("duration", task.duration);
+  return task_id;
 }
 
 std::string resolveTreePath(const std::string & name)
