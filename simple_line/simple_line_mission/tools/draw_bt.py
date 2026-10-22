@@ -22,6 +22,7 @@ CONTROL = {
     'Sequence': '→', 'SequenceStar': '→', 'ReactiveSequence': '→', 'PipelineSequence': '→',
     'Fallback': '?', 'ReactiveFallback': '?', 'RecoveryNode': '?',
     'Parallel': '⇉', 'RoundRobin': '↻', 'IfThenElse': '?', 'WhileDoElse': '?',
+    **{f'Switch{n}': '⇢' for n in range(2, 7)},
 }
 DECORATOR = {
     'RetryUntilSuccessful', 'Repeat', 'Inverter', 'ForceSuccess', 'ForceFailure', 'Timeout',
@@ -114,6 +115,11 @@ class Drawer:
                 self.lines.append(
                     f'{nid} -> {cid} [style=dashed, label=<<font point-size="10" '
                     f'color="{INK2}">실패 시</font>>];')
+            elif el.tag.startswith('Switch'):      # 값이 case_i 와 같으면 i 번째, 아니면 마지막
+                case = el.get(f'case_{i + 1}', 'default')
+                self.lines.append(
+                    f'{nid} -> {cid} [label=<<font point-size="10" '
+                    f'color="{INK2}">= {esc(case)}</font>>];')
             else:
                 self.lines.append(f'{nid} -> {cid};')
         return nid
@@ -128,7 +134,8 @@ class Drawer:
                    f'<tr><td><table border="0" cellspacing="0" cellpadding="4"><tr>{legend}</tr>'
                    f'</table></td></tr>'
                    f'<tr><td><font color="{INK2}" point-size="11">번호: 자식을 왼쪽부터 tick 하는 순서.'
-                   f'  Parallel 의 자식은 동시에, Fallback 의 뒤 자식(점선)은 앞 자식이 실패할 때만 실행'
+                   f'  Parallel 의 자식은 동시에, Fallback 의 뒤 자식(점선)은 앞 자식이 실패할 때만,'
+                   f' Switch 는 값이 맞는 자식 하나만 실행'
                    f'</font></td></tr></table>')
         self.subtree(root)
         head = [
@@ -137,7 +144,8 @@ class Drawer:
             f'fontname="{self.font}", bgcolor="white", pad=0.3, labelloc=b, '
             f'label=<{caption}>];',
             f'node [shape=box, fontname="{self.font}", fontsize=12, fontcolor="{INK}", margin="0.12,0.06"];',
-            f'edge [arrowhead=none, color="{EDGE}", penwidth=1.2, tailport=s, headport=n];',
+            f'edge [arrowhead=none, color="{EDGE}", penwidth=1.2, tailport=s, headport=n, '
+            f'fontname="{self.font}"];',
         ]
         return '\n'.join(head + self.lines + ['}'])
 

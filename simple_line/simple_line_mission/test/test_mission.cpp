@@ -3,20 +3,16 @@
 
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <deque>
-#include <map>
 #include <memory>
 #include <string>
 #include <thread>
-#include <vector>
 
 #include "behaviortree_cpp_v3/bt_factory.h"
-#include "behaviortree_cpp_v3/loggers/abstract_logger.h"
 #include "rclcpp/rclcpp.hpp"
 #include "simple_line_mission/mission_nodes.hpp"
+#include "test_fakes.hpp"
 #include "tf2_ros/buffer.h"
 
 using simple_line_mission::parsePoses;
@@ -47,82 +43,6 @@ TEST(ParsePoses, RejectsBadInput)
 
 // ---------------------------------------------------------------------------------------------
 
-// 가짜 Nav2 노드: 3 tick 동안 RUNNING 후, 정해 둔 결과(기본 SUCCESS)를 돌려준다
-std::map<std::string, std::deque<bool>> g_outcomes;            // 노드 이름 → 차례로 쓸 결과
-std::map<std::string, std::vector<geometry_msgs::msg::PoseStamped>> g_goals;
-
-class FakeNav2Action : public BT::StatefulActionNode
-{
-public:
-  using BT::StatefulActionNode::StatefulActionNode;
-
-  static BT::PortsList providedPorts()
-  {
-    return {
-      BT::InputPort("goals"), BT::InputPort("goal"), BT::InputPort("behavior_tree"),
-      BT::InputPort("spin_dist"), BT::InputPort("time_allowance"), BT::InputPort("is_recovery"),
-    };
-  }
-
-  BT::NodeStatus onStart() override
-  {
-    std::vector<geometry_msgs::msg::PoseStamped> goals;
-    geometry_msgs::msg::PoseStamped goal;
-    if (getInput("goals", goals)) {
-      g_goals[name()] = goals;
-    } else if (getInput("goal", goal)) {
-      g_goals[name()] = {goal};
-    }
-    ticks_ = 3;
-    return BT::NodeStatus::RUNNING;
-  }
-
-  BT::NodeStatus onRunning() override
-  {
-    if (--ticks_ > 0) {
-      return BT::NodeStatus::RUNNING;
-    }
-    auto & queue = g_outcomes[name()];
-    bool ok = true;
-    if (!queue.empty()) {
-      ok = queue.front();
-      queue.pop_front();
-    }
-    return ok ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
-  }
-
-  void onHalted() override {}
-
-private:
-  int ticks_{0};
-};
-
-// 노드 상태 변화를 "이름:상태" 로 모은다
-class Recorder : public BT::StatusChangeLogger
-{
-public:
-  explicit Recorder(BT::TreeNode * root)
-  : BT::StatusChangeLogger(root) {}
-
-  void callback(BT::Duration, const BT::TreeNode & node, BT::NodeStatus prev,
-    BT::NodeStatus status) override
-  {
-    if (status != BT::NodeStatus::IDLE) {
-      events.push_back(node.name() + ":" + BT::toStr(status));
-    } else if (prev == BT::NodeStatus::RUNNING) {
-      events.push_back(node.name() + ":HALTED");
-    }
-  }
-  void flush() override {}
-
-  int count(const std::string & event) const
-  {
-    return static_cast<int>(std::count(events.begin(), events.end(), event));
-  }
-
-  std::vector<std::string> events;
-};
-
 class MissionTree : public ::testing::Test
 {
 protected:
@@ -132,9 +52,7 @@ protected:
   BT::NodeStatus run()
   {
     BT::BehaviorTreeFactory factory;
-    for (const char * id : {"NavigateThroughPoses", "NavigateToPose", "Spin"}) {
-      factory.registerNodeType<FakeNav2Action>(id);
-    }
+    registerFakeNav2Nodes(factory);
     simple_line_mission::registerNodes(factory);
 
     auto node = std::make_shared<rclcpp::Node>("test_mission");

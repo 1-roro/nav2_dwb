@@ -1,7 +1,10 @@
-// mission.xml 을 읽어 BT 를 만들고, 끝날 때까지 tick 한다.
+// BT XML 을 읽어 트리를 만들고, 끝날 때까지 tick 한다.
 //
-//   ros2 run simple_line_mission mission_bt_runner
+//   ros2 run simple_line_mission mission_bt_runner                                  # mission.xml
+//   ros2 run simple_line_mission mission_bt_runner --ros-args -p bt_xml:=task_loop.xml
 //   ros2 run simple_line_mission mission_bt_runner --ros-args -p bt_xml:=/path/to/other.xml
+//
+// bt_xml 에 '/' 가 없으면 이 패키지의 share/.../behavior_trees/ 에서 찾는다.
 //
 // 순서:
 //   1. factory 에 BT 노드 종류를 등록한다 (Nav2 가 제공하는 노드 + 이 패키지의 노드)
@@ -57,7 +60,7 @@ public:
       return;
     }
     RCLCPP_INFO(
-      logger_, "[bt] %-15s %-20s %s -> %s", node.name().c_str(),
+      logger_, "[bt] %-15s %-23s %s -> %s", node.name().c_str(),
       node.registrationName().c_str(), BT::toStr(prev).c_str(),
       status == BT::NodeStatus::IDLE ? "HALTED" : BT::toStr(status).c_str());
   }
@@ -99,9 +102,11 @@ int main(int argc, char ** argv)
   std::signal(SIGTERM, onSignal);
 
   auto node = std::make_shared<rclcpp::Node>("mission_bt");
-  const std::string bt_xml = node->declare_parameter(
-    "bt_xml", ament_index_cpp::get_package_share_directory("simple_line_mission") +
-    "/behavior_trees/mission.xml");
+  std::string bt_xml = node->declare_parameter("bt_xml", std::string("mission.xml"));
+  if (bt_xml.find('/') == std::string::npos) {
+    bt_xml = ament_index_cpp::get_package_share_directory("simple_line_mission") +
+      "/behavior_trees/" + bt_xml;
+  }
   // bt_navigator 와 같은 100Hz (bt_loop_duration 10ms). Nav2 BT 노드는 tick 할 때마다 액션 메시지를
   // 조금씩만 처리하므로, 10Hz 로 낮추면 빠르게 오는 feedback 에 밀려 결과를 1초가량 늦게 받았다.
   const double tick_hz = node->declare_parameter("tick_hz", 100.0);

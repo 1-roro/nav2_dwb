@@ -257,14 +257,92 @@ Log::Log(const std::string & name, const BT::NodeConfiguration & config)
 : BT::SyncActionNode(name, config),
   node_(config.blackboard->get<rclcpp::Node::SharedPtr>("node"))
 {
+  status_pub_ = node_->create_publisher<std_msgs::msg::String>(kStatusTopic, rclcpp::QoS(10));
 }
 
 BT::NodeStatus Log::tick()
 {
-  std::string message;
+  std::string message, task_id;
   getInput("message", message);
-  RCLCPP_INFO(node_->get_logger(), "[log] %s", message.c_str());
+  getInput("task_id", task_id);
+  std_msgs::msg::String status;
+  status.data = task_id.empty() ? message : task_id + " " + message;
+  RCLCPP_INFO(node_->get_logger(), "[log] %s", status.data.c_str());
+  status_pub_->publish(status);
   return BT::NodeStatus::SUCCESS;
+}
+
+// ---------------------------------------------------------------------------------------------
+
+WaitForTask::WaitForTask(const std::string & name, const BT::NodeConfiguration & config)
+: BT::StatefulActionNode(name, config),
+  node_(config.blackboard->get<rclcpp::Node::SharedPtr>("node"))
+{
+  std::string topic = "mission/task";
+  getInput("topic", topic);
+  callback_group_ = node_->create_callback_group(
+    rclcpp::CallbackGroupType::MutuallyExclusive, false);
+  executor_.add_callback_group(callback_group_, node_->get_node_base_interface());
+  rclcpp::SubscriptionOptions options;
+  options.callback_group = callback_group_;
+  task_sub_ = node_->create_subscription<simple_line_mission_msgs::msg::Task>(
+    topic, rclcpp::QoS(10),
+    [this](simple_line_mission_msgs::msg::Task::ConstSharedPtr msg) {queue_.push_back(*msg);},
+    options);
+  status_pub_ = node_->create_publisher<std_msgs::msg::String>(kStatusTopic, rclcpp::QoS(10));
+}
+
+BT::NodeStatus WaitForTask::onStart()
+{
+  const auto status = takeTask();
+  if (status == BT::NodeStatus::RUNNING) {
+    report("waiting for a task");
+  }
+  return status;
+}
+
+BT::NodeStatus WaitForTask::onRunning()
+{
+  return takeTask();
+}
+
+BT::NodeStatus WaitForTask::takeTask()
+{
+  executor_.spin_some();                 // 도착한 Task 메시지를 queue_ 로 옮긴다
+  while (!queue_.empty()) {
+    auto task = queue_.front();
+    queue_.pop_front();
+    ++count_;
+    if (task.id.empty()) {
+      task.id = "task" + std::to_string(count_);
+    }
+    if (task.waypoints.empty()) {
+      report(task.id + " rejected: no waypoints");
+      continue;
+    }
+    for (auto & pose : task.waypoints) {
+      if (pose.header.frame_id.empty()) {
+        pose.header.frame_id = "map";
+      }
+    }
+    setOutput("waypoints", task.waypoints);
+    setOutput("task_id", task.id);
+    setOutput("action", task.action);
+    setOutput("duration", task.duration);
+    report(
+      task.id + " accepted: " + (task.action.empty() ? "go" : task.action) + ", " +
+      std::to_string(task.waypoints.size()) + " poses");
+    return BT::NodeStatus::SUCCESS;
+  }
+  return BT::NodeStatus::RUNNING;
+}
+
+void WaitForTask::report(const std::string & text)
+{
+  RCLCPP_INFO(node_->get_logger(), "[task] %s", text.c_str());
+  std_msgs::msg::String status;
+  status.data = text;
+  status_pub_->publish(status);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -276,6 +354,7 @@ void registerNodes(BT::BehaviorTreeFactory & factory)
   factory.registerNodeType<DoWork>("DoWork");
   factory.registerNodeType<ScanWhileMoving>("ScanWhileMoving");
   factory.registerNodeType<Log>("Log");
+  factory.registerNodeType<WaitForTask>("WaitForTask");
 }
 
 }  // namespace simple_line_mission

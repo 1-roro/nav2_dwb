@@ -2,6 +2,7 @@
 #define SIMPLE_LINE_MISSION__MISSION_NODES_HPP_
 
 #include <chrono>
+#include <deque>
 #include <memory>
 #include <string>
 #include <vector>
@@ -13,13 +14,18 @@
 // Nav2 BT 노드들과 같은 PoseStamped 문자열 변환을 쓰도록 포함한다
 #include "nav2_behavior_tree/bt_conversions.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "simple_line_mission_msgs/msg/task.hpp"
+#include "std_msgs/msg/string.hpp"
 #include "tf2_ros/buffer.h"
 
 namespace simple_line_mission
 {
 
-// mission.xml 에서 쓰는 이 패키지의 BT 노드들을 factory 에 등록한다
+// mission.xml, task_loop.xml 에서 쓰는 이 패키지의 BT 노드들을 factory 에 등록한다
 void registerNodes(BT::BehaviorTreeFactory & factory);
+
+// 작업 진행 상황을 알리는 토픽 (std_msgs/String, "<작업 id> <상태>")
+constexpr char kStatusTopic[] = "mission/status";
 
 // ---------------------------------------------------------------------------------------------
 // 위치 문자열 처리
@@ -150,7 +156,8 @@ private:
   std::string robot_frame_;
 };
 
-// message 를 로그로 남기고 SUCCESS.
+// message 를 로그로 남기고 mission/status 로도 발행한 뒤 SUCCESS.
+// task_id 를 주면 "<task_id> <message>" 로 보낸다.
 class Log : public BT::SyncActionNode
 {
 public:
@@ -158,13 +165,55 @@ public:
 
   static BT::PortsList providedPorts()
   {
-    return {BT::InputPort<std::string>("message")};
+    return {
+      BT::InputPort<std::string>("message"),
+      BT::InputPort<std::string>("task_id", "", "prefix: which task this is about"),
+    };
   }
 
   BT::NodeStatus tick() override;
 
 private:
   rclcpp::Node::SharedPtr node_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
+};
+
+// 토픽(기본 mission/task)으로 들어온 작업(simple_line_mission_msgs/Task)을 하나 꺼내
+// blackboard 에 쓰고 SUCCESS. 작업이 없으면 올 때까지 RUNNING.
+// 실행 중에 들어온 작업은 구독 큐(최대 10개)에 쌓여 있다가 차례로 꺼내진다.
+class WaitForTask : public BT::StatefulActionNode
+{
+public:
+  WaitForTask(const std::string & name, const BT::NodeConfiguration & config);
+
+  static BT::PortsList providedPorts()
+  {
+    return {
+      BT::InputPort<std::string>("topic", "mission/task", "simple_line_mission_msgs/Task topic"),
+      // MakePoses 와 같은 이유로 타입을 적지 않는다 (std::vector<geometry_msgs::msg::PoseStamped>)
+      BT::OutputPort("waypoints", "via points + work station"),
+      BT::OutputPort<std::string>("task_id"),
+      BT::OutputPort<std::string>("action"),
+      BT::OutputPort<double>("duration"),
+    };
+  }
+
+  BT::NodeStatus onStart() override;
+  BT::NodeStatus onRunning() override;
+  void onHalted() override {}
+
+private:
+  BT::NodeStatus takeTask();
+  void report(const std::string & text);
+
+  rclcpp::Node::SharedPtr node_;
+  // 구독 콜백은 이 노드를 tick 할 때만 처리한다 (Nav2 BT 노드들과 같은 방식)
+  rclcpp::CallbackGroup::SharedPtr callback_group_;
+  rclcpp::executors::SingleThreadedExecutor executor_;
+  rclcpp::Subscription<simple_line_mission_msgs::msg::Task>::SharedPtr task_sub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
+  std::deque<simple_line_mission_msgs::msg::Task> queue_;
+  int count_{0};
 };
 
 }  // namespace simple_line_mission
