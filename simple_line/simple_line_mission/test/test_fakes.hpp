@@ -14,9 +14,10 @@
 #include "behaviortree_cpp_v3/loggers/abstract_logger.h"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 
-// 가짜 Nav2 노드: 3 tick 동안 RUNNING 후, 정해 둔 결과(기본 SUCCESS)를 돌려준다
+// 가짜 Nav2 노드: g_ticks_to_finish tick 동안 RUNNING 후, 정해 둔 결과(기본 SUCCESS)를 돌려준다
 inline std::map<std::string, std::deque<bool>> g_outcomes;            // 노드 이름 → 차례로 쓸 결과
 inline std::map<std::string, std::vector<geometry_msgs::msg::PoseStamped>> g_goals;
+inline int g_ticks_to_finish = 3;
 
 class FakeNav2Action : public BT::StatefulActionNode
 {
@@ -40,7 +41,7 @@ public:
     } else if (getInput("goal", goal)) {
       g_goals[name()] = {goal};
     }
-    ticks_ = 3;
+    ticks_ = g_ticks_to_finish;
     return BT::NodeStatus::RUNNING;
   }
 

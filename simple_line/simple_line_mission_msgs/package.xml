@@ -3,7 +3,7 @@
 <package format="3">
   <name>simple_line_mission_msgs</name>
   <version>0.1.0</version>
-  <description>Task message sent to the simple_line mission behavior tree.</description>
+  <description>Task message and ExecuteTask action for the simple_line mission behavior trees.</description>
   <maintainer email="user@example.com">nav2_dwb</maintainer>
   <license>Apache-2.0</license>
 
@@ -11,6 +11,7 @@
   <buildtool_depend>rosidl_default_generators</buildtool_depend>
 
   <depend>geometry_msgs</depend>
+  <depend>action_msgs</depend>
 
   <exec_depend>rosidl_default_runtime</exec_depend>
 

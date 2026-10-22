@@ -3,13 +3,14 @@
 <package format="3">
   <name>simple_line_mission</name>
   <version>0.1.0</version>
-  <description>Example missions on Nav2 Humble: a BehaviorTree.CPP runner (fixed mission or tasks received on a topic), a task sender, and a Python task node.</description>
+  <description>Example missions on Nav2 Humble: BehaviorTree.CPP runners (fixed mission, tasks from a topic, tasks from an ExecuteTask action server), task senders, and a Python task node.</description>
   <maintainer email="user@example.com">nav2_dwb</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>rclcpp</depend>
+  <depend>rclcpp_action</depend>
   <depend>behaviortree_cpp_v3</depend>
   <depend>nav2_behavior_tree</depend>
   <depend>geometry_msgs</depend>

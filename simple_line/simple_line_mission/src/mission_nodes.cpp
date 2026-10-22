@@ -1,6 +1,8 @@
 #include "simple_line_mission/mission_nodes.hpp"
 
 #include <cmath>
+#include <map>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -51,6 +53,23 @@ double toDouble(const std::string & text)
     throw std::invalid_argument("'" + text + "' is not a number");
   }
   return value;
+}
+
+// 같은 ROS 노드에서 나가는 상태 보고(mission/status)는 publisher 하나로 보낸다.
+// Log 와 WaitForTask 가 publisher 를 따로 가지면 받는 쪽에 순서가 바뀌어 도착할 수 있다
+// ("t1 started" 가 "t1 accepted" 보다 먼저 오는 것을 실제로 봤다).
+rclcpp::Publisher<std_msgs::msg::String>::SharedPtr statusPublisher(
+  const rclcpp::Node::SharedPtr & node)
+{
+  static std::map<const rclcpp::Node *, std::weak_ptr<rclcpp::Publisher<std_msgs::msg::String>>>
+  publishers;
+  auto & weak = publishers[node.get()];
+  auto publisher = weak.lock();
+  if (!publisher) {
+    publisher = node->create_publisher<std_msgs::msg::String>(kStatusTopic, rclcpp::QoS(10));
+    weak = publisher;
+  }
+  return publisher;
 }
 
 }  // namespace
@@ -257,7 +276,7 @@ Log::Log(const std::string & name, const BT::NodeConfiguration & config)
 : BT::SyncActionNode(name, config),
   node_(config.blackboard->get<rclcpp::Node::SharedPtr>("node"))
 {
-  status_pub_ = node_->create_publisher<std_msgs::msg::String>(kStatusTopic, rclcpp::QoS(10));
+  status_pub_ = statusPublisher(node_);
 }
 
 BT::NodeStatus Log::tick()
@@ -289,7 +308,7 @@ WaitForTask::WaitForTask(const std::string & name, const BT::NodeConfiguration &
     topic, rclcpp::QoS(10),
     [this](simple_line_mission_msgs::msg::Task::ConstSharedPtr msg) {queue_.push_back(*msg);},
     options);
-  status_pub_ = node_->create_publisher<std_msgs::msg::String>(kStatusTopic, rclcpp::QoS(10));
+  status_pub_ = statusPublisher(node_);
 }
 
 BT::NodeStatus WaitForTask::onStart()
