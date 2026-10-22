@@ -3,7 +3,7 @@
 <package format="3">
   <name>simple_line_mission</name>
   <version>0.1.0</version>
-  <description>Example mission mixing pass-through routes and work stations: a BehaviorTree.CPP runner and a Python task node (Nav2 Humble).</description>
+  <description>Example missions on Nav2 Humble: a BehaviorTree.CPP runner (fixed mission or tasks received on a topic), a task sender, and a Python task node.</description>
   <maintainer email="user@example.com">nav2_dwb</maintainer>
   <license>Apache-2.0</license>
 
@@ -17,6 +17,8 @@
   <depend>tf2</depend>
   <depend>tf2_ros</depend>
   <depend>ament_index_cpp</depend>
+  <depend>std_msgs</depend>
+  <depend>simple_line_mission_msgs</depend>
 
   <exec_depend>simple_line_bringup</exec_depend>
   <exec_depend>nav2_simple_commander</exec_depend>

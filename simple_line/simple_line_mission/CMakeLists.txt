@@ -17,6 +17,8 @@ find_package(lifecycle_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(ament_index_cpp REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(simple_line_mission_msgs REQUIRED)
 
 set(dependencies
   rclcpp
@@ -27,6 +29,8 @@ set(dependencies
   tf2
   tf2_ros
   ament_index_cpp
+  std_msgs
+  simple_line_mission_msgs
 )
 
 # 이 패키지의 BT 노드들
@@ -48,7 +52,7 @@ install(TARGETS ${PROJECT_NAME}_nodes
   RUNTIME DESTINATION bin
 )
 install(TARGETS mission_bt_runner DESTINATION lib/${PROJECT_NAME})
-install(PROGRAMS scripts/mission_node.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/mission_node.py scripts/task_sender.py DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY behavior_trees DESTINATION share/${PROJECT_NAME})
 
@@ -59,6 +63,12 @@ if(BUILD_TESTING)
   ament_target_dependencies(test_mission ${dependencies})
   target_compile_definitions(test_mission PRIVATE
     MISSION_XML="${CMAKE_CURRENT_SOURCE_DIR}/behavior_trees/mission.xml")
+
+  ament_add_gtest(test_task_loop test/test_task_loop.cpp TIMEOUT 120)
+  target_link_libraries(test_task_loop ${PROJECT_NAME}_nodes)
+  ament_target_dependencies(test_task_loop ${dependencies})
+  target_compile_definitions(test_task_loop PRIVATE
+    TASK_LOOP_XML="${CMAKE_CURRENT_SOURCE_DIR}/behavior_trees/task_loop.xml")
 endif()
 
 ament_export_include_directories(include)

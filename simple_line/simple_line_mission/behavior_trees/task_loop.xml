@@ -1,0 +1,57 @@
+<!--
+  토픽으로 받은 작업을 하나씩 실행하는 미션 BT (BehaviorTree.CPP v3, Nav2 Humble)
+
+    task_sender.py ──(mission/task: simple_line_mission_msgs/Task)──▶ WaitForTask ─▶ 이동 + 작업
+                   ◀─(mission/status: std_msgs/String)─────────────── WaitForTask, Log
+
+  mission.xml 과 달리 좌표가 XML 에 없다. 위치와 할 일은 Task 메시지가 정하고,
+  BT 는 "작업을 받으면 action 에 따라 어떻게 움직이고 무엇을 할지" 만 정한다.
+
+    action       동작
+    go (그 외)   경유점을 지나 마지막 점까지 이동
+    inspect      이동 → 정지 상태로 duration 초 작업
+    scan         가는 동안 0.5m 마다 스캔
+    look_around  이동 → 제자리에서 한 바퀴
+
+  작업 하나가 실패해도 보고만 하고 다음 작업을 기다린다. 스스로 끝나지 않으므로 Ctrl-C 로 멈춘다.
+
+  실행: mission_bt_runner 의 bt_xml 파라미터를 task_loop.xml 로 준다 (MISSION_BT.md 참고)
+-->
+<root main_tree_to_execute="TaskLoop">
+  <BehaviorTree ID="TaskLoop">
+    <KeepRunningUntilFailure name="loop">
+      <Sequence name="one_task">
+
+        <!-- 1. 작업이 올 때까지 기다렸다가 내용을 blackboard 에 꺼내 둔다 -->
+        <WaitForTask name="wait_task" waypoints="{waypoints}" task_id="{task_id}"
+                     action="{action}" duration="{duration}"/>
+
+        <!-- 2. action 에 맞는 이동과 작업. 실패하면 보고하고 다음 작업으로 -->
+        <Fallback name="run_task">
+          <Sequence name="try_task">
+            <Log name="report_start" task_id="{task_id}" message="started"/>
+            <Switch3 name="by_action" variable="{action}"
+                     case_1="inspect" case_2="scan" case_3="look_around">
+              <Sequence name="inspect">
+                <NavigateThroughPoses name="go_inspect" goals="{waypoints}"/>
+                <DoWork name="work" task="{task_id}" duration="{duration}"/>
+              </Sequence>
+              <Parallel name="scan" success_threshold="1" failure_threshold="1">
+                <NavigateThroughPoses name="go_scan" goals="{waypoints}"/>
+                <ScanWhileMoving name="scanning" interval="0.5"/>
+              </Parallel>
+              <Sequence name="look_around">
+                <NavigateThroughPoses name="go_look" goals="{waypoints}"/>
+                <Spin name="spin" spin_dist="6.28" time_allowance="20" is_recovery="false"/>
+              </Sequence>
+              <NavigateThroughPoses name="go_only" goals="{waypoints}"/>
+            </Switch3>
+            <Log name="report_done" task_id="{task_id}" message="done"/>
+          </Sequence>
+          <Log name="report_failed" task_id="{task_id}" message="failed"/>
+        </Fallback>
+
+      </Sequence>
+    </KeepRunningUntilFailure>
+  </BehaviorTree>
+</root>

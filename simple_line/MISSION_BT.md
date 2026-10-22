@@ -3,13 +3,14 @@
 `simple_line` 의 planner / controller 위에서 여러 지점을 도는 방법을 정리한다. 장애물은 고려하지 않는다.
 
 - **1부**: Nav2 명령 하나로 여러 goal 을 도는 방법.
-- **2부**: 그 명령들을 조합해서 작업이 섞인 미션을 만드는 방법.
+- **2부**: 그 명령들을 조합해서 작업이 섞인 미션을 만드는 방법. 좌표를 XML 에 적어 두는 방식(6~12장)과, 실행 중에 토픽으로 받는 방식(13장)이 있다.
 
 | 하고 싶은 것 | 쓰는 Nav2 기능 | 실행 | 장 |
 |---|---|---|---|
 | 경유점은 멈추지 않고 지나 최종 goal 까지 | `NavigateThroughPoses` (bt_navigator) | `send_waypoints.py` | 1~4 |
 | goal 마다 멈추고 방향까지 맞추며 차례로 | `FollowWaypoints` (waypoint_follower) | `follow_waypoints.py` | 5 |
 | 경유, 정지 작업, 주행 중 작업, 실패 처리를 섞은 미션 | 위 명령들과 `Spin` 을 상위 계층에서 조합 | `mission_bt_runner` (BT)<br>`mission_node.py` (Python) | 6~12 |
+| 위와 같되, 좌표와 작업을 실행 중에 토픽으로 받기 | 같음 | `mission_bt_runner` (`task_loop.xml`)<br>+ `task_sender.py` | 13 |
 
 목차
 
@@ -28,10 +29,11 @@
   - [10. 코드로 구현하기 (C++)](#10-코드로-구현하기-c)
   - [11. Python 작업 노드](#11-python-작업-노드)
   - [12. 미션 실행](#12-미션-실행)
-- [13. 확인한 것](#13-확인한-것)
-- [14. 어떤 방법을 쓸까](#14-어떤-방법을-쓸까)
-- [15. 주의할 점 (Humble)](#15-주의할-점-humble)
-- [16. 파일](#16-파일)
+  - [13. 좌표를 토픽으로 받기 (task_loop.xml)](#13-좌표를-토픽으로-받기-task_loopxml)
+- [14. 확인한 것](#14-확인한-것)
+- [15. 어떤 방법을 쓸까](#15-어떤-방법을-쓸까)
+- [16. 주의할 점 (Humble)](#16-주의할-점-humble)
+- [17. 파일](#17-파일)
 
 ---
 
@@ -42,7 +44,8 @@ cd ~/nav2_ws/src/nav2_dwb && git pull
 cd ~/nav2_ws
 rosdep install --from-paths src --ignore-src -y      # nav2_simple_commander 등
 colcon build --symlink-install --packages-select \
-  simple_line_planner simple_line_controller simple_line_bringup simple_line_mission
+  simple_line_planner simple_line_controller simple_line_bringup \
+  simple_line_mission_msgs simple_line_mission
 source install/setup.bash
 ```
 
@@ -187,7 +190,7 @@ RViz 로도 할 수 있다.
 
 `SimpleLineController` (`simple_line_controller/src/simple_line_controller.cpp`) 에는 꺾은선을 위한 동작이 두 가지 들어 있다.
 직선 하나일 때는 필요 없지만, 여러 goal 을 이은 꺾은선에서는 이것이 없으면 문제가 생긴다.
-아래 "없을 때" 는 이 두 동작을 넣기 전 컨트롤러로 잰 값이다. 직선 하나짜리 경로에서는 동작이 바뀌지 않는다 (13-1).
+아래 "없을 때" 는 이 두 동작을 넣기 전 컨트롤러로 잰 값이다. 직선 하나짜리 경로에서는 동작이 바뀌지 않는다 (14-1).
 
 ### 3-1. 가장 가까운 경로 점을 앞쪽 일정 거리 안에서만 찾기
 
@@ -256,7 +259,7 @@ for (size_t i = 1; i < plan_.size(); ++i) goal_dist += 거리(plan_[i-1], plan_[
 다음 구간이 꺾이면 lookahead(0.6m) 지점의 carrot 이 다음 구간으로 넘어간다.
 
 - carrot 방향이 45°(`rotate_to_heading_min_angle`) 이하 → 호를 그리며 모서리를 돈다
-- 45° 초과 (예: 90° 모서리) → 모서리 근처에서 멈추고 제자리 회전 후 출발한다. 경유 goal 이라서 멈추는 것이 아니라 컨트롤러 동작이다 (13-3 타임라인에서 0.4초)
+- 45° 초과 (예: 90° 모서리) → 모서리 근처에서 멈추고 제자리 회전 후 출발한다. 경유 goal 이라서 멈추는 것이 아니라 컨트롤러 동작이다 (14-3 타임라인에서 0.4초)
 
 ### 경유 goal 을 정확히 밟지는 않는다
 
@@ -412,7 +415,7 @@ waypoint_follower:
 - **주행 중 작업**: 움직이는 동안 한다.
 
 이런 미션은 Nav2 위에 **상위 작업 계층**을 두고, 1부의 명령들을 단계마다 골라 보낸다.
-같은 미션을 두 가지 방법으로 만들었다.
+같은 미션을 두 가지 방법으로 만들었다. 좌표를 실행 중에 토픽으로 받는 BT 는 13장에 따로 정리했다.
 
 | | 실행 | 미션을 정하는 곳 |
 |---|---|---|
@@ -458,6 +461,7 @@ waypoint_follower:
 
 | 계층 | 하는 일 | 이 예제에서 |
 |---|---|---|
+| **입력** (13장) | 어디로 가서 무엇을 할지 보냄 | `task_sender.py` → `mission/task` 토픽 (`mission.xml` 은 입력 없이 XML 안의 좌표를 씀) |
 | **상위 작업 계층** | 무엇을, 어떤 순서로, 실패하면 어떻게 | `mission_bt_runner` (BT) 또는 `mission_node.py` (Python) |
 | **bt_navigator** | goal 까지 **어떻게 갈지** (재계획, recovery) | Nav2 기본 BT 그대로 (1-1) |
 | **서버** | 실제 경로 계산, 경로 추종, 제자리 동작 | planner_server (SimpleLinePlanner), controller_server (SimpleLineController), behavior_server (Spin) |
@@ -879,6 +883,7 @@ mission SUCCESS in 60.9 s
 - **미션 바꾸기**
   - BT 버전: `mission.xml` 을 고친다. `--symlink-install` 로 빌드했다면 다시 빌드하지 않아도 된다. 다른 파일을 쓰려면 `--ros-args -p bt_xml:=/path/to/my_mission.xml`.
   - Python 버전: `mission_node.py` 맨 위의 `ROUTE_A`, `ROUTE_B`, `HOME` 을 고친다.
+  - 좌표를 고치지 않고 실행 중에 보내려면: 13장 (`task_loop.xml` + `task_sender.py`).
   - 어느 쪽이든 각 `NavigateThroughPoses` 의 마지막 점이 그 구간의 출발점이나 앞 구간과 겹치지 않게 한다 (4장).
 - **RViz 에서 스캔 위치 보기**: `Add → By topic → /mission/scan_points (PoseArray)`
 - **XML 을 고친 뒤 그림 다시 그리기**:
@@ -893,7 +898,185 @@ mission SUCCESS in 60.9 s
 
 ---
 
-## 13. 확인한 것
+## 13. 좌표를 토픽으로 받기 (`task_loop.xml`)
+
+`mission.xml` 은 좌표와 순서가 XML 에 박혀 있다. 실제로는 사람이나 관제 서버가 실행 중에 "어디로 가서 무엇을 하라" 를 보낸다. `task_loop.xml` 은 그 방식이다.
+
+```
+[입력 노드]  task_sender.py (터미널 입력)  /  관제 서버  /  ros2 topic pub
+                │  mission/task    simple_line_mission_msgs/Task   어디로(waypoints), 무엇을(action)
+                ▼
+[미션 BT]    mission_bt_runner  (bt_xml:=task_loop.xml)
+                WaitForTask ─▶ Switch(action) ─▶ NavigateThroughPoses + DoWork / ScanWhileMoving / Spin
+                │  mission/status  std_msgs/String   "t1 accepted: ...", "t1 started", "t1 done" ...
+                ▼
+[입력 노드]  진행 상황 출력
+```
+
+| 누가 | 무엇을 정하나 |
+|---|---|
+| 입력 노드 | **데이터**: 어디로(waypoints), 무엇을(action) |
+| 미션 BT | **정책**: action 별로 어떻게 움직이고 무엇을 할지, 실패하면 어떻게 할지 |
+| 아래층 (bt_navigator, planner, controller) | 그대로. `mission.xml` 과 같은 Nav2 액션을 부른다 |
+
+### 13-1. Task 메시지 (`simple_line_mission_msgs/msg/Task.msg`)
+
+```
+string id                                 # 작업 이름 (로그와 mission/status 에 씀). 비우면 BT 가 붙인다
+geometry_msgs/PoseStamped[] waypoints     # 경유점들 + 마지막이 작업 지점. 1개 이상
+string action                             # go | inspect | scan | look_around. 그 외 값이면 이동만
+float64 duration                          # inspect 의 작업 시간 [s]
+```
+
+ROS 2 에서는 새 메시지 형식을 별도 패키지에 정의하는 것이 관례라서, 메시지만 담은 `simple_line_mission_msgs` 패키지를 따로 두었다.
+
+### 13-2. task_loop.xml
+
+![task loop BT](simple_line_mission/doc/task_loop.png)
+
+1. **`KeepRunningUntilFailure`**: 자식이 SUCCESS 를 내면 처음부터 다시 실행한다. 작업 하나가 한 바퀴다.
+2. **`WaitForTask`**: 작업이 올 때까지 RUNNING. 오면 `waypoints`, `task_id`, `action`, `duration` 을 blackboard 에 쓰고 SUCCESS.
+3. **`Switch3`**: `{action}` 값으로 가지 하나를 고른다.
+
+   | action | 가지 |
+   |---|---|
+   | `inspect` | 이동 → `DoWork` (duration 초) |
+   | `scan` | `Parallel` (이동, `ScanWhileMoving`) |
+   | `look_around` | 이동 → `Spin` 한 바퀴 |
+   | 그 외 (`go` 등) | 이동만 |
+
+4. **`Fallback run_task`**: 가지가 실패하면 `report_failed` 가 "failed" 를 보고하고 SUCCESS 를 낸다. 루프는 다음 작업을 기다린다.
+
+이동은 경유점 수와 상관없이 `NavigateThroughPoses` 하나로 보낸다. 점이 하나면 `NavigateToPose` 와 같게 동작한다.
+
+| | `mission.xml` | `task_loop.xml` |
+|---|---|---|
+| 좌표 | XML 안 (`MakePoses`) | Task 메시지 (`WaitForTask`) |
+| 작업 순서 | XML 에 고정 | 받은 순서 |
+| 작업 종류 | 지점마다 XML 에 적음 | `action` 값을 보고 `Switch3` 가 고름 |
+| 실패 처리 | 지점별 Fallback, 복귀 재시도 | 작업마다 보고하고 다음 작업으로 |
+| 끝 | 마지막 단계가 끝나면 | 끝나지 않음 (Ctrl-C) |
+
+### 13-3. WaitForTask 노드 (`src/mission_nodes.cpp`)
+
+발췌다.
+
+```cpp
+WaitForTask::WaitForTask(const std::string & name, const BT::NodeConfiguration & config)
+: BT::StatefulActionNode(name, config),
+  node_(config.blackboard->get<rclcpp::Node::SharedPtr>("node"))
+{
+  // 구독 콜백은 이 노드만의 callback group 에 넣고, tick 할 때 직접 처리한다
+  callback_group_ = node_->create_callback_group(
+    rclcpp::CallbackGroupType::MutuallyExclusive, false);
+  executor_.add_callback_group(callback_group_, node_->get_node_base_interface());
+  rclcpp::SubscriptionOptions options;
+  options.callback_group = callback_group_;
+  task_sub_ = node_->create_subscription<simple_line_mission_msgs::msg::Task>(
+    "mission/task", rclcpp::QoS(10),
+    [this](simple_line_mission_msgs::msg::Task::ConstSharedPtr msg) {queue_.push_back(*msg);},
+    options);
+}
+
+BT::NodeStatus WaitForTask::takeTask()        // onStart(), onRunning() 에서 부른다
+{
+  executor_.spin_some();                      // 도착한 Task 메시지를 queue_ 로
+  while (!queue_.empty()) {
+    auto task = queue_.front();
+    queue_.pop_front();
+    if (task.waypoints.empty()) { report(task.id + " rejected: no waypoints"); continue; }
+    setOutput("waypoints", task.waypoints);   // → NavigateThroughPoses goals="{waypoints}"
+    setOutput("task_id", task.id);
+    setOutput("action", task.action);         // → Switch3 variable="{action}"
+    setOutput("duration", task.duration);     // → DoWork duration="{duration}"
+    return BT::NodeStatus::SUCCESS;
+  }
+  return BT::NodeStatus::RUNNING;             // 작업이 없으면 다음 tick 에 다시 확인
+}
+```
+
+- **누가 구독 콜백을 처리하나**: `/mission_bt` ROS 노드는 tick 루프만 돌고 따로 spin 하지 않는다. 그래서 `WaitForTask` 가 자기 callback group 과 executor 를 만들고, tick 될 때 `spin_some()` 으로 도착한 메시지를 꺼낸다. Nav2 BT 노드들도 액션 결과를 이렇게 받는다.
+- **실행 중에 들어온 작업**: 다른 작업을 실행하는 동안 `WaitForTask` 는 tick 되지 않는다. 그동안 온 메시지는 구독 큐(QoS depth 10)에 쌓여 있다가 다음 차례에 하나씩 꺼내진다.
+- **상태 보고**: `Log` 노드에 `task_id` 포트를 더해, 로그와 함께 `mission/status` 로 `"<id> <message>"` 를 발행한다.
+- **출력 포트 `waypoints`**: `MakePoses` 와 같은 이유로 타입을 적지 않았다 (10-3).
+
+### 13-4. 입력 노드 (`scripts/task_sender.py`)
+
+```bash
+# 대화형: 한 줄에 작업 하나. 보낸 작업은 BT 가 받은 순서대로 하나씩 실행한다
+ros2 run simple_line_mission task_sender.py
+task> inspect 0,-1 1.5,-1,90       # (0,-1) 경유 → (1.5,-1) 에서 정지 → 3초 점검
+task> scan 1.5,1.5 -1,1.5,180      # 가는 동안 스캔
+task> look_around -1,1.5,180       # 도착 후 한 바퀴
+task> go -2,-1,0                   # 이동만
+task> inspect:5 1,0,0              # 작업 시간 5초
+
+# 작업 하나만 보내고, 끝날 때까지 기다렸다가 종료 (종료 코드 0 = done)
+ros2 run simple_line_mission task_sender.py inspect 0,-1 1.5,-1,90
+
+# 파일이나 다른 프로그램에서 줄 단위로 넘겨도 된다 (모두 끝날 때까지 기다림)
+printf 'inspect 0,-1 1.5,-1,90\ngo -2,-1,0\n' | ros2 run simple_line_mission task_sender.py
+```
+
+- **한 줄 형식**: `<action>[:duration] x,y[,yaw_deg] [x,y[,yaw_deg] ...]` (map frame). 마지막 점이 작업 지점이고, 앞의 점은 경유점이다.
+- **yaw 생략**: 중간 점은 다음 점 쪽, 마지막 점은 직전 점에서 온 방향으로 채운다. 작업의 첫 점은 직전 작업의 마지막 점(첫 작업이면 TF 로 읽은 로봇 위치)에서 온 것으로 본다.
+- **보내기 전에** BT 쪽 구독이 연결될 때까지 기다린다 (최대 10초). 토픽은 연결 전에 보낸 메시지를 버리기 때문이다.
+- **입력을 기다리는 동안에도** 상태 토픽을 받아 `<- t1 done` 처럼 출력한다. 스레드 없이 `select` 로 키보드 입력을 기다리면서 `rclpy.spin_once` 를 돌린다.
+
+입력 노드 없이 직접 보낼 수도 있다. 다른 노드(관제 서버 브리지, GUI)도 같은 토픽에 Task 를 발행하면 된다.
+
+```bash
+ros2 topic pub -w 1 --once /mission/task simple_line_mission_msgs/msg/Task \
+  "{id: t9, action: go, waypoints: [{header: {frame_id: map}, pose: {position: {x: 1.0, y: 0.0}, orientation: {w: 1.0}}}]}"
+ros2 topic echo /mission/status
+```
+
+### 13-5. 실행
+
+```bash
+# 터미널 1: 0장의 launch
+
+# 터미널 2: 작업을 기다리는 미션 BT
+ros2 run simple_line_mission mission_bt_runner --ros-args -p bt_xml:=task_loop.xml
+
+# 터미널 3: 작업 보내기
+ros2 run simple_line_mission task_sender.py
+```
+
+`bt_xml` 에 파일 이름만 주면 패키지의 `behavior_trees/` 에서 찾는다. 다른 위치의 파일은 전체 경로를 준다.
+
+입력 노드 출력 (가짜 로봇으로 실행한 실제 출력. 작업 4개를 한 번에 넣은 경우):
+
+```
+task>   -> t1: inspect (0,-1,0°) -> (1.5,-1,90°), 3 s
+task>   -> t2: scan (1.5,1.5,180°) -> (-1,1.5,180°)
+task>   -> t3: look_around (-1,1.5,180°)
+task>   -> t4: go (-2,-1,0°)
+  <- t1 accepted: inspect, 2 poses
+  <- t1 started
+  <- t1 done
+  <- t2 accepted: scan, 2 poses
+  <- t2 started
+  <- t2 done
+  <- t3 accepted: look_around, 1 poses
+  <- t3 started
+  <- t3 done
+  <- t4 accepted: go, 1 poses
+  <- t4 started
+  <- t4 done
+```
+
+### 13-6. 한계와 다음 단계
+
+- **토픽은 보내고 끝이다.** 결과는 상태 토픽으로만 안다. 입력 노드를 꺼도 BT 는 받은 작업을 계속한다. 멈추려면 `mission_bt_runner` 를 Ctrl-C 한다 (실행 중인 Nav2 goal 이 취소된다).
+- **받은 순서대로만 실행한다.** 취소, 끼어들기(우선순위), 대기 중인 작업 비우기는 없다.
+- **상태가 문자열이다.** 사람이 읽기는 쉽지만 다른 프로그램이 해석하기에는 약하다.
+- 이런 기능이 필요해지면 Task 를 **액션 서버**로 받는 것이 보통이다. 액션에는 결과, 진행 상황, 취소가 표준으로 있다. Nav2 가 `navigate_to_pose` 를 토픽이 아니라 액션으로 받는 것과 같은 이유다.
+- 각 Task 안에서도 마지막 점이 앞 구간과 겹치지 않게 한다 (4장).
+
+---
+
+## 14. 확인한 것
 
 모두 같은 환경에서 확인했다.
 
@@ -903,7 +1086,7 @@ mission SUCCESS in 60.9 s
 
 Gazebo 자체(월드, 스폰, AMCL)에서는 돌려 보지 못했다.
 
-### 13-1. 경유 경로 (NavigateThroughPoses, `send_waypoints.py`)
+### 14-1. 경유 경로 (NavigateThroughPoses, `send_waypoints.py`)
 
 "없을 때" 는 3장의 두 동작이 없는 컨트롤러다.
 
@@ -919,7 +1102,7 @@ Gazebo 자체(월드, 스폰, AMCL)에서는 돌려 보지 못했다.
 
 단일 goal 7개(정면, 등 뒤, 대각선, yaw 90° 차이, 0.15m, 제자리 회전, 스폰 복귀)도 3장 동작을 넣은 뒤 다시 돌렸다. 모두 SUCCEEDED, 소요 시간 차이는 1초 이내였다.
 
-### 13-2. waypoint_follower (`follow_waypoints.py`)
+### 14-2. waypoint_follower (`follow_waypoints.py`)
 
 기본 `WAYPOINTS` (goal 4개, 출발점으로 같은 yaw 로 복귀)를 `ros2 run` 과 `python3` 직접 실행으로 한 번씩 돌렸다.
 
@@ -927,7 +1110,7 @@ Gazebo 자체(월드, 스폰, AMCL)에서는 돌려 보지 못했다.
 - 54.0 s / 53.2 s, 최종 오차 xy 0.21 / 0.23 m, yaw 1.8 / 5.9°.
 - NavigateThroughPoses 에서 1.9초 만에 끝나 버리던 "출발점 복귀 + 같은 yaw" 경우도 끝까지 돈다.
 
-### 13-3. 미션 (`mission_bt_runner`, `mission_node.py`)
+### 14-3. 미션 (`mission_bt_runner`, `mission_node.py`)
 
 **단위 테스트** (`test/test_mission.cpp`, gtest 6개 통과): 실제 `mission.xml` 로 테스트한다. Nav2 노드 3개만 3 tick 뒤 정해 둔 결과를 내는 가짜로 바꿨다.
 
@@ -960,15 +1143,39 @@ BT 버전 실행 중 노드별 RUNNING 구간과 로봇 속도:
 - **`scan`**: `go_b` 와 같은 구간에 RUNNING 이고, `go_b` 가 끝나는 순간 halt 된다.
 - **작업 지점 정지 위치**: A, B 모두 goal 에서 0.22~0.24 m 앞에서 멈췄다. goal checker 의 `xy_goal_tolerance` 0.25 m 안에 들어오면 도착으로 보기 때문이다. 더 정확히 서야 하면 이 값을 줄인다.
 
+### 14-4. 토픽으로 받은 작업 (`task_loop.xml`, `task_sender.py`)
+
+**단위 테스트** (`test/test_task_loop.cpp`, gtest 4개 통과): 실제 `task_loop.xml` 에 `mission/task` 토픽으로 Task 를 보내고, `mission/status` 와 노드 상태 변화를 본다. Nav2 노드만 가짜다.
+
+| 테스트 | 확인 내용 |
+|---|---|
+| `ActionChoosesTheBehavior` | 작업 5개(inspect, scan, look_around, 빈 action, 모르는 action). action 별로 맞는 가지가 실행되고(`scan` 은 주행이 끝나면 halt), 받은 순서대로 started → done. Task 의 waypoints 가 그대로 `goals` 로 전달됨 |
+| `FailedTaskIsReportedAndTheLoopGoesOn` | 이동 실패 → `"t1 failed"` 보고, 다음 작업은 그대로 실행 |
+| `TaskWithoutWaypointsIsRejected` | 점이 없는 작업 → `"t1 rejected: no waypoints"`. id 가 없는 작업 → BT 가 `task2` 로 이름 붙임 |
+| `WaitsWhileThereIsNoTask` | 작업이 없으면 RUNNING 을 유지하고 `"waiting for a task"` 보고 |
+
+**Nav2 서버로 실행**: `mission_bt_runner` 를 `bt_xml:=task_loop.xml` 로 띄우고 `task_sender.py` 로 보냈다.
+
+| 항목 | 결과 |
+|---|---|
+| `mission.xml` 과 같은 작업 4개를 한 번에 입력 | 모두 done. 입력 노드 실행부터 마지막 done 까지 약 59초 (`mission.xml` 버전 60~61초) |
+| t1 경유점 (0,-1) 통과 속도 | 0.25 m/s (감속 없음) |
+| t2 스캔 | 9개 (0.5 m 간격), 주행이 끝나며 halt |
+| t3 `look_around` | 이동 후 `Spin` SUCCESS |
+| 한 번만 보내기 (`inspect:1 -1,-1,0`) | done 을 받고 종료 코드 0 |
+| 작업 중 `mission_bt_runner` Ctrl-C | Nav2 goal 취소, 로봇 정지 |
+| 입력 노드 Ctrl-C | 오류 없이 종료 (BT 는 받은 작업을 계속) |
+
 ---
 
-## 14. 어떤 방법을 쓸까
+## 15. 어떤 방법을 쓸까
 
 | 상황 | 방법 |
 |---|---|
 | 경유점을 멈추지 않고 지나 최종 goal 에서만 서면 된다 | `NavigateThroughPoses` (2장 스크립트, 또는 미션의 한 단계) |
 | 지점마다 멈춰서 같은 작업을 하고, 순서가 고정이다 | `waypoint_follower` (5장). 작업은 task executor 플러그인으로 |
 | 경유, 정지 작업, 주행 중 작업, 실패 처리가 섞인다 | 상위 작업 계층 (2부) |
+| 위와 같고, 어디로 가서 무엇을 할지는 실행 중에 사람이나 서버가 정한다 | `task_loop.xml` + Task 토픽 (13장). 취소·우선순위가 필요해지면 액션 서버로 |
 
 상위 작업 계층은 Python 으로 시작해서, 복잡해지면 BT 로 옮기는 것을 권한다.
 
@@ -980,7 +1187,7 @@ BT 버전 실행 중 노드별 RUNNING 구간과 로봇 속도:
 | 주행 중 작업, 동시에 여러 일 | `Parallel` 로 선언 | 대기 루프 안에 직접 끼워 넣어야 한다 |
 | 실패 처리, 재시도 | `Fallback`, `RetryUntilSuccessful` 등 조합 | if / for 가 늘어난다 |
 | 중단 | `haltTree()` 한 번에 실행 중인 노드 모두 정리 | 상황마다 직접 취소 |
-| 테스트 | 가짜 노드로 로봇 없이 흐름 테스트 (13-3) | 따로 구조를 만들어야 한다 |
+| 테스트 | 가짜 노드로 로봇 없이 흐름 테스트 (14-3) | 따로 구조를 만들어야 한다 |
 | 재사용 | 만든 노드를 다른 미션 XML 에서도 쓴다 | 함수 재사용 |
 
 - **단계가 몇 개 안 되고 순서가 고정이면 Python 이 빠르다.** 프로토타입, 시연, 외부 서버가 순서를 정해 주는 경우가 여기에 해당한다.
@@ -989,18 +1196,19 @@ BT 버전 실행 중 노드별 RUNNING 구간과 로봇 속도:
 
 ---
 
-## 15. 주의할 점 (Humble)
+## 16. 주의할 점 (Humble)
 
 - **최종 goal 이 앞 구간과 겹치면 안 된다.** `NavigateThroughPoses` 는 마지막 점 근처를 같은 방향으로 지나가면, 경유점이 남아 있어도 도착 처리할 수 있다 ([4장](#최종-goal-이-앞-구간과-겹치면-일찍-끝날-수-있다-humble)).
   - `send_waypoints.py` 는 이것을 미리 검사한다.
   - 미션의 `route_a`, `route_b` 는 마지막 점이 출발점이나 앞 구간과 겹치지 않게 골랐다.
 - **`NavigateThroughPoses` 를 재시도하면 지나온 경유점으로 되돌아갈 수 있다.** 다시 보내면 목록 전체가 다시 가므로, 이미 지나간 경유점도 다시 간다. 그래서 미션은 재시도를 `NavigateToPose` (복귀)에만 걸었다. 경유 구간을 재시도하려면 남은 점만 다시 보내야 한다.
 - **도착 직후 회전 감속이 조금 남는다.** goal checker 가 도착을 판정한 직후에도 velocity_smoother 가 감속하는 0.2초 정도 각속도가 남았다 (최대 0.68 rad/s). 작업이 완전한 정지를 요구하면, 작업 노드 앞에 "속도가 0 인지" 확인하는 조건 노드를 두면 된다.
+- **토픽으로 받은 작업은 취소할 수 없다.** 받은 순서대로 끝까지 실행한다 (13-6).
 - **goals 포트 타입, tick 주기**: 10-3 을 본다.
 
 ---
 
-## 16. 파일
+## 17. 파일
 
 ```
 simple_line/
@@ -1011,18 +1219,27 @@ simple_line/
 │   └── scripts/
 │       ├── send_waypoints.py                2장: NavigateThroughPoses 를 터미널에서
 │       └── follow_waypoints.py              5장: FollowWaypoints, 위치는 파일 안의 WAYPOINTS
+├── simple_line_mission_msgs/                13장
+│   └── msg/Task.msg                         작업 하나 (id, waypoints, action, duration)
 └── simple_line_mission/                     2부
-    ├── behavior_trees/mission.xml           미션 BT
+    ├── behavior_trees/
+    │   ├── mission.xml                      좌표가 XML 에 있는 미션 (6~12장)
+    │   └── task_loop.xml                    토픽으로 받은 작업을 하나씩 실행 (13장)
     ├── include/simple_line_mission/
     │   └── mission_nodes.hpp                직접 만든 BT 노드 선언 (포트 포함)
     ├── src/
-    │   ├── mission_nodes.cpp                MakePose(s), DoWork, ScanWhileMoving, Log
+    │   ├── mission_nodes.cpp                MakePose(s), DoWork, ScanWhileMoving, Log, WaitForTask
     │   └── mission_bt_runner.cpp            factory, blackboard, 트리 생성, tick 루프
-    ├── scripts/mission_node.py              같은 미션의 Python 버전 (BasicNavigator)
-    ├── test/test_mission.cpp                gtest: 위치 문자열 해석 + 가짜 Nav2 노드로 미션 흐름
+    ├── scripts/
+    │   ├── mission_node.py                  mission.xml 과 같은 미션의 Python 버전 (BasicNavigator)
+    │   └── task_sender.py                   13장의 입력 노드: Task 보내기, 상태 출력
+    ├── test/
+    │   ├── test_mission.cpp                 gtest: 위치 문자열 해석 + mission.xml 흐름
+    │   ├── test_task_loop.cpp               gtest: Task 토픽 → task_loop.xml 흐름
+    │   └── test_fakes.hpp                   두 테스트가 같이 쓰는 가짜 Nav2 노드
     ├── tools/draw_bt.py                     XML → 그림 (graphviz)
     └── doc/
-        ├── mission_bt.png                   미션 BT 그림 (draw_bt.py 로 생성)
+        ├── mission_bt.png, task_loop.png    BT 그림 (draw_bt.py 로 생성)
         ├── layers.dot / layers.png          계층 구조 그림
-        └── timeline.png                     실행 타임라인 (13-3 의 실행 기록으로 그림)
+        └── timeline.png                     실행 타임라인 (14-3 의 실행 기록으로 그림)
 ```

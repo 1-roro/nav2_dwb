@@ -10,14 +10,17 @@ digraph layers {
 
   // 왼쪽 열: 계층 이름
   node [shape=plaintext, style="", fontsize=12, fontcolor="#52514e", margin=0];
+  L0 [label=<<b>입력</b> (13장)<br/>어디로, 무엇을>];
   L1 [label=<<b>상위 작업 계층</b><br/>무엇을, 어떤 순서로,<br/>실패하면 어떻게>];
   L2 [label=<<b>bt_navigator</b><br/>goal 까지 어떻게 갈지<br/>(내부 BT: 재계획, recovery)>];
   L3 [label=<<b>서버</b><br/>경로 계산, 경로 추종,<br/>제자리 동작>];
   L4 [label=""];
-  L1 -> L2 -> L3 -> L4 [style=invis];
+  L0 -> L1 -> L2 -> L3 -> L4 [style=invis];
 
   node [shape=box, style="rounded,filled", fontsize=12, fontcolor="#0b0b0b", margin="0.15,0.08"];
-  bt [label=<<b>mission_bt_runner</b><br/><font point-size="10">BehaviorTree.CPP v3 + mission.xml</font>>,
+  ts [label=<<b>task_sender.py</b><br/><font point-size="10">또는 관제 서버, ros2 topic pub</font>>,
+      fillcolor="#fbdccf", color="#eb6834"];
+  bt [label=<<b>mission_bt_runner</b><br/><font point-size="10">BehaviorTree.CPP v3<br/>mission.xml 또는 task_loop.xml</font>>,
       fillcolor="#fbdccf", color="#eb6834"];
   py [label=<<b>mission_node.py</b><br/><font point-size="10">Python + BasicNavigator</font>>,
       fillcolor="#fbdccf", color="#eb6834"];
@@ -31,18 +34,22 @@ digraph layers {
               fillcolor="#cde2fb", color="#2a78d6"];
   behavior [label=<<b>behavior_server</b><br/><font point-size="10">spin, wait, backup ...</font>>,
             fillcolor="#cde2fb", color="#2a78d6"];
-  robot [label=<<b>로봇</b><br/><font point-size="10">cmd_vel (velocity_smoother 거쳐서)</font>>,
+  robot [label=<<b>로봇</b><br/><font point-size="10">/cmd_vel 을 받아 움직인다</font>>,
          fillcolor="#f0efec", color="#52514e"];
 
+  {rank=same; L0; ts}
   {rank=same; L1; bt; py}
   {rank=same; L2; ntp; nt}
   {rank=same; L3; planner; controller; behavior}
   {rank=same; L4; robot}
+  L0 -> ts [style=invis];
   L1 -> bt [style=invis];
   bt -> py [arrowhead=none, style=dotted, label="  또는  "];
   L2 -> ntp -> nt [style=invis];
   L3 -> planner -> controller -> behavior [style=invis];
 
+  ts -> bt [label=" mission/task (토픽)"];
+  bt -> ts [style=dashed, label=" mission/status"];
   bt -> ntp [label=" NavigateThroughPoses"];
   bt -> nt [label=" NavigateToPose"];
   py -> ntp [style=dashed];
@@ -53,6 +60,6 @@ digraph layers {
   nt -> planner [label=" ComputePath\l ToPose\l"];
   ntp -> controller [label=" FollowPath"];
   nt -> controller;
-  controller -> robot;
-  behavior -> robot;
+  controller -> robot [label=" /cmd_vel_nav → velocity_smoother\l → /cmd_vel\l"];
+  behavior -> robot [label=" /cmd_vel (바로)"];
 }
