@@ -7,8 +7,8 @@ simple_line/
 ├── simple_line_planner/      nav2_core::GlobalPlanner  — start → goal 직선 경로
 ├── simple_line_controller/   nav2_core::Controller     — pure pursuit + 제자리 회전
 ├── simple_line_bringup/      launch, 파라미터, 빈 방 월드(6m x 6m)
-├── simple_line_mission/      경유 구간 + 작업 지점 미션 예제 (상위 작업 BT, Python 작업 노드, 작업 입력 노드)
-└── simple_line_mission_msgs/ 미션 BT 에 보내는 작업 메시지 (Task.msg)
+├── simple_line_mission/      경유 구간 + 작업 지점 미션 예제 (상위 작업 BT, 작업 액션 서버/클라이언트, Python 작업 노드)
+└── simple_line_mission_msgs/ 미션 BT 에 보내는 작업 메시지와 액션 (Task.msg, ExecuteTask.action)
 ```
 
 ## Planner — `simple_line_planner::SimpleLinePlanner`
@@ -63,7 +63,7 @@ RViz 확인용 토픽: `/simple_line/local_plan` (잘라 낸 경로), `/simple_l
 
 - 1부: 명령 하나로 경유하기 (`NavigateThroughPoses`, `waypoint_follower`), 꺾은선을 위한 컨트롤러 동작
 - 2부: 경유 구간과 작업 지점(정지 작업, 주행 중 작업)을 섞은 미션 (상위 작업 BT, Python 작업 노드).
-  좌표와 작업을 실행 중에 토픽으로 받아 BT 가 실행하는 방식도 있다 (13장)
+  좌표와 작업을 실행 중에 받아 BT 가 실행하는 방식도 있다: 토픽 (13장), 액션 (14장, 결과·취소·선점)
 
 ## 빌드
 

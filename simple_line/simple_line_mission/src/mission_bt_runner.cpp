@@ -6,7 +6,7 @@
 //
 // bt_xml 에 '/' 가 없으면 이 패키지의 share/.../behavior_trees/ 에서 찾는다.
 //
-// 순서:
+// 순서 (1, 2 의 내용은 bt_common.cpp):
 //   1. factory 에 BT 노드 종류를 등록한다 (Nav2 가 제공하는 노드 + 이 패키지의 노드)
 //   2. blackboard 에 노드들이 같이 쓰는 값(ROS node, TF, timeout)을 넣는다
 //   3. XML 로 트리를 만든다
@@ -17,20 +17,12 @@
 #include <csignal>
 #include <memory>
 #include <string>
-#include <thread>
 
-#include "ament_index_cpp/get_package_share_directory.hpp"
 #include "behaviortree_cpp_v3/bt_factory.h"
-#include "behaviortree_cpp_v3/loggers/abstract_logger.h"
-#include "behaviortree_cpp_v3/utils/shared_library.h"
-#include "lifecycle_msgs/msg/state.hpp"
-#include "lifecycle_msgs/srv/get_state.hpp"
 #include "rclcpp/rclcpp.hpp"
-#include "simple_line_mission/mission_nodes.hpp"
+#include "simple_line_mission/bt_common.hpp"
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
-
-using namespace std::chrono_literals;
 
 namespace
 {
@@ -40,56 +32,6 @@ std::atomic<bool> g_stop{false};
 void onSignal(int)
 {
   g_stop = true;
-}
-
-// 상태가 바뀐 BT 노드를 한 줄씩 출력한다 (어느 노드가 언제 RUNNING / SUCCESS / FAILURE 가 되는지)
-class TransitionLogger : public BT::StatusChangeLogger
-{
-public:
-  TransitionLogger(BT::TreeNode * root, const rclcpp::Logger & logger)
-  : BT::StatusChangeLogger(root), logger_(logger)
-  {
-  }
-
-  void callback(
-    BT::Duration, const BT::TreeNode & node,
-    BT::NodeStatus prev, BT::NodeStatus status) override
-  {
-    // 끝난 노드가 IDLE 로 돌아가는 것은 생략하고, 실행 중에 멈춘 것(halt)만 보여 준다
-    if (status == BT::NodeStatus::IDLE && prev != BT::NodeStatus::RUNNING) {
-      return;
-    }
-    RCLCPP_INFO(
-      logger_, "[bt] %-15s %-23s %s -> %s", node.name().c_str(),
-      node.registrationName().c_str(), BT::toStr(prev).c_str(),
-      status == BT::NodeStatus::IDLE ? "HALTED" : BT::toStr(status).c_str());
-  }
-
-  void flush() override {}
-
-private:
-  rclcpp::Logger logger_;
-};
-
-// lifecycle 노드가 active 가 될 때까지 기다린다. active 전에 보낸 goal 은 거절된다.
-bool waitForActive(const rclcpp::Node::SharedPtr & node, const std::string & name)
-{
-  auto client = node->create_client<lifecycle_msgs::srv::GetState>(name + "/get_state");
-  while (!g_stop) {
-    if (client->wait_for_service(1s)) {
-      auto future = client->async_send_request(
-        std::make_shared<lifecycle_msgs::srv::GetState::Request>());
-      if (rclcpp::spin_until_future_complete(node, future, 1s) ==
-        rclcpp::FutureReturnCode::SUCCESS &&
-        future.get()->current_state.id == lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE)
-      {
-        return true;
-      }
-    }
-    RCLCPP_INFO(node->get_logger(), "waiting for %s to become active ...", name.c_str());
-    std::this_thread::sleep_for(1s);
-  }
-  return false;
 }
 
 }  // namespace
@@ -102,11 +44,8 @@ int main(int argc, char ** argv)
   std::signal(SIGTERM, onSignal);
 
   auto node = std::make_shared<rclcpp::Node>("mission_bt");
-  std::string bt_xml = node->declare_parameter("bt_xml", std::string("mission.xml"));
-  if (bt_xml.find('/') == std::string::npos) {
-    bt_xml = ament_index_cpp::get_package_share_directory("simple_line_mission") +
-      "/behavior_trees/" + bt_xml;
-  }
+  const std::string bt_xml = simple_line_mission::resolveTreePath(
+    node->declare_parameter("bt_xml", std::string("mission.xml")));
   // bt_navigator 와 같은 100Hz (bt_loop_duration 10ms). Nav2 BT 노드는 tick 할 때마다 액션 메시지를
   // 조금씩만 처리하므로, 10Hz 로 낮추면 빠르게 오는 feedback 에 밀려 결과를 1초가량 늦게 받았다.
   const double tick_hz = node->declare_parameter("tick_hz", 100.0);
@@ -115,35 +54,15 @@ int main(int argc, char ** argv)
   auto tf_buffer = std::make_shared<tf2_ros::Buffer>(node->get_clock());
   tf2_ros::TransformListener tf_listener(*tf_buffer, node);   // 자체 스레드에서 TF 수신
 
-  // 1. BT 노드 종류 등록 ------------------------------------------------------------------------
+  // 1. BT 노드 종류 등록
   BT::BehaviorTreeFactory factory;
-  // (a) Nav2 가 제공하는 BT 노드: 플러그인 라이브러리(.so)를 이름으로 불러온다.
-  //     bt_navigator 의 plugin_lib_names 파라미터와 같은 방식이다.
-  BT::SharedLibrary loader;
-  for (const char * lib : {
-      "nav2_navigate_to_pose_action_bt_node",       // <NavigateToPose>
-      "nav2_navigate_through_poses_action_bt_node",  // <NavigateThroughPoses>
-      "nav2_spin_action_bt_node",                    // <Spin>
-      "nav2_wait_action_bt_node"})                   // <Wait>
-  {
-    factory.registerFromPlugin(loader.getOSName(lib));
-  }
-  // (b) 이 패키지에서 만든 BT 노드: 코드에서 바로 등록한다
-  simple_line_mission::registerNodes(factory);
+  simple_line_mission::registerAllNodes(factory);
 
-  // 2. blackboard ------------------------------------------------------------------------------
-  // 노드들이 같이 쓰는 변수 저장소. Nav2 BT 노드는 생성될 때 아래 키들을 꼭 찾는다.
-  auto blackboard = BT::Blackboard::create();
-  blackboard->set<rclcpp::Node::SharedPtr>("node", node);
-  blackboard->set<std::shared_ptr<tf2_ros::Buffer>>("tf_buffer", tf_buffer);
-  blackboard->set<std::chrono::milliseconds>("server_timeout", 1000ms);
-  blackboard->set<std::chrono::milliseconds>(
-    "bt_loop_duration", std::chrono::milliseconds(static_cast<int>(1000.0 / tick_hz)));
-  blackboard->set<std::chrono::milliseconds>("wait_for_service_timeout", 5000ms);
+  // 2. blackboard
+  auto blackboard = simple_line_mission::createBlackboard(node, tf_buffer, tick_hz);
 
-  // 3. 트리 생성 --------------------------------------------------------------------------------
-  // Nav2 BT 노드는 생성될 때 액션 서버를 찾으므로, bt_navigator 가 뜬 뒤에 만든다
-  if (!waitForActive(node, "bt_navigator")) {
+  // 3. 트리 생성. Nav2 BT 노드는 생성될 때 액션 서버를 찾으므로, bt_navigator 가 뜬 뒤에 만든다
+  if (!simple_line_mission::waitForActive(node, "bt_navigator", g_stop)) {
     rclcpp::shutdown();
     return 1;
   }
@@ -155,13 +74,10 @@ int main(int argc, char ** argv)
     rclcpp::shutdown();
     return 1;
   }
-  std::unique_ptr<TransitionLogger> logger;
-  if (log_transitions) {
-    logger = std::make_unique<TransitionLogger>(tree.rootNode(), node->get_logger());
-  }
+  simple_line_mission::TransitionLogger logger(tree.rootNode(), node->get_logger(), log_transitions);
   RCLCPP_INFO(node->get_logger(), "running %s", bt_xml.c_str());
 
-  // 4. tick 루프 --------------------------------------------------------------------------------
+  // 4. tick 루프
   // tick 한 번 = 루트에서 시작해 지금 실행할 노드까지 내려가며 각 노드를 한 번씩 실행.
   // 오래 걸리는 노드(주행, 작업)는 RUNNING 을 돌려주고, 다음 tick 에서 이어서 확인한다.
   const auto start = std::chrono::steady_clock::now();

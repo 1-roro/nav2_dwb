@@ -10,7 +10,7 @@ digraph layers {
 
   // 왼쪽 열: 계층 이름
   node [shape=plaintext, style="", fontsize=12, fontcolor="#52514e", margin=0];
-  L0 [label=<<b>입력</b> (13장)<br/>어디로, 무엇을>];
+  L0 [label=<<b>입력</b> (13, 14장)<br/>어디로, 무엇을>];
   L1 [label=<<b>상위 작업 계층</b><br/>무엇을, 어떤 순서로,<br/>실패하면 어떻게>];
   L2 [label=<<b>bt_navigator</b><br/>goal 까지 어떻게 갈지<br/>(내부 BT: 재계획, recovery)>];
   L3 [label=<<b>서버</b><br/>경로 계산, 경로 추종,<br/>제자리 동작>];
@@ -18,9 +18,9 @@ digraph layers {
   L0 -> L1 -> L2 -> L3 -> L4 [style=invis];
 
   node [shape=box, style="rounded,filled", fontsize=12, fontcolor="#0b0b0b", margin="0.15,0.08"];
-  ts [label=<<b>task_sender.py</b><br/><font point-size="10">또는 관제 서버, ros2 topic pub</font>>,
+  ts [label=<<b>task_client.py</b> (액션)<br/><b>task_sender.py</b> (토픽)<br/><font point-size="10">또는 관제 서버, ros2 action / topic 명령</font>>,
       fillcolor="#fbdccf", color="#eb6834"];
-  bt [label=<<b>mission_bt_runner</b><br/><font point-size="10">BehaviorTree.CPP v3<br/>mission.xml 또는 task_loop.xml</font>>,
+  bt [label=<<b>task_server</b>  (task.xml)<br/><b>mission_bt_runner</b>  (mission.xml, task_loop.xml)<br/><font point-size="10">BehaviorTree.CPP v3</font>>,
       fillcolor="#fbdccf", color="#eb6834"];
   py [label=<<b>mission_node.py</b><br/><font point-size="10">Python + BasicNavigator</font>>,
       fillcolor="#fbdccf", color="#eb6834"];
@@ -48,8 +48,8 @@ digraph layers {
   L2 -> ntp -> nt [style=invis];
   L3 -> planner -> controller -> behavior [style=invis];
 
-  ts -> bt [label=" mission/task (토픽)"];
-  bt -> ts [style=dashed, label=" mission/status"];
+  ts -> bt [label=" execute_task (액션: goal, cancel)\l mission/task (토픽)\l"];
+  bt -> ts [style=dashed, label=" feedback, result\l mission/status\l"];
   bt -> ntp [label=" NavigateThroughPoses"];
   bt -> nt [label=" NavigateToPose"];
   py -> ntp [style=dashed];

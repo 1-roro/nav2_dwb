@@ -1,0 +1,36 @@
+<!--
+  작업 하나를 실행하는 미션 BT (BehaviorTree.CPP v3, Nav2 Humble)
+
+    task_client.py ──(execute_task 액션: goal = Task)──▶ task_server ─▶ 이 트리를 처음부터 tick
+                   ◀─ feedback (실행 중인 노드), result (성공 여부, 이유) ─┘
+
+  task_server 가 goal 을 받으면 blackboard 에 {waypoints} {task_id} {action} {duration} 을 쓰고 이 트리를
+  끝날 때까지 tick 한다. 트리가 SUCCESS 면 goal 은 SUCCEEDED, FAILURE 면 ABORTED 가 된다.
+  작업을 기다리고, 실패를 보고하고, 다음 작업을 받는 일은 서버가 하므로 트리에는 "한 작업을 어떻게 하나" 만 남는다.
+
+    action       동작
+    go (그 외)   경유점을 지나 마지막 점까지 이동
+    inspect      이동 → 정지 상태로 duration 초 작업
+    scan         가는 동안 0.5m 마다 스캔
+    look_around  이동 → 제자리에서 한 바퀴
+-->
+<root main_tree_to_execute="Task">
+  <BehaviorTree ID="Task">
+    <Switch3 name="by_action" variable="{action}"
+             case_1="inspect" case_2="scan" case_3="look_around">
+      <Sequence name="inspect">
+        <NavigateThroughPoses name="go_inspect" goals="{waypoints}"/>
+        <DoWork name="work" task="{task_id}" duration="{duration}"/>
+      </Sequence>
+      <Parallel name="scan" success_threshold="1" failure_threshold="1">
+        <NavigateThroughPoses name="go_scan" goals="{waypoints}"/>
+        <ScanWhileMoving name="scanning" interval="0.5"/>
+      </Parallel>
+      <Sequence name="look_around">
+        <NavigateThroughPoses name="go_look" goals="{waypoints}"/>
+        <Spin name="spin" spin_dist="6.28" time_allowance="20" is_recovery="false"/>
+      </Sequence>
+      <NavigateThroughPoses name="go_only" goals="{waypoints}"/>
+    </Switch3>
+  </BehaviorTree>
+</root>
