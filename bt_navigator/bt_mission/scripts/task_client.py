@@ -12,8 +12,14 @@ task_server 에 작업을 액션(execute_task, bt_mission_msgs/action/ExecuteTas
   # 작업 하나만 보내고, 끝날 때까지 기다렸다가 종료 (종료 코드 0 = SUCCEEDED)
   ros2 run bt_mission task_client.py inspect 0,-1 1.5,-1,90
 
-작업 한 줄의 형식은 task_sender.py 와 같다:
-  <action>[:duration] [stop|avoid|none] x,y[,yaw_deg] [x,y[,yaw_deg] ...]
+작업 한 줄의 형식: <action>[:duration] [stop|avoid|none] x,y[,yaw_deg] [x,y[,yaw_deg] ...]
+  - 좌표는 map frame. 로봇은 점마다 멈춰서 위치와 방향을 맞추고(도착) 다음 점으로 간다.
+    작업(inspect 의 점검, look_around 의 회전)은 마지막 점에서 한다
+  - yaw 는 그 점에 도착했을 때 볼 방향 [deg]. 생략하면 중간 점은 다음 점 쪽,
+    마지막 점은 직전 점에서 온 방향으로 채운다.
+    작업의 첫 점은 직전 작업의 마지막 점(첫 작업이면 로봇 현재 위치)에서 온 것으로 본다
+  - stop | avoid | none: 길에 장애물이 있을 때. 생략하면 stop (멈춰서 기다렸다가 길이 비면 다시 간다)
+
 Ctrl-C 를 누르면 지금 작업을 취소하고 끝낸다.
 """
 
@@ -35,8 +41,9 @@ from bt_mission_msgs.action import ExecuteTask
 from bt_mission_msgs.msg import Task
 import tf2_ros
 
-# 작업 한 줄 해석과 yaw 채우기는 같은 폴더의 task_sender.py (토픽 버전) 와 같다
-from task_sender import fill_yaws, parse_line
+ACTIONS = (Task.ACTION_GO, Task.ACTION_INSPECT, Task.ACTION_SCAN, Task.ACTION_LOOK_AROUND)
+OBSTACLE_MODES = (Task.OBSTACLE_STOP, Task.OBSTACLE_AVOID, Task.OBSTACLE_NONE)
+DEFAULT_DURATION = 3.0
 
 HELP = '''작업: <action>[:duration] [stop|avoid|none] x,y[,yaw_deg] [x,y[,yaw_deg] ...]   (map frame)
   action: go | inspect | scan | look_around. 점마다 멈춰서 도착을 알리고 다음 점으로, 작업은 마지막 점에서
@@ -56,6 +63,56 @@ interrupted = False
 def on_sigint(*_):
     global interrupted
     interrupted = True
+
+
+def parse_line(text):
+    """'inspect:5 avoid 0,-1 1.5,-1,90' -> ('inspect', 5.0, [(0, -1, None), (1.5, -1, 90)], 'avoid')
+
+    장애물 모드(stop | avoid | none)는 action 뒤 어디에 적어도 된다. 없으면 빈 값 (= stop).
+    """
+    tokens = text.split()
+    if len(tokens) < 2:
+        raise ValueError('need an action and at least one point')
+    action, _, duration = tokens[0].partition(':')
+    if action not in ACTIONS:
+        raise ValueError(f"unknown action '{action}' (one of {', '.join(ACTIONS)})")
+    try:
+        duration = float(duration) if duration else DEFAULT_DURATION
+    except ValueError:
+        raise ValueError(f"duration '{duration}' is not a number (e.g. inspect:5)") from None
+    points = []
+    obstacle = ''
+    for token in tokens[1:]:
+        if token in OBSTACLE_MODES:
+            obstacle = token
+            continue
+        try:
+            values = [float(v) for v in token.split(',')]
+        except ValueError:
+            values = []
+        if len(values) not in (2, 3):
+            raise ValueError(f"'{token}' is not x,y or x,y,yaw_deg "
+                             f"(or an obstacle mode: {', '.join(OBSTACLE_MODES)})")
+        points.append((values[0], values[1], values[2] if len(values) == 3 else None))
+    if not points:
+        raise ValueError('need at least one point')
+    return action, duration, points, obstacle
+
+
+def fill_yaws(start_xy, points):
+    """yaw 가 None 인 점을 진행 방향으로 채운다 [rad]."""
+    xy = [start_xy] + [(x, y) for x, y, _ in points]
+    filled = []
+    for i, (x, y, yaw_deg) in enumerate(points):
+        if yaw_deg is not None:
+            yaw = math.radians(yaw_deg)
+        elif i + 1 < len(points):                       # 중간 점: 다음 점 쪽
+            yaw = math.atan2(points[i + 1][1] - y, points[i + 1][0] - x)
+        else:                                           # 마지막 점: 직전 점에서 온 방향
+            px, py = xy[i]
+            yaw = math.atan2(y - py, x - px) if (x, y) != (px, py) else 0.0
+        filled.append((x, y, yaw))
+    return filled
 
 
 class TaskClient(Node):

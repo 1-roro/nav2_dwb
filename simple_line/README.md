@@ -72,7 +72,7 @@ RViz 확인용 토픽: `/simple_line/local_plan` (잘라 낸 경로), `/simple_l
 여러 goal 을 도는 방법:
 
 - [MULTI_GOAL.md](MULTI_GOAL.md): 명령 하나로 경유하기 (`NavigateThroughPoses`, `waypoint_follower`), 꺾은선을 위한 컨트롤러 동작
-- [`../bt_navigator/`](../bt_navigator/README.md): 작업(들를 점 + 정지 작업, 주행 중 작업)을 토픽 / 액션으로 받아 실행하는 BT. 경유 구간과 작업 지점을 XML 에 적어 둔 미션은 [`bt_old_mission/`](../bt_navigator/bt_old_mission/README.md).
+- [`../bt_navigator/`](../bt_navigator/README.md): 작업(들를 점 + 정지 작업, 주행 중 작업)을 액션으로 받아 실행하는 BT.
   이 폴더의 planner / controller / launch 위에서 상위 작업 BT 가 Nav2 명령을 조합한다
 
 ## 빌드
@@ -120,7 +120,7 @@ ros2 launch simple_line_bringup simple_line.launch.py
 
 같은 파일에 장애물을 피해 가는 planner `Avoid`(NavFn)와 controller `FollowPathAvoid`(Regulated Pure Pursuit)도
 등록되어 있다. 기본 BT 는 이 둘을 부르지 않는다. bt_navigator 미션에서 작업을 `avoid` 로 보낼 때만
-`navigate_avoid.xml` 트리를 통해 쓰인다 ([bt_navigator 7-3](../bt_navigator/README.md#7-3-돌아가게-하려면-avoid)).
+`navigate_avoid.xml` 트리를 통해 쓰인다 ([bt_navigator 6-3](../bt_navigator/README.md#6-3-돌아가게-하려면-avoid)).
 
 goal 에 도착했다고 보는 범위(goal checker)도 줄였다. Humble 기본값(xy 0.25m / yaw 0.25rad)이면 로봇이 goal
 20cm 남짓 앞에서 멈춘다.
