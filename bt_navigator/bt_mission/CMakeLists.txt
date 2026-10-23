@@ -50,7 +50,7 @@ add_library(${PROJECT_NAME}_bt SHARED src/bt_common.cpp src/task_server.cpp)
 target_link_libraries(${PROJECT_NAME}_bt ${PROJECT_NAME}_nodes)
 ament_target_dependencies(${PROJECT_NAME}_bt ${dependencies})
 
-# BT XML 하나를 끝날 때까지 실행하는 노드 (task_loop.xml, 또는 bt_fixed_mission 의 mission.xml)
+# BT XML 하나를 끝날 때까지 실행하는 노드 (task_loop.xml, 또는 bt_old_mission 의 mission.xml)
 add_executable(mission_bt_runner src/mission_bt_runner.cpp)
 target_link_libraries(mission_bt_runner ${PROJECT_NAME}_bt)
 ament_target_dependencies(mission_bt_runner ${dependencies})

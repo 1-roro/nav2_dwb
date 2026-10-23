@@ -5,7 +5,7 @@
 //
 // bt_xml 에 '/' 가 없으면 이 패키지의 share/.../behavior_trees/ 에서 찾는다.
 // 다른 패키지의 BT 노드를 쓰는 XML 이면 그 노드의 플러그인 라이브러리를 extra_plugin_libs 로 준다
-// (예: bt_fixed_mission 의 mission.launch.py 가 bt_fixed_mission_nodes 를 준다).
+// (예: bt_old_mission 의 mission.launch.py 가 bt_old_mission_nodes 를 준다).
 //
 // 순서 (1, 2 의 내용은 bt_common.cpp):
 //   1. factory 에 BT 노드 종류를 등록한다 (Nav2 가 제공하는 노드 + 이 패키지의 노드 + extra_plugin_libs)

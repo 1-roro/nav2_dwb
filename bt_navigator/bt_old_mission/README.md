@@ -1,6 +1,6 @@
-# bt_fixed_mission: 좌표를 XML 에 적어 둔 미션
+# bt_old_mission: 좌표를 XML 에 적어 둔 미션 (이전 예제)
 
-[bt_navigator/README.md](../README.md) 의 작업 BT 는 갈 곳과 할 일을 실행 중에 토픽이나 액션으로 받는다. 이 패키지는 그보다 앞 단계의 예제다. 갈 곳과 할 일을 **BT XML 안에 미리 적어 두고**, 실행하면 적힌 대로 한 번 돈다. 같은 미션을 Python(BasicNavigator)으로 만든 버전도 있다.
+[bt_navigator/README.md](../README.md) 의 작업 BT 는 갈 곳과 할 일을 실행 중에 토픽이나 액션으로 받는다. 이 패키지는 그보다 앞 단계의 예제로, 지금은 쓰지 않고 참고용으로 남겨 두었다. 장애물 처리(stop & go)도 들어 있지 않다. 갈 곳과 할 일을 **BT XML 안에 미리 적어 두고**, 실행하면 적힌 대로 한 번 돈다. 같은 미션을 Python(BasicNavigator)으로 만든 버전도 있다.
 
 미션에는 네 가지가 섞여 있다.
 
@@ -41,7 +41,7 @@ cd ~/nav2_ws
 rosdep install --from-paths src --ignore-src -y      # nav2_simple_commander 등
 colcon build --symlink-install --packages-select \
   simple_line_planner simple_line_controller simple_line_bringup \
-  bt_mission_msgs bt_mission bt_fixed_mission
+  bt_mission_msgs bt_mission bt_old_mission
 source install/setup.bash
 ```
 
@@ -50,8 +50,8 @@ source install/setup.bash
 ros2 launch simple_line_bringup simple_line.launch.py
 
 # 터미널 2: 둘 중 하나
-ros2 launch bt_fixed_mission mission.launch.py     # BT 버전
-ros2 run bt_fixed_mission mission_node.py          # Python 버전
+ros2 launch bt_old_mission mission.launch.py     # BT 버전
+ros2 run bt_old_mission mission_node.py          # Python 버전
 ```
 
 예전에는 `mission.xml` 과 `mission_node.py` 가 `bt_mission` 패키지에 있었다. `ros2 run bt_mission mission_bt_runner` 를 그냥 실행하면 이제 [`task_loop.xml`](../README.md#4-좌표를-토픽으로-받기-task_loopxml) 이 뜬다.
@@ -64,8 +64,8 @@ ros2 run bt_fixed_mission mission_node.py          # Python 버전
 
 | | 실행 | 미션을 정하는 곳 |
 |---|---|---|
-| **BT 버전** | `ros2 launch bt_fixed_mission mission.launch.py` | `behavior_trees/mission.xml` |
-| **Python 버전** | `ros2 run bt_fixed_mission mission_node.py` | `scripts/mission_node.py` 맨 위의 `ROUTE_A`, `ROUTE_B`, `HOME` |
+| **BT 버전** | `ros2 launch bt_old_mission mission.launch.py` | `behavior_trees/mission.xml` |
+| **Python 버전** | `ros2 run bt_old_mission mission_node.py` | `scripts/mission_node.py` 맨 위의 `ROUTE_A`, `ROUTE_B`, `HOME` |
 
 두 버전이 부르는 Nav2 기능은 같다.
 
@@ -171,7 +171,7 @@ ros2 run bt_fixed_mission mission_node.py          # Python 버전
 
 ## 3. MakePose, MakePoses 와 실행 (C++)
 
-### 3-1. 노드 (`include/bt_fixed_mission/pose_nodes.hpp`, `src/pose_nodes.cpp`)
+### 3-1. 노드 (`include/bt_old_mission/pose_nodes.hpp`, `src/pose_nodes.cpp`)
 
 | 노드 | 입력 포트 | 출력 포트 `output` | 쓰는 곳 |
 |---|---|---|---|
@@ -184,13 +184,13 @@ ros2 run bt_fixed_mission mission_node.py          # Python 버전
 
 ### 3-2. 플러그인으로 불러오기
 
-`mission_bt_runner` 는 `bt_mission` 의 노드만 코드에서 등록한다. `MakePose(s)` 는 이 패키지에 있으므로, 플러그인 라이브러리 `bt_fixed_mission_nodes` 로 빌드하고 실행할 때 이름으로 불러온다. bt_navigator 가 `plugin_lib_names` 로 Nav2 BT 노드를 불러오는 것과 같은 방식이다.
+`mission_bt_runner` 는 `bt_mission` 의 노드만 코드에서 등록한다. `MakePose(s)` 는 이 패키지에 있으므로, 플러그인 라이브러리 `bt_old_mission_nodes` 로 빌드하고 실행할 때 이름으로 불러온다. bt_navigator 가 `plugin_lib_names` 로 Nav2 BT 노드를 불러오는 것과 같은 방식이다.
 
 ```cpp
 // src/pose_nodes.cpp 끝. 라이브러리를 불러오면 이 함수가 불려 노드가 등록된다
 BT_REGISTER_NODES(factory)
 {
-  bt_fixed_mission::registerPoseNodes(factory);   // MakePose, MakePoses
+  bt_old_mission::registerPoseNodes(factory);   // MakePose, MakePoses
 }
 ```
 
@@ -198,7 +198,7 @@ BT_REGISTER_NODES(factory)
 # launch/mission.launch.py (발췌)
 Node(package='bt_mission', executable='mission_bt_runner', name='mission_bt',
      parameters=[{'bt_xml': os.path.join(share, 'behavior_trees', 'mission.xml'),
-                  'extra_plugin_libs': ['bt_fixed_mission_nodes']}])
+                  'extra_plugin_libs': ['bt_old_mission_nodes']}])
 ```
 
 `mission_bt_runner` 는 `extra_plugin_libs` 의 라이브러리를 Nav2 BT 노드와 같이 `factory.registerFromPlugin()` 으로 불러온다 ([본문 3-2](../README.md#3-2-실행-노드-srcmission_bt_runnercpp)). CMake 에서는 그 라이브러리에 `BT_PLUGIN_EXPORT` 를 정의해야 `BT_REGISTER_NODES` 가 플러그인 진입점이 된다.
@@ -207,8 +207,8 @@ launch 없이 실행하려면 두 파라미터를 직접 준다.
 
 ```bash
 ros2 run bt_mission mission_bt_runner --ros-args \
-  -p bt_xml:=$(ros2 pkg prefix bt_fixed_mission)/share/bt_fixed_mission/behavior_trees/mission.xml \
-  -p "extra_plugin_libs:=[bt_fixed_mission_nodes]"
+  -p bt_xml:=$(ros2 pkg prefix bt_old_mission)/share/bt_old_mission/behavior_trees/mission.xml \
+  -p "extra_plugin_libs:=[bt_old_mission_nodes]"
 ```
 
 `extra_plugin_libs` 를 빠뜨리면 트리를 만들 때 바로 끝난다.
@@ -300,8 +300,8 @@ def wait_until_done(nav, while_running=None):
 
 ```bash
 # 둘 중 하나
-ros2 launch bt_fixed_mission mission.launch.py
-ros2 run bt_fixed_mission mission_node.py
+ros2 launch bt_old_mission mission.launch.py
+ros2 run bt_old_mission mission_node.py
 ```
 
 BT 버전 출력 (가짜 로봇으로 실행한 실제 로그. 타임스탬프는 뺐다):
@@ -350,7 +350,7 @@ mission SUCCESS in 72.0 s
   ```bash
   sudo apt install graphviz fonts-nanum
   cd ~/nav2_ws/src/nav2_dwb/bt_navigator
-  python3 bt_mission/tools/draw_bt.py bt_fixed_mission/behavior_trees/mission.xml bt_fixed_mission/doc/mission_bt.png
+  python3 bt_mission/tools/draw_bt.py bt_old_mission/behavior_trees/mission.xml bt_old_mission/doc/mission_bt.png
   ```
 
 - **중단**: Ctrl-C. 두 버전 모두 실행 중인 Nav2 goal 을 취소하고 끝난다.
@@ -378,7 +378,7 @@ mission SUCCESS in 72.0 s
 
 본문 [7장](../README.md#7-확인한-것)과 같은 환경이다. 실제 Nav2 Humble 서버를 쓰고, Gazebo 대신 `cmd_vel` 을 적분하는 가짜 로봇을 썼다. 출발점은 (-2.0, -1.0, 0°) 이다.
 
-**단위 테스트** (`test/test_fixed_mission.cpp`, gtest 6개 통과): 실제 `mission.xml` 로 테스트한다. Nav2 노드 3개만 3 tick 뒤 정해 둔 결과를 내는 가짜로 바꿨다.
+**단위 테스트** (`test/test_old_mission.cpp`, gtest 6개 통과): 실제 `mission.xml` 로 테스트한다. Nav2 노드 3개만 3 tick 뒤 정해 둔 결과를 내는 가짜로 바꿨다.
 
 | 테스트 | 확인 내용 |
 |---|---|
@@ -400,7 +400,7 @@ mission SUCCESS in 72.0 s
 | 정지 위치 오차 (A / B / 출발점) | 0.03 / 0.03 / 0.02 m | 0.03 / 0.04 / 0.04 m |
 | Ctrl-C | goal 취소, 로봇 정지 | goal 취소, 로봇 정지 |
 
-패키지를 나눈 뒤에도 같은 스택에서 다시 돌렸다. `ros2 launch bt_fixed_mission mission.launch.py` 는 SUCCESS, 71.2 s, 스캔 10개. 3-2 의 `ros2 run` 명령은 71.3 s, Python 버전은 71.0 s 였다.
+패키지를 나눈 뒤에도 같은 스택에서 다시 돌렸다. `ros2 launch bt_old_mission mission.launch.py` 는 SUCCESS, 71.2 s, 스캔 10개. 3-2 의 `ros2 run` 명령은 71.3 s, Python 버전은 71.0 s 였다.
 
 컨트롤러의 회전 정렬과 goal 허용오차를 바꾸기 전에는 미션 시간이 60~61.5 s, 정지 위치 오차가 0.22~0.24 m 였다.
 모서리에서 다 돈 뒤에 출발하고, 작업 지점에 더 가까이 가서 서는 만큼 시간이 늘었다.
@@ -450,13 +450,13 @@ BT 버전 실행 중 노드별 RUNNING 구간과 로봇 속도:
 ## 10. 파일
 
 ```
-bt_fixed_mission/
+bt_old_mission/
 ├── behavior_trees/mission.xml               좌표가 XML 에 있는 미션 (1, 2장)
-├── include/bt_fixed_mission/pose_nodes.hpp  MakePose, MakePoses 선언, parsePoses (3장)
+├── include/bt_old_mission/pose_nodes.hpp    MakePose, MakePoses 선언, parsePoses (3장)
 ├── src/pose_nodes.cpp                       위 구현 + 플러그인 등록 (BT_REGISTER_NODES)
 ├── launch/mission.launch.py                 bt_mission 의 mission_bt_runner 로 mission.xml 실행
 ├── scripts/mission_node.py                  같은 미션의 Python 버전 (BasicNavigator, 4장)
-├── test/test_fixed_mission.cpp              gtest: 위치 문자열 해석 + mission.xml 흐름 (가짜 Nav2 노드)
+├── test/test_old_mission.cpp                gtest: 위치 문자열 해석 + mission.xml 흐름 (가짜 Nav2 노드)
 └── doc/
     ├── mission_bt.png                       BT 그림 (bt_mission/tools/draw_bt.py 로 생성)
     └── timeline.png                         실행 타임라인 (7장의 실행 기록으로 그림)

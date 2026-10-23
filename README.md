@@ -6,4 +6,4 @@ Nav2 개념을 단계별로 쌓아 가며 실습하는 저장소.
 - [`straight_line/`](straight_line/README.md): 직선 경로 planner + controller Nav2 플러그인 실습 (ROS 2 Humble, C++)
 - [`simple_line/`](simple_line/README.md): 장애물 없이 직선 경로만 다루는 planner + controller 최종 구현 (ROS 2 Humble, C++)
   - [`simple_line/MULTI_GOAL.md`](simple_line/MULTI_GOAL.md): 명령 하나로 여러 goal 경유하기 (`NavigateThroughPoses`, `waypoint_follower`)
-- [`bt_navigator/`](bt_navigator/README.md): Nav2 명령을 상위 작업 BT 로 조합한다. 작업(들를 점 + 할 일)을 토픽 / 액션으로 받아 점마다 멈추며 실행한다. 좌표를 XML 에 적어 둔 미션 예제는 [`bt_navigator/bt_fixed_mission/`](bt_navigator/bt_fixed_mission/README.md). 아래층은 `simple_line` 을 쓴다
+- [`bt_navigator/`](bt_navigator/README.md): Nav2 명령을 상위 작업 BT 로 조합한다. 작업(들를 점 + 할 일)을 토픽 / 액션으로 받아 점마다 멈추며 실행한다. 좌표를 XML 에 적어 둔 미션 예제는 [`bt_navigator/bt_old_mission/`](bt_navigator/bt_old_mission/README.md). 아래층은 `simple_line` 을 쓴다

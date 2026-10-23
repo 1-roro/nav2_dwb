@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>bt_fixed_mission</name>
+  <name>bt_old_mission</name>
   <version>0.1.0</version>
   <description>Example mission whose points are written in the BT XML (mission.xml), its MakePose/MakePoses BT nodes, and the same mission in Python with BasicNavigator.</description>
   <maintainer email="user@example.com">nav2_dwb</maintainer>

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(bt_fixed_mission)
+project(bt_old_mission)
 
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 17)
@@ -43,10 +43,10 @@ if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
   find_package(bt_mission REQUIRED)
   find_package(tf2_ros REQUIRED)
-  ament_add_gtest(test_fixed_mission test/test_fixed_mission.cpp TIMEOUT 120)
-  target_link_libraries(test_fixed_mission ${PROJECT_NAME}_nodes)
-  ament_target_dependencies(test_fixed_mission ${dependencies} bt_mission tf2_ros)
-  target_compile_definitions(test_fixed_mission PRIVATE
+  ament_add_gtest(test_old_mission test/test_old_mission.cpp TIMEOUT 120)
+  target_link_libraries(test_old_mission ${PROJECT_NAME}_nodes)
+  ament_target_dependencies(test_old_mission ${dependencies} bt_mission tf2_ros)
+  target_compile_definitions(test_old_mission PRIVATE
     MISSION_XML="${CMAKE_CURRENT_SOURCE_DIR}/behavior_trees/mission.xml")
 endif()
 

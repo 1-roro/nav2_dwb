@@ -1,5 +1,5 @@
-#ifndef BT_FIXED_MISSION__POSE_NODES_HPP_
-#define BT_FIXED_MISSION__POSE_NODES_HPP_
+#ifndef BT_OLD_MISSION__POSE_NODES_HPP_
+#define BT_OLD_MISSION__POSE_NODES_HPP_
 
 #include <string>
 #include <vector>
@@ -12,8 +12,8 @@
 #include "rclcpp/rclcpp.hpp"
 
 // mission.xml 이 좌표를 XML 에 적어 두려고 쓰는 BT 노드 (MakePose, MakePoses).
-// 라이브러리 bt_fixed_mission_nodes 를 플러그인으로 불러오면 등록된다 (BT_REGISTER_NODES).
-namespace bt_fixed_mission
+// 라이브러리 bt_old_mission_nodes 를 플러그인으로 불러오면 등록된다 (BT_REGISTER_NODES).
+namespace bt_old_mission
 {
 
 // MakePose, MakePoses 를 factory 에 등록한다
@@ -83,6 +83,6 @@ private:
   rclcpp::Node::SharedPtr node_;
 };
 
-}  // namespace bt_fixed_mission
+}  // namespace bt_old_mission
 
-#endif  // BT_FIXED_MISSION__POSE_NODES_HPP_
+#endif  // BT_OLD_MISSION__POSE_NODES_HPP_

@@ -1,11 +1,11 @@
-#include "bt_fixed_mission/pose_nodes.hpp"
+#include "bt_old_mission/pose_nodes.hpp"
 
 #include <cmath>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
-namespace bt_fixed_mission
+namespace bt_old_mission
 {
 
 namespace
@@ -167,10 +167,10 @@ void registerPoseNodes(BT::BehaviorTreeFactory & factory)
   factory.registerNodeType<MakePoses>("MakePoses");
 }
 
-}  // namespace bt_fixed_mission
+}  // namespace bt_old_mission
 
 // mission_bt_runner 가 extra_plugin_libs 로 이 라이브러리를 불러올 때 등록된다
 BT_REGISTER_NODES(factory)
 {
-  bt_fixed_mission::registerPoseNodes(factory);
+  bt_old_mission::registerPoseNodes(factory);
 }

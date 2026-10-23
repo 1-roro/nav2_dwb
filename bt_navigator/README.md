@@ -12,7 +12,7 @@
 bt_navigator/
 ├── bt_mission/        미션 BT (XML), 직접 만든 BT 노드, BT 실행 노드, 작업 액션 서버, 입력 노드
 ├── bt_mission_msgs/   작업 메시지와 액션 (Task.msg, ExecuteTask.action)
-└── bt_fixed_mission/  좌표를 XML 에 미리 적어 둔 미션 예제. 문서는 bt_fixed_mission/README.md
+└── bt_old_mission/    좌표를 XML 에 미리 적어 둔 미션 예제. 문서는 bt_old_mission/README.md
 ```
 
 | 하고 싶은 것 | 실행 | 장 |
@@ -20,7 +20,7 @@ bt_navigator/
 | 점과 작업을 실행 중에 토픽으로 받기 | `mission_bt_runner` (`task_loop.xml`)<br>+ `task_sender.py` | 4 |
 | 위와 같되, 작업을 액션으로 맡기기 (결과, 진행 상황, 취소, 선점) | `task_server` (`task.xml`)<br>+ `task_client.py` | 5 |
 | 위와 같되, 서버를 Nav2 의 `BtActionServer` 와 lifecycle 노드로 | `task_server_lifecycle.launch.py`<br>+ `task_client.py` | 6 |
-| (참고) 경유, 정지 작업, 주행 중 작업, 실패 처리를 XML 에 미리 적어 둔 미션. Python 버전과 비교 | `bt_fixed_mission` | [따로 정리](bt_fixed_mission/README.md) |
+| (참고) 경유, 정지 작업, 주행 중 작업, 실패 처리를 XML 에 미리 적어 둔 미션. Python 버전과 비교 | `bt_old_mission` | [따로 정리](bt_old_mission/README.md) |
 
 - **명령 내리는 법**(입력 형식과 예시)은 [5-5](#5-5-명령-내리기-입력-형식과-예시) 에 모아 두었다.
 - 아래층(planner, controller, 시뮬레이션 launch)은 [`simple_line/`](../simple_line/README.md) 것을 그대로 쓴다.
@@ -78,7 +78,7 @@ ros2 run bt_mission task_server
 ros2 run bt_mission task_client.py go 0,-1 0,1 -2,-1,0
 ```
 
-입력 형식과 예시는 [5-5](#5-5-명령-내리기-입력-형식과-예시) 에 있다. 좌표를 XML 에 적어 둔 미션 예제(`bt_fixed_mission`)도 빌드하려면 위 `colcon build` 목록에 `bt_fixed_mission` 을 더한다.
+입력 형식과 예시는 [5-5](#5-5-명령-내리기-입력-형식과-예시) 에 있다. 좌표를 XML 에 적어 둔 미션 예제(`bt_old_mission`)도 빌드하려면 위 `colcon build` 목록에 `bt_old_mission` 을 더한다.
 
 ---
 
@@ -310,7 +310,7 @@ while (status == BT::NodeStatus::RUNNING) {
 | 파라미터 | 기본값 | 설명 |
 |---|---|---|
 | `bt_xml` | `task_loop.xml` | 실행할 XML. 파일 이름만 주면 `share/bt_mission/behavior_trees/` 에서 찾는다 |
-| `extra_plugin_libs` | `[]` | 더 불러올 BT 노드 플러그인 라이브러리. 다른 패키지의 노드를 쓰는 XML 일 때 준다. 예: `bt_fixed_mission` 의 `mission.xml` 은 `[bt_fixed_mission_nodes]` ([bt_fixed_mission/README.md](bt_fixed_mission/README.md#3-2-플러그인으로-불러오기)) |
+| `extra_plugin_libs` | `[]` | 더 불러올 BT 노드 플러그인 라이브러리. 다른 패키지의 노드를 쓰는 XML 일 때 준다. 예: `bt_old_mission` 의 `mission.xml` 은 `[bt_old_mission_nodes]` ([bt_old_mission/README.md](bt_old_mission/README.md#3-2-플러그인으로-불러오기)) |
 | `tick_hz` | 100.0 | tick 주기 [Hz] |
 | `log_transitions` | true | 노드 상태 변화 출력 |
 
@@ -324,20 +324,20 @@ while (status == BT::NodeStatus::RUNNING) {
 | `Wait` | `nav2_wait_action_bt_node` | `wait` | `wait_duration` |
 
 - **tick 은 100Hz 정도로.**
-  - tick 을 10Hz 로 돌렸을 때, 로봇이 멈춘 뒤 BT 가 SUCCESS 를 받기까지 매번 0.9~1.1초가 걸렸다. 100Hz 에서는 이 지연이 사라졌다. `bt_fixed_mission` 의 미션 시간이 63.7~65.5초에서 60.1~61.5초가 됐다.
+  - tick 을 10Hz 로 돌렸을 때, 로봇이 멈춘 뒤 BT 가 SUCCESS 를 받기까지 매번 0.9~1.1초가 걸렸다. 100Hz 에서는 이 지연이 사라졌다. `bt_old_mission` 의 미션 시간이 63.7~65.5초에서 60.1~61.5초가 됐다.
   - 원인은 이렇게 보인다. Nav2 BT 노드는 tick 마다 액션 메시지를 조금씩(대개 하나)만 처리한다. bt_navigator 가 feedback 을 빠르게 보내서, 결과 메시지가 그 뒤에 밀렸다.
   - bt_navigator 자신도 기본 10ms(100Hz) 로 tick 한다.
 - **점 목록 포트는 타입을 적지 않았다** (`WaitForTask` 의 `waypoints`, `ForEachWaypoint` 의 `poses`).
   - Nav2 Humble 1.1.18 이하의 `NavigateThroughPoses` BT 노드는 `goals` 포트 타입을 `PoseStamped` 로 잘못 선언하고 있다 (1.1.19 부터 `std::vector<PoseStamped>`).
   - 점 목록을 `std::vector<PoseStamped>` 로 선언하면, 같은 blackboard 변수를 `NavigateThroughPoses` 에도 넘기는 트리를 만들 때 타입이 다르다는 오류가 난다. 멈추지 않고 지나가는 가지를 더하는 경우다.
   - 같은 이유로 서버는 트리를 만들기 전에 `waypoints` 를 타입 없는 항목으로 만들어 둔다 (5-4 의 `prepareBlackboard()`).
-  - 이 문제로 생기는 노드 순서 제약은 [bt_fixed_mission/README.md](bt_fixed_mission/README.md#3-3-nav2-humble-의-포트-타입-문제) 에 있다.
+  - 이 문제로 생기는 노드 순서 제약은 [bt_old_mission/README.md](bt_old_mission/README.md#3-3-nav2-humble-의-포트-타입-문제) 에 있다.
 
 ---
 
 ## 4. 좌표를 토픽으로 받기 (`task_loop.xml`)
 
-실제 작업에서는 사람이나 관제 서버가 실행 중에 "어디로 가서 무엇을 하라" 를 보낸다. `task_loop.xml` 은 그것을 토픽으로 받는다. 좌표를 XML 에 미리 적어 두는 방식은 [bt_fixed_mission](bt_fixed_mission/README.md) 에 따로 있다.
+실제 작업에서는 사람이나 관제 서버가 실행 중에 "어디로 가서 무엇을 하라" 를 보낸다. `task_loop.xml` 은 그것을 토픽으로 받는다. 좌표를 XML 에 미리 적어 두는 방식은 [bt_old_mission](bt_old_mission/README.md) 에 따로 있다.
 
 ```
 [입력 노드]  task_sender.py (터미널 입력)  /  관제 서버  /  ros2 topic pub
@@ -422,7 +422,7 @@ BT::NodeStatus ForEachWaypoint::tick()       // src/mission_nodes.cpp, 발췌
 - 도착을 알릴 때 TF 로 읽은 실제 로봇 위치와의 거리도 로그에 남긴다 (`[waypoint] t1 arrived 1/3 (0.00, -1.00), robot 0.035 m away`).
 - `reached` 출력에는 지금까지 도착한 점 수를 쓴다. 액션 서버(5장)는 이 값을 feedback 으로 보낸다.
 
-**`NavigateThroughPoses` 를 쓰지 않는 이유**: `NavigateThroughPoses` 는 점들을 이은 꺾은선 하나로 달린다. 앞의 점은 0.7m 안에 들어오면 지난 것으로 치고, 그 자리에서 다음 점으로 새 경로를 긋는다 ([MULTI_GOAL.md 4장](../simple_line/MULTI_GOAL.md#경유-goal-을-정확히-밟지는-않는다)). 실측으로 경유점을 0.23~0.58m 거리로 지나갔다. 그래서 점마다 도착해야 하는 작업 명령에는 맞지 않다. 멈추지 않고 지나가야 하는 점에는 `NavigateThroughPoses` 가 맞고, [bt_fixed_mission](bt_fixed_mission/README.md) 의 `mission.xml` 이 그렇게 쓴다.
+**`NavigateThroughPoses` 를 쓰지 않는 이유**: `NavigateThroughPoses` 는 점들을 이은 꺾은선 하나로 달린다. 앞의 점은 0.7m 안에 들어오면 지난 것으로 치고, 그 자리에서 다음 점으로 새 경로를 긋는다 ([MULTI_GOAL.md 4장](../simple_line/MULTI_GOAL.md#경유-goal-을-정확히-밟지는-않는다)). 실측으로 경유점을 0.23~0.58m 거리로 지나갔다. 그래서 점마다 도착해야 하는 작업 명령에는 맞지 않다. 멈추지 않고 지나가야 하는 점에는 `NavigateThroughPoses` 가 맞고, [bt_old_mission](bt_old_mission/README.md) 의 `mission.xml` 이 그렇게 쓴다.
 
 ### 4-3. WaitForTask 노드 (`src/mission_nodes.cpp`)
 
@@ -939,7 +939,7 @@ t3 는 t2 의 마지막 점과 같은 곳이라 바로 도착하고 회전한다
 - **실행은 한 번에 하나다.** 서버는 선점만 하고, 대기열은 보내는 쪽이 관리한다.
 - **feedback 의 `running` 은 BT 노드 이름이다.** 사람이 읽을 단계 이름이 필요하면 노드 이름을 그렇게 짓거나, feedback 에 필드를 더한다.
 - **Nav2 템플릿으로도 만들 수 있다.** Nav2 에는 이 구조를 위한 템플릿 `nav2_behavior_tree::BtActionServer` 가 있다 (bt_navigator 가 이것으로 만들어져 있다). 같은 일을 이 템플릿으로 한 버전과 비교는 6장에 있다.
-- **점마다 서는 만큼 느려진다.** 7장의 작업 4개가 약 61초(경유점을 지나감)에서 78초(점마다 섬)가 됐다. 멈출 필요가 없는 점은 `NavigateThroughPoses` 로 지나가게 하는 가지를 따로 두면 된다 ([bt_fixed_mission](bt_fixed_mission/README.md) 의 `mission.xml` 이 그렇게 지나간다).
+- **점마다 서는 만큼 느려진다.** 7장의 작업 4개가 약 61초(경유점을 지나감)에서 78초(점마다 섬)가 됐다. 멈출 필요가 없는 점은 `NavigateThroughPoses` 로 지나가게 하는 가지를 따로 두면 된다 ([bt_old_mission](bt_old_mission/README.md) 의 `mission.xml` 이 그렇게 지나간다).
 
 ---
 
@@ -1175,13 +1175,13 @@ Gazebo 자체(월드, 스폰, AMCL)에서는 돌려 보지 못했다.
 
 | 상황 | 방법 |
 |---|---|
-| 경유점을 멈추지 않고 지나 최종 goal 에서만 서면 된다 | `NavigateThroughPoses` ([MULTI_GOAL.md](../simple_line/MULTI_GOAL.md) 의 `send_waypoints.py`, 또는 [bt_fixed_mission](bt_fixed_mission/README.md) 미션의 한 단계) |
+| 경유점을 멈추지 않고 지나 최종 goal 에서만 서면 된다 | `NavigateThroughPoses` ([MULTI_GOAL.md](../simple_line/MULTI_GOAL.md) 의 `send_waypoints.py`, 또는 [bt_old_mission](bt_old_mission/README.md) 미션의 한 단계) |
 | 지점마다 멈춰서 같은 작업을 하고, 순서가 고정이다 | `waypoint_follower` ([MULTI_GOAL.md 5장](../simple_line/MULTI_GOAL.md#5-멈춰-가며-경유하기-waypoint_follower)). 작업은 task executor 플러그인으로 |
-| 경유, 정지 작업, 주행 중 작업, 실패 처리가 섞이고, 순서가 정해져 있다 | 상위 작업 계층에 미션을 적어 둔다 ([bt_fixed_mission](bt_fixed_mission/README.md)) |
+| 경유, 정지 작업, 주행 중 작업, 실패 처리가 섞이고, 순서가 정해져 있다 | 상위 작업 계층에 미션을 적어 둔다 ([bt_old_mission](bt_old_mission/README.md)) |
 | 어디로 가서 무엇을 할지는 실행 중에 사람이나 서버가 정한다 | **`task_server` + ExecuteTask 액션 (5장)**. 점마다 멈춰서 도착을 알리고, 결과, 취소, 선점이 표준으로 있다. 토픽 버전(4장)은 가장 단순한 형태 |
 | 위와 같고, 서버를 Nav2 처럼 lifecycle_manager 로 관리한다 | `task_server_lifecycle` (6장). 비교와 고르는 기준은 6-4, 6-5 |
 
-상위 작업 계층을 BT 로 만들지 Python 으로 만들지는 [bt_fixed_mission/README.md](bt_fixed_mission/README.md#8-bt-로-할까-python-으로-할까) 에서 같은 미션으로 비교했다.
+상위 작업 계층을 BT 로 만들지 Python 으로 만들지는 [bt_old_mission/README.md](bt_old_mission/README.md#8-bt-로-할까-python-으로-할까) 에서 같은 미션으로 비교했다.
 
 ---
 
@@ -1234,6 +1234,6 @@ bt_navigator/
 │   └── doc/
 │       ├── task_loop.png, task.png          BT 그림 (draw_bt.py 로 생성)
 │       └── layers.dot / layers.png          계층 구조 그림
-└── bt_fixed_mission/                        좌표를 XML 에 적어 둔 미션 예제 (MakePose(s), mission.xml, Python 버전)
-                                             파일 목록은 bt_fixed_mission/README.md
+└── bt_old_mission/                          좌표를 XML 에 적어 둔 미션 예제 (MakePose(s), mission.xml, Python 버전)
+                                             파일 목록은 bt_old_mission/README.md
 ```

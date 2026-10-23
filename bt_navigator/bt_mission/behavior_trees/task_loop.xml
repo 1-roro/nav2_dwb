@@ -4,7 +4,7 @@
     task_sender.py ──(mission/task: bt_mission_msgs/Task)──▶ WaitForTask ─▶ 이동 + 작업
                    ◀─(mission/status: std_msgs/String)────── WaitForTask, Log
 
-  bt_fixed_mission 의 mission.xml 과 달리 좌표가 XML 에 없다. 위치와 할 일은 Task 메시지가 정하고,
+  bt_old_mission 의 mission.xml 과 달리 좌표가 XML 에 없다. 위치와 할 일은 Task 메시지가 정하고,
   BT 는 "작업을 받으면 action 에 따라 어떻게 움직이고 무엇을 할지" 만 정한다.
   점마다 ForEachWaypoint 가 NavigateToPose 를 한 번씩 보낸다. 로봇은 점마다 멈춰서 위치와 방향을 맞추고,
   도착을 알린 뒤("t1 arrived 1/3") 다음 점으로 간다.

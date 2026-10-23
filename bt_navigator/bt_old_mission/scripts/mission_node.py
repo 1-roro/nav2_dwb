@@ -2,7 +2,7 @@
 """
 behavior_trees/mission.xml 과 같은 미션을 BT 없이 Python 으로 차례로 실행한다.
 
-  ros2 run bt_fixed_mission mission_node.py
+  ros2 run bt_old_mission mission_node.py
 
 Nav2 와는 nav2_simple_commander 의 BasicNavigator 로 주고받는다
 (goThroughPoses = NavigateThroughPoses, goToPose = NavigateToPose, spin = Spin).

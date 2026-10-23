@@ -16,12 +16,12 @@
 #include "behaviortree_cpp_v3/action_node.h"
 #include "behaviortree_cpp_v3/bt_factory.h"
 #include "behaviortree_cpp_v3/loggers/abstract_logger.h"
-#include "bt_fixed_mission/pose_nodes.hpp"
+#include "bt_old_mission/pose_nodes.hpp"
 #include "bt_mission/mission_nodes.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "tf2_ros/buffer.h"
 
-using bt_fixed_mission::parsePoses;
+using bt_old_mission::parsePoses;
 
 namespace
 {
@@ -144,9 +144,9 @@ protected:
       factory.registerNodeType<FakeNav2Action>(id);
     }
     bt_mission::registerNodes(factory);               // DoWork, ScanWhileMoving, Log
-    bt_fixed_mission::registerPoseNodes(factory);     // MakePose, MakePoses
+    bt_old_mission::registerPoseNodes(factory);     // MakePose, MakePoses
 
-    auto node = std::make_shared<rclcpp::Node>("test_fixed_mission");
+    auto node = std::make_shared<rclcpp::Node>("test_old_mission");
     auto blackboard = BT::Blackboard::create();
     blackboard->set<rclcpp::Node::SharedPtr>("node", node);
     blackboard->set<std::shared_ptr<tf2_ros::Buffer>>(
