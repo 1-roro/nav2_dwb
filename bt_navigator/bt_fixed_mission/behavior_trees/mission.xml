@@ -3,6 +3,8 @@
 
   빈 방(simple_line_bringup) 기준. 로봇은 (-2.0, -1.0) 에서 +x 를 보고 출발한다.
 
+    ros2 launch bt_fixed_mission mission.launch.py     (bt_mission 의 mission_bt_runner 로 실행)
+
     출발 ──▶ (0,-1) 경유 ──▶ A(1.5,-1) 정지: 점검 3초
          ──▶ (1.5,1.5) 경유 ──▶ B(-1,1.5) 정지: 360° 회전 + 보고 2초   (A → B 주행 중 0.5m 마다 스캔)
          ──▶ 출발점 복귀
@@ -15,7 +17,9 @@
     Nav2 노드  NavigateThroughPoses 경유점을 멈추지 않고 지나 마지막 점에서 정지 (bt_navigator 에 요청)
               NavigateToPose       한 점까지 가서 정지 (bt_navigator 에 요청)
               Spin                 제자리 회전 (behavior_server 에 요청)
-    이 패키지  MakePose / MakePoses 문자열 "x,y[,yaw_deg]" → pose, blackboard 에 저장
+    bt_fixed_mission
+              MakePose / MakePoses 문자열 "x,y[,yaw_deg]" → pose, blackboard 에 저장
+    bt_mission
               DoWork               정지 상태 작업 (지금은 duration 초 대기)
               ScanWhileMoving      주행 중 작업 (interval m 마다 위치 기록, halt 될 때까지 RUNNING)
               Log                  로그 출력

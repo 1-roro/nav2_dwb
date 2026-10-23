@@ -50,7 +50,7 @@ add_library(${PROJECT_NAME}_bt SHARED src/bt_common.cpp src/task_server.cpp)
 target_link_libraries(${PROJECT_NAME}_bt ${PROJECT_NAME}_nodes)
 ament_target_dependencies(${PROJECT_NAME}_bt ${dependencies})
 
-# BT XML 하나를 끝날 때까지 실행하는 노드 (mission.xml, task_loop.xml)
+# BT XML 하나를 끝날 때까지 실행하는 노드 (task_loop.xml, 또는 bt_fixed_mission 의 mission.xml)
 add_executable(mission_bt_runner src/mission_bt_runner.cpp)
 target_link_libraries(mission_bt_runner ${PROJECT_NAME}_bt)
 ament_target_dependencies(mission_bt_runner ${dependencies})
@@ -82,7 +82,7 @@ install(
   RUNTIME DESTINATION bin
 )
 install(TARGETS mission_bt_runner task_server task_server_lifecycle DESTINATION lib/${PROJECT_NAME})
-install(PROGRAMS scripts/mission_node.py scripts/task_sender.py scripts/task_client.py
+install(PROGRAMS scripts/task_sender.py scripts/task_client.py
   DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY behavior_trees launch DESTINATION share/${PROJECT_NAME})
@@ -93,12 +93,6 @@ if(BUILD_TESTING)
   add_library(test_fake_nav2 SHARED test/test_fakes.cpp)
   target_compile_definitions(test_fake_nav2 PRIVATE BT_PLUGIN_EXPORT)
   ament_target_dependencies(test_fake_nav2 behaviortree_cpp_v3 geometry_msgs)
-
-  ament_add_gtest(test_mission test/test_mission.cpp TIMEOUT 120)
-  target_link_libraries(test_mission ${PROJECT_NAME}_nodes test_fake_nav2)
-  ament_target_dependencies(test_mission ${dependencies})
-  target_compile_definitions(test_mission PRIVATE
-    MISSION_XML="${CMAKE_CURRENT_SOURCE_DIR}/behavior_trees/mission.xml")
 
   ament_add_gtest(test_task_loop test/test_task_loop.cpp TIMEOUT 120)
   target_link_libraries(test_task_loop ${PROJECT_NAME}_nodes test_fake_nav2)

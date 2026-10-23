@@ -3,19 +3,107 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <deque>
+#include <map>
 #include <memory>
 #include <string>
 #include <thread>
+#include <vector>
 
+#include "behaviortree_cpp_v3/action_node.h"
 #include "behaviortree_cpp_v3/bt_factory.h"
-#include "rclcpp/rclcpp.hpp"
+#include "behaviortree_cpp_v3/loggers/abstract_logger.h"
+#include "bt_fixed_mission/pose_nodes.hpp"
 #include "bt_mission/mission_nodes.hpp"
-#include "test_fakes.hpp"
+#include "rclcpp/rclcpp.hpp"
 #include "tf2_ros/buffer.h"
 
-using bt_mission::parsePoses;
+using bt_fixed_mission::parsePoses;
+
+namespace
+{
+
+// 가짜 Nav2 노드: 3 tick 동안 RUNNING 후, g_outcomes 에 정해 둔 결과(기본 SUCCESS)를 돌려준다
+std::map<std::string, std::deque<bool>> g_outcomes;    // 노드 이름 → 차례로 쓸 결과
+// 노드 이름 → 받은 목표. goals(NavigateThroughPoses)는 받은 목록, goal(NavigateToPose)은 받은 차례대로 쌓는다
+std::map<std::string, std::vector<geometry_msgs::msg::PoseStamped>> g_goals;
+
+class FakeNav2Action : public BT::StatefulActionNode
+{
+public:
+  using BT::StatefulActionNode::StatefulActionNode;
+
+  static BT::PortsList providedPorts()
+  {
+    return {
+      BT::InputPort("goals"), BT::InputPort("goal"), BT::InputPort("spin_dist"),
+      BT::InputPort("time_allowance"), BT::InputPort("is_recovery"),
+    };
+  }
+
+  BT::NodeStatus onStart() override
+  {
+    std::vector<geometry_msgs::msg::PoseStamped> goals;
+    geometry_msgs::msg::PoseStamped goal;
+    if (getInput("goals", goals)) {
+      g_goals[name()] = goals;
+    } else if (getInput("goal", goal)) {
+      g_goals[name()].push_back(goal);
+    }
+    ticks_ = 3;
+    return BT::NodeStatus::RUNNING;
+  }
+
+  BT::NodeStatus onRunning() override
+  {
+    if (--ticks_ > 0) {
+      return BT::NodeStatus::RUNNING;
+    }
+    auto & queue = g_outcomes[name()];
+    bool ok = true;
+    if (!queue.empty()) {
+      ok = queue.front();
+      queue.pop_front();
+    }
+    return ok ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
+  }
+
+  void onHalted() override {}
+
+private:
+  int ticks_{0};
+};
+
+// 노드 상태 변화를 "이름:상태" 로 모은다
+class Recorder : public BT::StatusChangeLogger
+{
+public:
+  explicit Recorder(BT::TreeNode * root)
+  : BT::StatusChangeLogger(root) {}
+
+  void callback(BT::Duration, const BT::TreeNode & node, BT::NodeStatus prev,
+    BT::NodeStatus status) override
+  {
+    if (status != BT::NodeStatus::IDLE) {
+      events.push_back(node.name() + ":" + BT::toStr(status));
+    } else if (prev == BT::NodeStatus::RUNNING) {
+      events.push_back(node.name() + ":HALTED");
+    }
+  }
+  void flush() override {}
+
+  int count(const std::string & event) const
+  {
+    return static_cast<int>(std::count(events.begin(), events.end(), event));
+  }
+
+  std::vector<std::string> events;
+};
+
+}  // namespace
 
 TEST(ParsePoses, FillsMissingYawAlongTheRoute)
 {
@@ -52,10 +140,13 @@ protected:
   BT::NodeStatus run()
   {
     BT::BehaviorTreeFactory factory;
-    registerFakeNav2Nodes(factory);
-    bt_mission::registerNodes(factory);
+    for (const char * id : {"NavigateThroughPoses", "NavigateToPose", "Spin"}) {
+      factory.registerNodeType<FakeNav2Action>(id);
+    }
+    bt_mission::registerNodes(factory);               // DoWork, ScanWhileMoving, Log
+    bt_fixed_mission::registerPoseNodes(factory);     // MakePose, MakePoses
 
-    auto node = std::make_shared<rclcpp::Node>("test_mission");
+    auto node = std::make_shared<rclcpp::Node>("test_fixed_mission");
     auto blackboard = BT::Blackboard::create();
     blackboard->set<rclcpp::Node::SharedPtr>("node", node);
     blackboard->set<std::shared_ptr<tf2_ros::Buffer>>(

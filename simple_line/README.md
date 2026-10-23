@@ -72,7 +72,7 @@ RViz 확인용 토픽: `/simple_line/local_plan` (잘라 낸 경로), `/simple_l
 여러 goal 을 도는 방법:
 
 - [MULTI_GOAL.md](MULTI_GOAL.md): 명령 하나로 경유하기 (`NavigateThroughPoses`, `waypoint_follower`), 꺾은선을 위한 컨트롤러 동작
-- [`../bt_navigator/`](../bt_navigator/README.md): 경유 구간과 작업 지점(정지 작업, 주행 중 작업)을 섞은 미션.
+- [`../bt_navigator/`](../bt_navigator/README.md): 작업(들를 점 + 정지 작업, 주행 중 작업)을 토픽 / 액션으로 받아 실행하는 BT. 경유 구간과 작업 지점을 XML 에 적어 둔 미션은 [`bt_fixed_mission/`](../bt_navigator/bt_fixed_mission/README.md).
   이 폴더의 planner / controller / launch 위에서 상위 작업 BT 가 Nav2 명령을 조합한다
 
 ## 빌드

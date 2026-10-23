@@ -35,7 +35,7 @@ public:
     bool log_transitions, const std::string & action_name = "execute_task");
 
   // 트리를 만들기 전에 부른다. waypoints 를 타입 없는 blackboard 항목으로 만들어 둔다
-  // (Nav2 1.1.18 이하 NavigateThroughPoses 의 goals 포트 타입 문제, bt_navigator/README.md 5-3)
+  // (Nav2 1.1.18 이하 NavigateThroughPoses 의 goals 포트 타입 문제, bt_navigator/README.md 3-3)
   static void prepareBlackboard(const BT::Blackboard::Ptr & blackboard);
 
   // 한 주기: 들어온 요청(goal, cancel)을 처리하고, 작업이 있으면 트리를 한 번 tick 한다

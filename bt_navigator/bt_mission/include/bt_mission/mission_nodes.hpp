@@ -22,30 +22,11 @@
 namespace bt_mission
 {
 
-// mission.xml, task_loop.xml, task.xml 에서 쓰는 이 패키지의 BT 노드들을 factory 에 등록한다
+// task_loop.xml, task.xml 에서 쓰는 이 패키지의 BT 노드들을 factory 에 등록한다
 void registerNodes(BT::BehaviorTreeFactory & factory);
 
 // 작업 진행 상황을 알리는 토픽 (std_msgs/String, "<작업 id> <상태>")
 constexpr char kStatusTopic[] = "mission/status";
-
-// ---------------------------------------------------------------------------------------------
-// 위치 문자열 처리
-// ---------------------------------------------------------------------------------------------
-
-struct Pose2D
-{
-  double x{0.0};
-  double y{0.0};
-  double yaw{0.0};   // [rad]
-};
-
-// "x,y[,yaw_deg]; x,y[,yaw_deg]; ..." 를 읽는다.
-// yaw 를 생략한 점은 진행 방향으로 채운다: 중간 점은 다음 점 쪽, 마지막 점은 이전 점에서 온 방향.
-// 형식이 틀리거나, 점이 하나뿐인데 yaw 가 없으면 std::invalid_argument.
-std::vector<Pose2D> parsePoses(const std::string & text);
-
-geometry_msgs::msg::PoseStamped toPoseStamped(
-  const Pose2D & pose, const std::string & frame, const rclcpp::Time & stamp);
 
 // ---------------------------------------------------------------------------------------------
 // BT 노드
@@ -55,51 +36,6 @@ geometry_msgs::msg::PoseStamped toPoseStamped(
 //                      onStart() → (RUNNING 이면 다음 tick 마다) onRunning() → SUCCESS / FAILURE.
 //                      실행 중에 부모가 멈추라고 하면 onHalted().
 // ---------------------------------------------------------------------------------------------
-
-// pose="x,y,yaw_deg" → output (PoseStamped). NavigateToPose 의 goal 로 쓴다.
-class MakePose : public BT::SyncActionNode
-{
-public:
-  MakePose(const std::string & name, const BT::NodeConfiguration & config);
-
-  static BT::PortsList providedPorts()
-  {
-    return {
-      BT::InputPort<std::string>("pose", "x,y,yaw_deg"),
-      BT::InputPort<std::string>("frame", "map", "frame_id of the pose"),
-      BT::OutputPort<geometry_msgs::msg::PoseStamped>("output", "the pose"),
-    };
-  }
-
-  BT::NodeStatus tick() override;
-
-private:
-  rclcpp::Node::SharedPtr node_;
-};
-
-// poses="x,y[,yaw_deg]; ..." → output (std::vector<PoseStamped>). NavigateThroughPoses 의 goals 로 쓴다.
-class MakePoses : public BT::SyncActionNode
-{
-public:
-  MakePoses(const std::string & name, const BT::NodeConfiguration & config);
-
-  static BT::PortsList providedPorts()
-  {
-    return {
-      BT::InputPort<std::string>("poses", "x,y[,yaw_deg]; x,y[,yaw_deg]; ..."),
-      BT::InputPort<std::string>("frame", "map", "frame_id of the poses"),
-      // 타입을 적지 않은 포트. Nav2 Humble 1.1.18 이하의 NavigateThroughPoses BT 노드는 goals 포트
-      // 타입을 PoseStamped 로 잘못 선언하고 있어서, 여기서 std::vector<PoseStamped> 로 선언하면
-      // 트리를 만들 때 타입이 다르다는 오류가 난다 (1.1.19 이후 수정).
-      BT::OutputPort("output", "std::vector<geometry_msgs::msg::PoseStamped>"),
-    };
-  }
-
-  BT::NodeStatus tick() override;
-
-private:
-  rclcpp::Node::SharedPtr node_;
-};
 
 // 정지 상태에서 하는 작업 자리. 지금은 duration 초 동안 RUNNING 을 돌려주고 끝난다.
 // 실제로는 이 자리에서 서비스 / 액션을 불러 촬영, 집기, IO 등을 한다.
@@ -193,7 +129,9 @@ public:
   static BT::PortsList providedPorts()
   {
     return {
-      // MakePoses 와 같은 이유로 타입을 적지 않는다 (std::vector<geometry_msgs::msg::PoseStamped>)
+      // 타입을 적지 않는다 (std::vector<geometry_msgs::msg::PoseStamped>). Nav2 Humble 1.1.18 이하의
+      // NavigateThroughPoses 는 goals 포트를 PoseStamped 로 잘못 선언해서, 같은 blackboard 항목을
+      // NavigateThroughPoses 와 같이 쓰면 타입이 다르다는 오류가 난다 (README 3-3)
       BT::InputPort("poses", "points to visit in order"),
       BT::OutputPort<geometry_msgs::msg::PoseStamped>("pose", "the point the child goes to"),
       BT::OutputPort<int>("reached", "how many points have been reached"),
@@ -227,7 +165,7 @@ public:
   {
     return {
       BT::InputPort<std::string>("topic", "mission/task", "bt_mission_msgs/Task topic"),
-      // MakePoses 와 같은 이유로 타입을 적지 않는다 (std::vector<geometry_msgs::msg::PoseStamped>)
+      // ForEachWaypoint 의 poses 와 같은 이유로 타입을 적지 않는다
       BT::OutputPort("waypoints", "points to visit, in order"),
       BT::OutputPort<std::string>("task_id"),
       BT::OutputPort<std::string>("action"),

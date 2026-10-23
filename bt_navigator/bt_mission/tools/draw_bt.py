@@ -3,7 +3,7 @@
 BehaviorTree.CPP v3 XML 을 그림(png / svg)으로 그린다. graphviz 의 dot 이 필요하다.
 
   sudo apt install graphviz fonts-nanum
-  python3 draw_bt.py ../behavior_trees/mission.xml ../doc/mission_bt.png
+  python3 draw_bt.py ../behavior_trees/task.xml ../doc/task.png
 
 - 노드 색: 제어 노드(회색), 데코레이터(흰색 점선), Nav2 BT 노드(파랑), 그 외 액션(주황)
 - 액션 노드 앞의 번호는 실행 순서 (모두 성공했을 때)
