@@ -150,6 +150,7 @@ TEST_F(TaskServerTest, RunsATaskAndReportsFeedback)
   EXPECT_EQ(result.code, ResultCode::SUCCEEDED);
   EXPECT_TRUE(result.result->success);
   EXPECT_EQ(result.result->message, "done");
+  EXPECT_EQ(result.result->bt_status, "SUCCESS");      // 트리가 돌려준 상태
 
   EXPECT_EQ(recorder_->count("go_inspect:SUCCESS"), 2);  // 점마다 NavigateToPose 한 번
   EXPECT_EQ(recorder_->count("work:SUCCESS"), 1);
@@ -173,6 +174,7 @@ TEST_F(TaskServerTest, RunsATaskAndReportsFeedback)
   // 점 사이에도 실행 중인 노드가 비지 않는다 (도착한 tick 에 다음 점을 바로 시작)
   for (const auto & f : feedback_) {
     EXPECT_FALSE(f.running.empty());
+    EXPECT_EQ(f.bt_status, "RUNNING");
   }
 }
 
@@ -207,6 +209,7 @@ TEST_F(TaskServerTest, NewGoalPreemptsTheRunningOne)
   const auto result_a = waitResult(a);
   EXPECT_EQ(result_a.code, ResultCode::ABORTED);
   EXPECT_EQ(result_a.result->message, "preempted by b");
+  EXPECT_EQ(result_a.result->bt_status, "RUNNING");     // 끝나기 전에 멈췄다
   EXPECT_EQ(waitResult(b).code, ResultCode::SUCCEEDED);
   EXPECT_EQ(recorder_->count("go_only:HALTED"), 1);     // a 의 이동을 멈춤 (실제로는 Nav2 goal 취소)
   ASSERT_EQ(g_goals["go_only"].size(), 2u);             // a 의 점, b 의 점
@@ -225,6 +228,7 @@ TEST_F(TaskServerTest, CancelHaltsTheTask)
   const auto result = waitResult(handle);
   EXPECT_EQ(result.code, ResultCode::CANCELED);
   EXPECT_EQ(result.result->message, "canceled");
+  EXPECT_EQ(result.result->bt_status, "RUNNING");
   EXPECT_EQ(recorder_->count("go_scan:HALTED"), 1);
   EXPECT_EQ(recorder_->count("scanning:HALTED"), 1);
   EXPECT_FALSE(server_->busy());
@@ -239,6 +243,7 @@ TEST_F(TaskServerTest, FailedNavigationAbortsWithTheNodeName)
   EXPECT_EQ(result.code, ResultCode::ABORTED);
   EXPECT_FALSE(result.result->success);
   EXPECT_EQ(result.result->message, "go_look failed at waypoint 1/1");
+  EXPECT_EQ(result.result->bt_status, "FAILURE");
   EXPECT_EQ(recorder_->count("spin:RUNNING"), 0);       // 이동이 실패하면 회전은 하지 않는다
 }
 

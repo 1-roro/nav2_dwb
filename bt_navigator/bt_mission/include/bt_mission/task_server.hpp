@@ -74,6 +74,8 @@ private:
   bool last_blocked_{false};
   int total_{0};                         // 이 작업의 점 수
   int count_{0};
+  // 트리(루트)가 마지막으로 돌려준 상태. feedback 과 result 의 bt_status 로 보낸다
+  BT::NodeStatus bt_status_{BT::NodeStatus::IDLE};
 };
 
 }  // namespace bt_mission

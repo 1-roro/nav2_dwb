@@ -355,7 +355,7 @@ while (status == BT::NodeStatus::RUNNING) {
 [미션 BT]    mission_bt_runner  (bt_xml:=task_loop.xml)
                 WaitForTask ─▶ Switch(action) ─▶ 점마다 NavigateToPose (ForEachWaypoint)
                                                  + DoWork / ScanWhileMoving / Spin
-                │  mission/status  std_msgs/String   "t1 accepted: ...", "t1 arrived 1/3", "t1 done" ...
+                │  mission/status  std_msgs/String   "t1 accepted: ...", "t1 started (RUNNING)", "t1 arrived 1/3", "t1 done (SUCCESS)" ...
                 ▼
 [입력 노드]  진행 상황 출력
 ```
@@ -393,7 +393,9 @@ ROS 2 에서는 새 메시지 형식을 별도 패키지에 정의하는 것이 
    | `look_around` | 점을 차례로 들른 뒤 → `Spin` 한 바퀴 |
    | 그 외 (`go` 등) | 점을 차례로 들르기만 |
 
-4. **`Fallback run_task`**: 가지가 실패하면 `report_failed` 가 "failed" 를 보고하고 SUCCESS 를 낸다. 루프는 다음 작업을 기다린다.
+4. **`Fallback run_task`**: 가지가 실패하면 `report_failed` 가 "failed (FAILURE)" 를 보고하고 SUCCESS 를 낸다. 루프는 다음 작업을 기다린다.
+
+시작과 끝의 보고에는 그 작업을 실행하는 가지(`try_task`)의 BT 상태를 괄호로 붙인다: `t1 started (RUNNING)`, `t1 done (SUCCESS)`, `t1 failed (FAILURE)`.
 
 `Switch3` 앞의 `ObstacleMode` 와, 각 `NavigateToPose` 를 감싼 `StopAndGo` 는 장애물 처리다 (7장).
 
@@ -497,7 +499,7 @@ printf 'inspect 0,-1 1.5,-1,90\ngo -2,-1,0\n' | ros2 run bt_mission task_sender.
 
 - **한 줄 형식**은 5장의 `task_client.py` 와 같다. 형식과 예시는 [5-5](#5-5-명령-내리기-입력-형식과-예시) 에 모아 두었다.
 - **보내기 전에** BT 쪽 구독이 연결될 때까지 기다린다 (최대 10초). 토픽은 연결 전에 보낸 메시지를 버리기 때문이다.
-- **입력을 기다리는 동안에도** 상태 토픽을 받아 `<- t1 arrived 1/3`, `<- t1 blocked: obstacle 0.57 m ahead`, `<- t1 done` 처럼 출력한다. 스레드 없이 `select` 로 키보드 입력을 기다리면서 `rclpy.spin_once` 를 돌린다.
+- **입력을 기다리는 동안에도** 상태 토픽을 받아 `<- t1 arrived 1/3`, `<- t1 blocked: obstacle 0.57 m ahead`, `<- t1 done (SUCCESS)` 처럼 출력한다. 스레드 없이 `select` 로 키보드 입력을 기다리면서 `rclpy.spin_once` 를 돌린다.
 
 입력 노드 없이 직접 보낼 수도 있다. 다른 노드(관제 서버 브리지, GUI)도 같은 토픽에 Task 를 발행하면 된다. 필드 쓰는 법은 5-5 의 `ros2 action send_goal` 예시에서 `task:` 아래 부분과 같다.
 
@@ -525,13 +527,13 @@ ros2 run bt_mission task_sender.py
 
 ```
 $ ros2 run bt_mission task_sender.py go 0,-1 0,1 -2,-1,0
-  -> cli-015638: go (0,-1,90°) -> (0,1,-135°) -> (-2,-1,0°)
-  <- cli-015638 accepted: go, 3 poses
-  <- cli-015638 started
-  <- cli-015638 arrived 1/3
-  <- cli-015638 arrived 2/3
-  <- cli-015638 arrived 3/3
-  <- cli-015638 done
+  -> cli-071225: go (0,-1,90°) -> (0,1,-135°) -> (-2,-1,0°)
+  <- cli-071225 accepted: go, 3 poses
+  <- cli-071225 started (RUNNING)
+  <- cli-071225 arrived 1/3
+  <- cli-071225 arrived 2/3
+  <- cli-071225 arrived 3/3
+  <- cli-071225 done (SUCCESS)
 ```
 
 `(0,-1,90°)` 처럼 yaw 를 적지 않은 점은 다음 점 쪽 방향으로 채워졌다. 그래서 (0,-1) 에 도착하면 (0,1) 쪽으로 돌아 둔다.
@@ -563,8 +565,8 @@ task_client.py ──goal: ExecuteTask (Task)────▶ task_server (액션
 | | 토픽 (4장) | 액션 (5장) |
 |---|---|---|
 | 받았는지 | `"t1 accepted"` 문자열 | goal 수락 / 거절 응답 |
-| 진행 상황 | 상태 문자열 (`"t1 arrived 1/3"`) | feedback (`task_id`, `running`, `waypoints_reached`, `waypoints_total`, `elapsed`) |
-| 결과 | `"done"` / `"failed"` 문자열 | 상태 SUCCEEDED / ABORTED / CANCELED + result (`success`, `message`) |
+| 진행 상황 | 상태 문자열 (`"t1 started (RUNNING)"`, `"t1 arrived 1/3"`) | feedback (`task_id`, `bt_status`, `running`, `waypoints_reached`, `waypoints_total`, `blocked`, `elapsed`) |
+| 결과 | `"done (SUCCESS)"` / `"failed (FAILURE)"` 문자열 | 상태 SUCCEEDED / ABORTED / CANCELED + result (`success`, `message`, `bt_status`) |
 | 취소 | 없음 | cancel → BT halt → Nav2 goal 취소 |
 | 실행 중에 새 작업 | 큐에 쌓임 | **선점**: 지금 작업을 멈추고 새 작업. 차례대로 하려면 보내는 쪽이 하나 끝나면 다음을 보낸다 |
 | 작업 기다리기, 결과 보고 | BT 안 (`WaitForTask`, 반복, `Log`) | 서버 코드. BT 에는 작업 하나만 남는다 |
@@ -581,9 +583,12 @@ bool success
 string message                # "done", 또는 실패/중단 이유
                               # ("go_inspect failed at waypoint 2/3", "preempted by t2", "canceled",
                               #  "blocked by an obstacle at waypoint 1/2")
+string bt_status              # 트리(task.xml 의 루트)가 마지막으로 돌려준 상태
+                              #   SUCCESS | FAILURE | RUNNING (끝나기 전에 멈춤) | IDLE (tick 안 함)
 ---
 # ---- feedback ----
 string task_id
+string bt_status              # 트리(루트)의 상태. 실행 중이므로 RUNNING
 string running                # 지금 RUNNING 인 액션 노드 (이름 순, 예: "go_scan, scanning")
 uint32 waypoints_reached      # 지금까지 도착한 점 수 (0 ~ waypoints_total)
 uint32 waypoints_total        # 이 작업의 점 수
@@ -594,6 +599,7 @@ float32 elapsed               # 작업 시작 후 지난 시간 [s]
 - goal 은 4장의 `Task` 메시지를 그대로 담는다.
 - goal 하나는 작업 하나다. 여러 작업의 순서와 조합은 보내는 쪽이 정한다. 미션 전체를 goal 하나로 보내면 "2번째 작업만 취소" 같은 일이 어렵다.
 - 점에 도착할 때마다 `waypoints_reached` 가 1씩 는다. 클라이언트는 이 값이 바뀌면 "도착" 으로 출력한다.
+- `bt_status` 는 BT 의 상태 그대로다 (SUCCESS / RUNNING / FAILURE). goal 상태(SUCCEEDED / ABORTED / CANCELED)는 액션의 상태라서 둘을 같이 보낸다. 대응은 5-2 에 있다.
 
 ### 5-2. task.xml
 
@@ -602,7 +608,15 @@ float32 elapsed               # 작업 시작 후 지난 시간 [s]
 `task_loop.xml` 에서 반복(`KeepRunningUntilFailure`), `WaitForTask`, `Log` 를 뺀 것이다. 작업을 기다리고, 결과를 보고하고, 다음 작업을 받는 일은 서버가 맡는다. 그래서 트리에는 "작업 하나를 어떻게 하나" 만 남는다.
 
 - **action 별 동작**: 4-2 와 같다. 점마다 `ForEachWaypoint` 가 `NavigateToPose` 를 하나씩 보낸다.
-- **트리 결과와 goal 상태**: 트리가 SUCCESS 면 goal 은 SUCCEEDED, FAILURE 면 ABORTED 다.
+- **트리 결과와 goal 상태**: 트리가 SUCCESS 면 goal 은 SUCCEEDED, FAILURE 면 ABORTED 다. 트리 상태는 result 의 `bt_status` 로도 간다.
+
+  | 언제 | goal 상태 | `bt_status` |
+  |---|---|---|
+  | 실행 중 (feedback) | - | RUNNING |
+  | 트리가 SUCCESS | SUCCEEDED | SUCCESS |
+  | 트리가 FAILURE (이동 실패, 장애물로 포기, 모르는 obstacle 값 등) | ABORTED | FAILURE |
+  | 끝나기 전에 취소 | CANCELED | RUNNING |
+  | 끝나기 전에 선점, 서버 종료 | ABORTED | RUNNING (`task_server_lifecycle` 의 선점은 빈 값, 6-3) |
 - **blackboard**: `{waypoints}` `{task_id}` `{action}` `{duration}` `{obstacle}` 은 서버가 goal 을 받을 때 채운다. `{waypoint}` (지금 가는 점) 와 `{waypoints_reached}` 는 `ForEachWaypoint` 가, `{blocked}` 는 `StopAndGo` 가, `{stop_and_go}` 와 `{nav_bt}` 는 `ObstacleMode` 가 쓴다.
 - **장애물**: 맨 앞의 `ObstacleMode` 가 작업의 `obstacle` 값을 보고 `StopAndGo` 를 켜거나, `NavigateToPose` 가 쓸 navigation BT 를 바꾼다 (7장).
 
@@ -671,6 +685,7 @@ void TaskServer::step()
     return;
   }
   const auto status = tree_.tickRoot();
+  bt_status_ = status;                   // feedback, result 의 bt_status
   if (status == BT::NodeStatus::RUNNING) {
     publishFeedback();                   // 실행 중인 노드나 도착한 점 수가 바뀌었을 때, 아니면 0.5초마다
   } else if (status == BT::NodeStatus::SUCCESS) {
@@ -787,23 +802,24 @@ ros2 run bt_mission task_client.py
 ```
 task> go 0,-1 0,1.5 -2,1.5 -2,-1,0
   -> t1: go (0,-1) -> (0,1.5) -> (-2,1.5) -> (-2,-1)
-  .. t1: go_only (0.0 s)
-  .. t1: arrived 1/4 (0,-1) (13.0 s)
-  .. t1: arrived 2/4 (0,1.5) (27.9 s)
-  .. t1: arrived 3/4 (-2,1.5) (40.8 s)
+  .. t1: RUNNING go_only (0.0 s)
+  .. t1: arrived 1/4 (0,-1) (12.8 s)
+  .. t1: arrived 2/4 (0,1.5) (27.7 s)
+  .. t1: arrived 3/4 (-2,1.5) (40.5 s)
   .. t1: arrived 4/4 (-2,-1)
-  <- t1 SUCCEEDED: done
+  <- t1 SUCCEEDED: done [BT SUCCESS]
 ```
 
 | 출력 | 뜻 |
 |---|---|
 | `-> t1: ...` | 작업 t1 을 보냄 (id 는 클라이언트가 t1, t2, ... 로 붙인다) |
 | `.. t2 queued (1 waiting)` | 앞 작업이 끝나기를 기다리는 중 |
-| `.. t1: go_only (0.0 s)` | 지금 실행 중인 BT 노드 (feedback 의 `running`) |
-| `.. t1: arrived 2/4 (0,1.5) (27.9 s)` | 4개 중 2번째 점에 도착 |
+| `.. t1: RUNNING go_only (0.0 s)` | 트리 상태와 지금 실행 중인 BT 노드 (feedback 의 `bt_status`, `running`) |
+| `.. t1: arrived 2/4 (0,1.5) (27.7 s)` | 4개 중 2번째 점에 도착 |
 | `.. t1: blocked by an obstacle, waiting (5.4 s)` | 길이 막혀서 멈췄다 (feedback 의 `blocked`) |
 | `.. t1: path clear, going again (18.8 s)` | 길이 비어서 다시 출발 |
-| `<- t1 SUCCEEDED: done` | 결과 |
+| `<- t1 SUCCEEDED: done [BT SUCCESS]` | 결과: goal 상태, message, 트리 상태 (result 의 `bt_status`) |
+| `<- t1 CANCELED: canceled [BT RUNNING]` | 끝나기 전에 취소됨. 트리는 RUNNING 이었다 |
 
 자주 하는 실수 (실제 메시지):
 
@@ -875,25 +891,30 @@ ros2 action send_goal --feedback /execute_task bt_mission_msgs/action/ExecuteTas
 출력 (실제, 줄임):
 
 ```
-Goal accepted with ID: 07870e315a0a41d2bb0ec1f5dd11b015
+Goal accepted with ID: 2224ae7a6b0a4646abc9419ec63832e2
 
 Feedback:
     task_id: a1
+bt_status: RUNNING
 running: go_only
 waypoints_reached: 0
 waypoints_total: 2
-elapsed: 0.0010850010439753532
+blocked: false
+elapsed: 0.0006170350243337452
 ...
 Feedback:
     task_id: a1
+bt_status: RUNNING
 running: go_only
 waypoints_reached: 1
 waypoints_total: 2
-elapsed: 6.871181488037109
+blocked: false
+elapsed: 6.731001377105713
 ...
 Result:
     success: true
 message: done
+bt_status: SUCCESS
 
 Goal finished with status: SUCCEEDED
 ```
@@ -903,6 +924,7 @@ Goal finished with status: SUCCEEDED
 - **한 줄 해석**: `task_sender.py` 의 함수(`parse_line`, `fill_yaws`)를 가져다 쓴다. 두 입력 노드의 형식이 같은 이유다.
 - **차례대로 실행**: 서버는 새 goal 이 오면 선점하므로, 기다리는 작업은 클라이언트가 큐에 들고 있다가 앞 작업의 result 를 받으면 다음 goal 을 보낸다.
 - **도착 출력**: feedback 의 `waypoints_reached` 가 늘면 그 점을 "arrived" 로 출력한다. 마지막 점에 도착하면서 끝나는 작업(`go`, `scan`)은 그 도착을 담은 feedback 없이 결과가 오므로, SUCCEEDED 를 받으면 남은 도착을 출력한다.
+- **BT 상태**: 실행 중인 노드 앞에 feedback 의 `bt_status`(RUNNING)를, 결과 뒤에 result 의 `bt_status` 를 `[BT SUCCESS]` 처럼 붙인다.
 - **장애물**: feedback 의 `blocked` 가 바뀌면 `blocked by an obstacle, waiting` / `path clear, going again` 을 출력한다.
 - **Ctrl-C**: 지금 작업에 cancel 을 보내고, CANCELED 를 받은 뒤 끝낸다.
   - rclpy 기본 Ctrl-C 처리는 ROS 를 먼저 종료해서 cancel 을 보낼 수 없다.
@@ -928,35 +950,50 @@ task>   -> t1: inspect (0,-1) -> (1.5,-1)
 task>   .. t2 queued (1 waiting)
 task>   .. t3 queued (2 waiting)
 task>   .. t4 queued (3 waiting)
-  .. t1: go_inspect (0.0 s)
+task> waiting for 4 task(s) to finish (Ctrl-C to cancel)
+  .. t1: RUNNING go_inspect (0.0 s)
   .. t1: arrived 1/2 (0,-1) (10.8 s)
-  .. t1: arrived 2/2 (1.5,-1) (21.7 s)
-  .. t1: work (21.7 s)
-  <- t1 SUCCEEDED: done
+  .. t1: arrived 2/2 (1.5,-1) (21.8 s)
+  .. t1: RUNNING work (21.8 s)
+  <- t1 SUCCEEDED: done [BT SUCCESS]
   -> t2: scan (1.5,1.5) -> (-1,1.5)
-  .. t2: go_scan, scanning (0.0 s)
-  .. t2: arrived 1/2 (1.5,1.5) (15.1 s)
+  .. t2: RUNNING go_scan, scanning (0.0 s)
+  .. t2: arrived 1/2 (1.5,1.5) (14.9 s)
   .. t2: arrived 2/2 (-1,1.5)
-  <- t2 SUCCEEDED: done
+  <- t2 SUCCEEDED: done [BT SUCCESS]
   -> t3: look_around (-1,1.5)
-  .. t3: go_look (0.0 s)
+  .. t3: RUNNING go_look (0.0 s)
   .. t3: arrived 1/1 (-1,1.5) (0.1 s)
-  .. t3: spin (0.1 s)
-  <- t3 SUCCEEDED: done
+  .. t3: RUNNING spin (0.1 s)
+  <- t3 SUCCEEDED: done [BT SUCCESS]
   -> t4: go (-2,-1)
-  .. t4: go_only (0.0 s)
+  .. t4: RUNNING go_only (0.0 s)
   .. t4: arrived 1/1 (-2,-1)
-  <- t4 SUCCEEDED: done
-
-# 선점                               # 취소
-task>   -> t1: go (1.5,-1)           task>   -> t1: go (1.5,-1)
-  .. t1: go_only (0.0 s)               .. t1: go_only (0.0 s)
-  -> t2: go (-2,-1)                    .. canceling t1
-  <- t1 ABORTED: preempted by t2       <- t1 CANCELED: canceled
-  .. t2: go_only (0.0 s)
-  .. t2: arrived 1/1 (-2,-1)
-  <- t2 SUCCEEDED: done
+  <- t4 SUCCEEDED: done [BT SUCCESS]
 ```
+
+선점 (`go 1.5,-1` 을 보내고 4초 뒤 `!go -2,-1`):
+
+```
+task>   -> t1: go (1.5,-1)
+task>   .. t1: RUNNING go_only (0.0 s)
+  -> t2: go (-2,-1)
+task>   .. t2: RUNNING go_only (0.0 s)
+  <- t1 ABORTED: preempted by t2 [BT RUNNING]
+  .. t2: arrived 1/1 (-2,-1)
+  <- t2 SUCCEEDED: done [BT SUCCESS]
+```
+
+취소 (`go 1.5,-1` 을 보내고 4초 뒤 `cancel`):
+
+```
+task>   -> t1: go (1.5,-1)
+task>   .. t1: RUNNING go_only (0.0 s)
+  .. canceling t1
+task>   <- t1 CANCELED: canceled [BT RUNNING]
+```
+
+선점되거나 취소된 작업은 트리가 끝나기 전에 멈췄으므로 `[BT RUNNING]` 이다.
 
 t3 는 t2 의 마지막 점과 같은 곳이라 바로 도착하고 회전한다.
 
@@ -1050,7 +1087,7 @@ void TaskServerLifecycle::onPreempt(ExecuteTask::Goal::ConstSharedPtr goal)
 }
 ```
 
-- **선점된 goal 의 result 는 빈 값이다.** `acceptPendingGoal()` 안에서 SimpleActionServer 가 빈 result 로 ABORTED 를 보낸다. `task_server` 처럼 `"preempted by t2"` 를 실어 보낼 방법이 없다.
+- **선점된 goal 의 result 는 빈 값이다.** `acceptPendingGoal()` 안에서 SimpleActionServer 가 빈 result 로 ABORTED 를 보낸다. `task_server` 처럼 `"preempted by t2"` 나 `bt_status` 를 실어 보낼 방법이 없다.
 - **트리가 막 끝난 tick 에는 받지 않는다.** 그 tick 에 받으면, 끝난 작업의 SUCCESS 가 새 goal 의 결과로 보내진다.
 - **첫 feedback 은 50ms 늦춘다.** BtActionServer 는 goal 을 수락하자마자 다른 스레드에서 tick 을 시작한다. 그래서 첫 feedback 이 수락 응답보다 먼저 도착하면, 클라이언트는 모르는 goal 의 것으로 버린다. gtest 를 10번 돌렸을 때 이렇게 버려진 feedback 이 8개였고, 50ms 늦춘 뒤에는 0개였다. `task_server` 는 수락한 goal 을 다음 step 에 시작해서 같은 문제를 피한다 (5-4).
 
@@ -1063,7 +1100,7 @@ void TaskServerLifecycle::onPreempt(ExecuteTask::Goal::ConstSharedPtr goal)
 |---|---|---|
 | 작업 4개 (8장) | 모두 SUCCEEDED, 61.1 s | 모두 SUCCEEDED, 60.6 s |
 | 정상 / cancel / 이동 실패의 결과 | SUCCEEDED("done") / CANCELED("canceled") / ABORTED("go_look failed at waypoint 1/1") | 같음 |
-| 선점된 작업 | ABORTED("preempted by t2") | ABORTED, message 빈 값 |
+| 선점된 작업 | ABORTED("preempted by t2"), bt_status RUNNING | ABORTED, message 와 bt_status 모두 빈 값 |
 | 점이 없는 작업 | 수락 단계에서 REJECTED | 수락된 뒤 ABORTED, message 빈 값 |
 | 작업 중 서버 Ctrl-C | ABORTED("task_server shutting down"). 신호 처리를 직접 짰다 | ABORTED("task server deactivated"). LifecycleNode 의 종료 처리 |
 | 시작 | 실행하면 bt_navigator 가 active 가 될 때까지 기다린다 | configure → activate 가 필요하다 (lifecycle_manager, launch 부터 active 까지 3.7초). Nav2 가 없으면 activate 실패 |
@@ -1278,9 +1315,9 @@ Gazebo 자체(월드, 스폰, AMCL)에서는 돌려 보지 못했다.
 
 | 테스트 | 확인 내용 |
 |---|---|
-| `ActionChoosesTheBehavior` | 작업 5개(inspect, scan, look_around, 빈 action, 모르는 action). action 별로 맞는 가지가 실행되고(`scan` 은 주행이 끝나면 halt), 받은 순서대로 started → arrived 1/2 → arrived 2/2 → done. Task 의 점이 차례로 `NavigateToPose` 의 goal 로 가고, 작업(`work`)은 마지막 점에 도착한 뒤 시작 |
-| `FailedTaskIsReportedAndTheLoopGoesOn` | 이동 실패 → `"t1 failed"` 보고, 다음 작업은 그대로 실행 |
-| `FailureStopsAtThatWaypoint` | 점 3개 중 둘째 점에서 이동 실패 → `"t1 arrived 1/3"` 뒤 `"t1 failed"`. 셋째 점으로는 가지 않음 |
+| `ActionChoosesTheBehavior` | 작업 5개(inspect, scan, look_around, 빈 action, 모르는 action). action 별로 맞는 가지가 실행되고(`scan` 은 주행이 끝나면 halt), 받은 순서대로 started (RUNNING) → arrived 1/2 → arrived 2/2 → done (SUCCESS). Task 의 점이 차례로 `NavigateToPose` 의 goal 로 가고, 작업(`work`)은 마지막 점에 도착한 뒤 시작 |
+| `FailedTaskIsReportedAndTheLoopGoesOn` | 이동 실패 → `"t1 failed (FAILURE)"` 보고, 다음 작업은 그대로 실행 |
+| `FailureStopsAtThatWaypoint` | 점 3개 중 둘째 점에서 이동 실패 → `"t1 arrived 1/3"` 뒤 `"t1 failed (FAILURE)"`. 셋째 점으로는 가지 않음 |
 | `TaskWithoutWaypointsIsRejected` | 점이 없는 작업 → `"t1 rejected: no waypoints"`. id 가 없는 작업 → BT 가 `task2` 로 이름 붙임 |
 | `WaitsWhileThereIsNoTask` | 작업이 없으면 RUNNING 을 유지하고 `"waiting for a task"` 보고 |
 
@@ -1291,7 +1328,7 @@ Gazebo 자체(월드, 스폰, AMCL)에서는 돌려 보지 못했다.
 | 작업 4개를 한 번에 입력 | 모두 done, 78.4 s. 점마다 `arrived i/n` 보고 (점마다 멈추기 전에는 약 59초) |
 | t2 스캔 | 10개 (0.5 m 간격), 마지막 점에 도착하며 halt |
 | t3 `look_around` | 이동 후 `Spin` SUCCESS |
-| 한 번만 보내기 (`go 0,-1 0,1 -2,-1,0`) | arrived 1/3, 2/3, 3/3, done 을 받고 종료 코드 0 |
+| 한 번만 보내기 (`go 0,-1 0,1 -2,-1,0`) | started (RUNNING), arrived 1/3, 2/3, 3/3, done (SUCCESS) 를 받고 종료 코드 0 |
 | 작업 중 `mission_bt_runner` Ctrl-C | Nav2 goal 취소, 로봇 정지 |
 | 입력 노드 Ctrl-C | 오류 없이 종료 (BT 는 받은 작업을 계속) |
 
@@ -1301,11 +1338,11 @@ Gazebo 자체(월드, 스폰, AMCL)에서는 돌려 보지 못했다.
 
 | 테스트 | 확인 내용 |
 |---|---|
-| `RunsATaskAndReportsFeedback` | 점 2개 inspect → SUCCEEDED("done"). feedback 이 (`go_inspect`, 도착 0) → (`go_inspect`, 1) → (`work`, 2) 로 바뀜. 점 사이에도 `running` 이 비지 않음. 점이 차례로 `NavigateToPose` 의 goal 로 감 |
+| `RunsATaskAndReportsFeedback` | 점 2개 inspect → SUCCEEDED("done", bt_status SUCCESS). feedback 이 (`go_inspect`, 도착 0) → (`go_inspect`, 1) → (`work`, 2) 로 바뀌고 bt_status 는 늘 RUNNING. 점 사이에도 `running` 이 비지 않음. 점이 차례로 `NavigateToPose` 의 goal 로 감 |
 | `RunsTasksOneAfterAnother` | 같은 서버로 작업 두 개 (scan, look_around) 를 차례로 → 둘 다 SUCCEEDED (트리가 작업마다 초기화됨) |
-| `NewGoalPreemptsTheRunningOne` | 작업 a 실행 중에 b 를 보냄 → a 는 ABORTED("preempted by b"), a 의 이동 노드 halt, b 는 SUCCEEDED |
-| `CancelHaltsTheTask` | scan 실행 중 cancel → CANCELED, 이동과 스캔 노드 모두 halt |
-| `FailedNavigationAbortsWithTheNodeName` | 이동 실패 → ABORTED("go_look failed at waypoint 1/1"), 회전은 하지 않음 |
+| `NewGoalPreemptsTheRunningOne` | 작업 a 실행 중에 b 를 보냄 → a 는 ABORTED("preempted by b", bt_status RUNNING), a 의 이동 노드 halt, b 는 SUCCEEDED |
+| `CancelHaltsTheTask` | scan 실행 중 cancel → CANCELED(bt_status RUNNING), 이동과 스캔 노드 모두 halt |
+| `FailedNavigationAbortsWithTheNodeName` | 이동 실패 → ABORTED("go_look failed at waypoint 1/1", bt_status FAILURE), 회전은 하지 않음 |
 | `FailureStopsAtThatWaypoint` | 점 3개 중 둘째 점에서 실패 → ABORTED("go_only failed at waypoint 2/3"), 셋째 점으로는 가지 않음 |
 | `RejectsATaskWithoutWaypoints` | 점이 없는 goal → 거절 |
 
@@ -1434,6 +1471,7 @@ Gazebo 자체(월드, 스폰, AMCL)에서는 돌려 보지 못했다.
 - **점에 얼마나 정확히 서나**: goal checker 의 `xy_goal_tolerance` / `yaw_goal_tolerance` 가 정한다. `simple_line_params.yaml` 에서 0.05m / 0.05rad 로 줄였다 (Humble 기본 0.25 / 0.25). 실측으로 점에서 3~5cm 안에 섰다.
 - **`ros2 action send_goal` 로 보낼 때 방향**: `orientation` 을 안 적으면 0° 다. 점마다 0° 로 돌았다가 다음 점으로 가므로, 방향을 적거나 `task_client.py` 를 쓴다 (5-5-5).
 - **`task_server` 와 `task_server_lifecycle` 은 같이 띄우지 않는다.** 둘 다 `/execute_task` 액션을 연다.
+- **stop 모드에서는 벽도 장애물이다.** goal 까지의 직선이 벽에 막히면 벽 앞에서 계속 기다린다 (`max_wait` 기본 0). 맵 밖이나 벽 너머의 점을 보내지 않거나, `max_wait` 를 정해 둔다.
 - **stop 모드는 레이저가 있어야 움직인다.** `/scan` 이 1초 넘게 안 오면 막힌 것으로 보고 서 있는다. 레이저가 없는 시뮬레이션이나 테스트에서는 `none` 을 쓴다 (7-2).
 - **레이저 높이의 물체만 본다.** 2D 레이저 평면보다 낮거나 높은 물체(낮은 상자, 테이블 상판)는 stop 도 avoid 도 보지 못한다. 필요하면 depth 카메라 같은 센서를 더한다.
 - **stop 모드의 길 검사는 직선이다.** SimpleLinePlanner 가 긋는 경로와 같아서 지금은 맞다. 휘는 경로를 만드는 planner 를 기본으로 쓰게 되면, `{path}` 를 따라 검사하도록 바꿔야 한다.

@@ -133,6 +133,7 @@ void TaskServerLifecycle::onLoop()
   }
   auto feedback = std::make_shared<ExecuteTask::Feedback>();
   feedback->task_id = task_id_;
+  feedback->bt_status = BT::toStr(BT::NodeStatus::RUNNING);   // 위에서 RUNNING 일 때만 보낸다
   feedback->running = running;
   feedback->waypoints_reached = reached;
   feedback->waypoints_total = total_;
@@ -169,6 +170,10 @@ void TaskServerLifecycle::onCompletion(ExecuteTask::Result::SharedPtr result, Bt
 {
   // BtActionServer 가 이 result 로 SUCCEEDED / ABORTED / CANCELED 를 보낸다
   result->success = status == BtStatus::SUCCEEDED;
+  // 트리(루트)가 마지막으로 돌려준 상태. 취소되면 끝나기 전에 멈춘 것이라 RUNNING (task_server 와 같다)
+  result->bt_status = BT::toStr(
+    status == BtStatus::SUCCEEDED ? BT::NodeStatus::SUCCESS :
+    status == BtStatus::FAILED ? BT::NodeStatus::FAILURE : BT::NodeStatus::RUNNING);
   const char * state = "aborted";
   if (status == BtStatus::SUCCEEDED) {
     result->message = "done";

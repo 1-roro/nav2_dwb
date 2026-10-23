@@ -199,20 +199,24 @@ class TaskClient(Node):
             print(f'  .. {task_id}: {state} ({feedback.elapsed:.1f} s)', flush=True)
         self.last_blocked[task_id] = feedback.blocked
         if feedback.running and feedback.running != self.last_running.get(task_id):
-            print(f'  .. {task_id}: {feedback.running} ({feedback.elapsed:.1f} s)', flush=True)
+            # bt_status: 트리(루트)의 상태 (실행 중이므로 RUNNING), running: 지금 RUNNING 인 액션 노드
+            print(f'  .. {task_id}: {feedback.bt_status} {feedback.running} '
+                  f'({feedback.elapsed:.1f} s)', flush=True)
         self.last_running[task_id] = feedback.running
 
     def on_result(self, task_id, future):
         response = future.result()
         self.finished(task_id, STATUS.get(response.status, str(response.status)),
-                      response.result.message)
+                      response.result.message, response.result.bt_status)
 
-    def finished(self, task_id, state, message):
+    def finished(self, task_id, state, message, bt_status=''):
         # 마지막 점에 도착하면서 끝나는 작업(go, scan)은 그 도착을 담은 feedback 없이 결과가 온다.
         # SUCCEEDED 면 모든 점에 도착한 것이므로 남은 도착을 여기서 출력한다
         if state == 'SUCCEEDED' and task_id in self.sent:
             self.print_arrivals(task_id, len(self.sent[task_id].waypoints))
-        print(f'  <- {task_id} {state}: {message}', flush=True)
+        # state: 액션 goal 의 상태, bt_status: 트리(루트)가 마지막으로 돌려준 상태
+        print(f'  <- {task_id} {state}: {message}' + (f' [BT {bt_status}]' if bt_status else ''),
+              flush=True)
         self.results[task_id] = (state, message)
         self.handles.pop(task_id, None)
         if self.active == task_id:

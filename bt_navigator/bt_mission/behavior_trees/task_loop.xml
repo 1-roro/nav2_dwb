@@ -24,6 +24,9 @@
                   장애물을 보는 planner / controller (Avoid / FollowPathAvoid) 로 돌아간다
     none          장애물을 보지 않는다
 
+  mission/status 로 "t1 started (RUNNING)" → "t1 arrived 1/3" ... → "t1 done (SUCCESS)" 또는
+  "t1 failed (FAILURE)" 를 보낸다. 괄호 안은 그 작업을 실행하는 가지(try_task)의 BT 상태다.
+
   작업 하나가 실패해도 보고만 하고 다음 작업을 기다린다. 스스로 끝나지 않으므로 Ctrl-C 로 멈춘다.
 
   실행: mission_bt_runner 의 bt_xml 파라미터를 task_loop.xml 로 준다 (bt_navigator/README.md 참고)
@@ -40,7 +43,7 @@
         <!-- 2. action 에 맞는 이동과 작업. 실패하면 보고하고 다음 작업으로 -->
         <Fallback name="run_task">
           <Sequence name="try_task">
-            <Log name="report_start" task_id="{task_id}" message="started"/>
+            <Log name="report_start" task_id="{task_id}" message="started (RUNNING)"/>
             <ObstacleMode name="obstacle_mode" mode="{obstacle}" avoid_bt="navigate_avoid.xml"
                           stop_and_go="{stop_and_go}" nav_bt="{nav_bt}"/>
             <Switch3 name="by_action" variable="{action}"
@@ -83,9 +86,9 @@
                 </StopAndGo>
               </ForEachWaypoint>
             </Switch3>
-            <Log name="report_done" task_id="{task_id}" message="done"/>
+            <Log name="report_done" task_id="{task_id}" message="done (SUCCESS)"/>
           </Sequence>
-          <Log name="report_failed" task_id="{task_id}" message="failed"/>
+          <Log name="report_failed" task_id="{task_id}" message="failed (FAILURE)"/>
         </Fallback>
 
       </Sequence>

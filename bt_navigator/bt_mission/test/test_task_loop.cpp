@@ -126,19 +126,21 @@ TEST_F(TaskLoopTree, ActionChoosesTheBehavior)
   task_pub_->publish(makeTask("t3", "look_around", {{-1.0, 1.5}}));
   task_pub_->publish(makeTask("t4", "", {{-2.0, -1.0}}));        // action 이 비면 이동만
   task_pub_->publish(makeTask("t5", "dance", {{0.0, 0.0}}));     // 모르는 action 도 이동만
-  ASSERT_TRUE(tickUntil("t5 done"));
+  ASSERT_TRUE(tickUntil("t5 done (SUCCESS)"));
 
   // 받은 순서대로 하나씩 실행하고 보고한다
   EXPECT_TRUE(has("t1 accepted: inspect, 2 poses, obstacle none"));
   for (const char * id : {"t1", "t2", "t3", "t4", "t5"}) {
-    EXPECT_LT(indexOf(std::string(id) + " started"), indexOf(std::string(id) + " done")) << id;
+    EXPECT_LT(
+      indexOf(std::string(id) + " started (RUNNING)"),
+      indexOf(std::string(id) + " done (SUCCESS)")) << id;
   }
-  EXPECT_LT(indexOf("t1 done"), indexOf("t2 started"));
-  EXPECT_LT(indexOf("t4 done"), indexOf("t5 started"));
+  EXPECT_LT(indexOf("t1 done (SUCCESS)"), indexOf("t2 started (RUNNING)"));
+  EXPECT_LT(indexOf("t4 done (SUCCESS)"), indexOf("t5 started (RUNNING)"));
 
   // 점마다 도착을 알린 뒤 작업을 끝낸다
   EXPECT_LT(indexOf("t1 arrived 1/2"), indexOf("t1 arrived 2/2"));
-  EXPECT_LT(indexOf("t1 arrived 2/2"), indexOf("t1 done"));
+  EXPECT_LT(indexOf("t1 arrived 2/2"), indexOf("t1 done (SUCCESS)"));
   EXPECT_TRUE(has("t2 arrived 2/2"));
 
   // action 별로 다른 가지가 실행된다. 이동 노드는 점마다 한 번씩 SUCCESS
@@ -169,7 +171,7 @@ TEST_F(TaskLoopTree, FailureStopsAtThatWaypoint)
 {
   g_outcomes["go_only"] = {true, false};          // 첫 점은 도착, 둘째 점에서 실패
   task_pub_->publish(makeTask("t1", "go", {{1.0, 0.0}, {2.0, 0.0}, {2.0, 1.0}}));
-  ASSERT_TRUE(tickUntil("t1 failed"));
+  ASSERT_TRUE(tickUntil("t1 failed (FAILURE)"));
   EXPECT_TRUE(has("t1 arrived 1/3"));
   EXPECT_FALSE(has("t1 arrived 2/3"));
   EXPECT_EQ(g_goals["go_only"].size(), 2u);       // 셋째 점으로는 가지 않는다
@@ -180,18 +182,18 @@ TEST_F(TaskLoopTree, FailedTaskIsReportedAndTheLoopGoesOn)
   g_outcomes["go_only"] = {false, true};
   task_pub_->publish(makeTask("t1", "go", {{1.0, 0.0}}));
   task_pub_->publish(makeTask("t2", "go", {{2.0, 0.0}}));
-  ASSERT_TRUE(tickUntil("t2 done"));
-  EXPECT_TRUE(has("t1 failed"));
-  EXPECT_FALSE(has("t1 done"));
+  ASSERT_TRUE(tickUntil("t2 done (SUCCESS)"));
+  EXPECT_TRUE(has("t1 failed (FAILURE)"));
+  EXPECT_FALSE(has("t1 done (SUCCESS)"));
 }
 
 TEST_F(TaskLoopTree, TaskWithoutWaypointsIsRejected)
 {
   task_pub_->publish(makeTask("t1", "inspect", {}));
   task_pub_->publish(makeTask("", "go", {{1.0, 0.0}}));       // id 가 없으면 BT 가 붙인다
-  ASSERT_TRUE(tickUntil("task2 done"));
+  ASSERT_TRUE(tickUntil("task2 done (SUCCESS)"));
   EXPECT_TRUE(has("t1 rejected: no waypoints"));
-  EXPECT_FALSE(has("t1 started"));
+  EXPECT_FALSE(has("t1 started (RUNNING)"));
   EXPECT_EQ(recorder_->count("work:RUNNING"), 0);
 }
 
