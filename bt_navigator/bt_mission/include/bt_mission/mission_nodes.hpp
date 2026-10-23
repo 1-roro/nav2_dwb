@@ -9,6 +9,7 @@
 
 #include "behaviortree_cpp_v3/action_node.h"
 #include "behaviortree_cpp_v3/bt_factory.h"
+#include "behaviortree_cpp_v3/decorator_node.h"
 #include "geometry_msgs/msg/pose_array.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 // Nav2 BT 노드들과 같은 PoseStamped 문자열 변환을 쓰도록 포함한다
@@ -21,7 +22,7 @@
 namespace bt_mission
 {
 
-// mission.xml, task_loop.xml 에서 쓰는 이 패키지의 BT 노드들을 factory 에 등록한다
+// mission.xml, task_loop.xml, task.xml 에서 쓰는 이 패키지의 BT 노드들을 factory 에 등록한다
 void registerNodes(BT::BehaviorTreeFactory & factory);
 
 // 작업 진행 상황을 알리는 토픽 (std_msgs/String, "<작업 id> <상태>")
@@ -178,6 +179,42 @@ private:
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
 };
 
+// poses 의 점을 순서대로 하나씩 pose 에 넣고 자식(보통 NavigateToPose)을 실행하는 데코레이터.
+//   자식 SUCCESS → 그 점에 도착. 로그와 mission/status 로 "<task_id> arrived <i>/<n>" 을 알리고 다음 점으로
+//   자식 FAILURE → 바로 FAILURE (남은 점으로는 가지 않는다)
+//   마지막 점에 도착하면 SUCCESS
+// reached 에는 지금까지 도착한 점 수를 쓴다 (task_server 가 feedback 으로 보낸다).
+// 점마다 멈추므로 NavigateThroughPoses 처럼 근처를 지나쳐 가지 않는다.
+class ForEachWaypoint : public BT::DecoratorNode
+{
+public:
+  ForEachWaypoint(const std::string & name, const BT::NodeConfiguration & config);
+
+  static BT::PortsList providedPorts()
+  {
+    return {
+      // MakePoses 와 같은 이유로 타입을 적지 않는다 (std::vector<geometry_msgs::msg::PoseStamped>)
+      BT::InputPort("poses", "points to visit in order"),
+      BT::OutputPort<geometry_msgs::msg::PoseStamped>("pose", "the point the child goes to"),
+      BT::OutputPort<int>("reached", "how many points have been reached"),
+      BT::InputPort<std::string>("task_id", "", "prefix of the arrival report"),
+      BT::InputPort<std::string>("robot_frame", "base_link", "robot frame for the arrival error"),
+    };
+  }
+
+  void halt() override;
+
+private:
+  BT::NodeStatus tick() override;
+  void reportArrival();
+
+  rclcpp::Node::SharedPtr node_;
+  std::shared_ptr<tf2_ros::Buffer> tf_;  // 있으면 도착할 때 실제 위치와의 오차도 알린다
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
+  std::vector<geometry_msgs::msg::PoseStamped> poses_;
+  std::size_t index_{0};
+};
+
 // 토픽(기본 mission/task)으로 들어온 작업(bt_mission_msgs/Task)을 하나 꺼내
 // blackboard 에 쓰고 SUCCESS. 작업이 없으면 올 때까지 RUNNING.
 // 실행 중에 들어온 작업은 구독 큐(최대 10개)에 쌓여 있다가 차례로 꺼내진다.
@@ -191,7 +228,7 @@ public:
     return {
       BT::InputPort<std::string>("topic", "mission/task", "bt_mission_msgs/Task topic"),
       // MakePoses 와 같은 이유로 타입을 적지 않는다 (std::vector<geometry_msgs::msg::PoseStamped>)
-      BT::OutputPort("waypoints", "via points + work station"),
+      BT::OutputPort("waypoints", "points to visit, in order"),
       BT::OutputPort<std::string>("task_id"),
       BT::OutputPort<std::string>("action"),
       BT::OutputPort<double>("duration"),

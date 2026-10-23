@@ -17,10 +17,11 @@ bt_navigator/
 | 하고 싶은 것 | 실행 | 장 |
 |---|---|---|
 | 경유, 정지 작업, 주행 중 작업, 실패 처리를 섞은 미션 (좌표는 XML 안에) | `mission_bt_runner` (BT)<br>`mission_node.py` (Python) | 1~7 |
-| 위와 같되, 좌표와 작업을 실행 중에 토픽으로 받기 | `mission_bt_runner` (`task_loop.xml`)<br>+ `task_sender.py` | 8 |
+| 점과 작업을 실행 중에 토픽으로 받기. 점마다 멈춰서 도착을 알린다 | `mission_bt_runner` (`task_loop.xml`)<br>+ `task_sender.py` | 8 |
 | 위와 같되, 작업을 액션으로 맡기기 (결과, 진행 상황, 취소, 선점) | `task_server` (`task.xml`)<br>+ `task_client.py` | 9 |
 | 위와 같되, 서버를 Nav2 의 `BtActionServer` 와 lifecycle 노드로 | `task_server_lifecycle.launch.py`<br>+ `task_client.py` | 10 |
 
+- **명령 내리는 법**(입력 형식과 예시)은 [9-5](#9-5-명령-내리기-입력-형식과-예시) 에 모아 두었다.
 - 아래층(planner, controller, 시뮬레이션 launch)은 [`simple_line/`](../simple_line/README.md) 것을 그대로 쓴다.
 - 폴더 이름의 bt_navigator 는 Nav2 의 bt_navigator 노드를 바꾼다는 뜻이 아니다. Nav2 bt_navigator 는 그대로 두고, 이 폴더의 미션 BT 가 그 위에서 명령을 보낸다 (2장).
 
@@ -159,6 +160,7 @@ BT 는 루트부터 **tick** 을 한다. 실행 노드가 tick 을 주기적으�
 | 제어 | **Fallback** (?) | 자식을 왼쪽부터 차례로. 하나라도 SUCCESS 면 바로 SUCCESS. 앞 자식이 실패해야 다음 자식을 실행 |
 | 제어 | **Parallel** (⇉) | 자식을 매 tick 모두 실행. `success_threshold` 개가 SUCCESS 면 SUCCESS. 나머지 RUNNING 자식은 **halt** (중단) |
 | 데코레이터 | **RetryUntilSuccessful** | 자식이 FAILURE 면 `num_attempts` 번까지 다시 |
+| 데코레이터 | **ForEachWaypoint** (직접 만듦) | 점 목록의 점마다 자식을 한 번씩 다시 실행 (8-2). `task_loop.xml`, `task.xml` 에서 쓴다 |
 | 액션 | **Nav2 BT 노드** | `NavigateThroughPoses`, `NavigateToPose`, `Spin`. Nav2 서버에 액션을 보내고, 끝날 때까지 RUNNING |
 | 액션 | **직접 만든 노드** | `MakePose(s)`, `DoWork`, `ScanWhileMoving`, `Log` (5장) |
 
@@ -562,8 +564,9 @@ mission SUCCESS in 60.9 s
                 │  mission/task    bt_mission_msgs/Task   어디로(waypoints), 무엇을(action)
                 ▼
 [미션 BT]    mission_bt_runner  (bt_xml:=task_loop.xml)
-                WaitForTask ─▶ Switch(action) ─▶ NavigateThroughPoses + DoWork / ScanWhileMoving / Spin
-                │  mission/status  std_msgs/String   "t1 accepted: ...", "t1 started", "t1 done" ...
+                WaitForTask ─▶ Switch(action) ─▶ 점마다 NavigateToPose (ForEachWaypoint)
+                                                 + DoWork / ScanWhileMoving / Spin
+                │  mission/status  std_msgs/String   "t1 accepted: ...", "t1 arrived 1/3", "t1 done" ...
                 ▼
 [입력 노드]  진행 상황 출력
 ```
@@ -578,7 +581,7 @@ mission SUCCESS in 60.9 s
 
 ```
 string id                                 # 작업 이름 (로그와 mission/status 에 씀). 비우면 BT 가 붙인다
-geometry_msgs/PoseStamped[] waypoints     # 경유점들 + 마지막이 작업 지점. 1개 이상
+geometry_msgs/PoseStamped[] waypoints     # 들를 점들. 1개 이상. orientation 은 그 점에 도착했을 때 볼 방향
 string action                             # go | inspect | scan | look_around. 그 외 값이면 이동만
 float64 duration                          # inspect 의 작업 시간 [s]
 ```
@@ -595,18 +598,56 @@ ROS 2 에서는 새 메시지 형식을 별도 패키지에 정의하는 것이 
 
    | action | 가지 |
    |---|---|
-   | `inspect` | 이동 → `DoWork` (duration 초) |
-   | `scan` | `Parallel` (이동, `ScanWhileMoving`) |
-   | `look_around` | 이동 → `Spin` 한 바퀴 |
-   | 그 외 (`go` 등) | 이동만 |
+   | `inspect` | 점을 차례로 들른 뒤 → `DoWork` (duration 초) |
+   | `scan` | `Parallel` (점을 차례로 들르기, `ScanWhileMoving`) |
+   | `look_around` | 점을 차례로 들른 뒤 → `Spin` 한 바퀴 |
+   | 그 외 (`go` 등) | 점을 차례로 들르기만 |
 
 4. **`Fallback run_task`**: 가지가 실패하면 `report_failed` 가 "failed" 를 보고하고 SUCCESS 를 낸다. 루프는 다음 작업을 기다린다.
 
-이동은 경유점 수와 상관없이 `NavigateThroughPoses` 하나로 보낸다. 점이 하나면 `NavigateToPose` 와 같게 동작한다.
+**점마다 멈추기: `ForEachWaypoint`**
+
+"점을 차례로 들르기" 는 직접 만든 데코레이터 `ForEachWaypoint` 가 한다. 점마다 자식 `NavigateToPose` 를 한 번씩 실행한다.
+
+```xml
+<ForEachWaypoint name="go_points" poses="{waypoints}" pose="{waypoint}" task_id="{task_id}">
+  <NavigateToPose name="go_only" goal="{waypoint}"/>
+</ForEachWaypoint>
+```
+
+```cpp
+BT::NodeStatus ForEachWaypoint::tick()       // src/mission_nodes.cpp, 발췌
+{
+  if (status() == BT::NodeStatus::IDLE) {    // 처음 tick: 점 목록을 읽고 첫 점을 {waypoint} 에
+    getInput("poses", poses_);
+    index_ = 0;
+    setOutput("pose", poses_[0]);
+  }
+  while (true) {
+    const auto child_status = child_node_->executeTick();   // NavigateToPose
+    if (child_status == BT::NodeStatus::RUNNING) return BT::NodeStatus::RUNNING;
+    haltChild();                             // 자식을 IDLE 로 (다음 점은 새 goal 로 시작)
+    if (child_status == BT::NodeStatus::FAILURE) return BT::NodeStatus::FAILURE;
+    ++index_;
+    setOutput("reached", static_cast<int>(index_));
+    reportArrival();                         // 로그 + mission/status "t1 arrived 2/3"
+    if (index_ == poses_.size()) return BT::NodeStatus::SUCCESS;
+    setOutput("pose", poses_[index_]);       // 다음 점. 같은 tick 에 바로 출발
+  }
+}
+```
+
+- 점 하나에 `NavigateToPose` 하나다. 그래서 로봇은 점마다 멈춰서 **위치와 방향을 맞추고**(goal checker: 0.05m, 약 3°), 도착을 알린 뒤 다음 점으로 간다.
+- 중간 점에서 실패하면 그 자리에서 FAILURE 다. 남은 점으로는 가지 않는다.
+- 도착을 알릴 때 TF 로 읽은 실제 로봇 위치와의 거리도 로그에 남긴다 (`[waypoint] t1 arrived 1/3 (0.00, -1.00), robot 0.035 m away`).
+- `reached` 출력에는 지금까지 도착한 점 수를 쓴다. 액션 서버(9장)는 이 값을 feedback 으로 보낸다.
+
+**`NavigateThroughPoses` 를 쓰지 않는 이유**: `NavigateThroughPoses` 는 점들을 이은 꺾은선 하나로 달린다. 앞의 점은 0.7m 안에 들어오면 지난 것으로 치고, 그 자리에서 다음 점으로 새 경로를 긋는다 ([MULTI_GOAL.md 4장](../simple_line/MULTI_GOAL.md#경유-goal-을-정확히-밟지는-않는다)). 실측으로 경유점을 0.23~0.58m 거리로 지나갔다. 그래서 점마다 도착해야 하는 작업 명령에는 맞지 않다. 멈추지 않고 지나가는 경유가 필요한 경우의 예로 `mission.xml` 은 그대로 `NavigateThroughPoses` 를 쓴다.
 
 | | `mission.xml` | `task_loop.xml` |
 |---|---|---|
 | 좌표 | XML 안 (`MakePoses`) | Task 메시지 (`WaitForTask`) |
+| 여러 점 | `NavigateThroughPoses` 로 지나감 (멈추지 않음) | `ForEachWaypoint` + `NavigateToPose` 로 점마다 멈춤 |
 | 작업 순서 | XML 에 고정 | 받은 순서 |
 | 작업 종류 | 지점마다 XML 에 적음 | `action` 값을 보고 `Switch3` 가 고름 |
 | 실패 처리 | 지점별 Fallback, 복귀 재시도 | 작업마다 보고하고 다음 작업으로 |
@@ -640,7 +681,7 @@ BT::NodeStatus WaitForTask::takeTask()        // onStart(), onRunning() 에서 �
     auto task = queue_.front();
     queue_.pop_front();
     if (task.waypoints.empty()) { report(task.id + " rejected: no waypoints"); continue; }
-    setOutput("waypoints", task.waypoints);   // → NavigateThroughPoses goals="{waypoints}"
+    setOutput("waypoints", task.waypoints);   // → ForEachWaypoint poses="{waypoints}"
     setOutput("task_id", task.id);
     setOutput("action", task.action);         // → Switch3 variable="{action}"
     setOutput("duration", task.duration);     // → DoWork duration="{duration}"
@@ -660,11 +701,8 @@ BT::NodeStatus WaitForTask::takeTask()        // onStart(), onRunning() 에서 �
 ```bash
 # 대화형: 한 줄에 작업 하나. 보낸 작업은 BT 가 받은 순서대로 하나씩 실행한다
 ros2 run bt_mission task_sender.py
-task> inspect 0,-1 1.5,-1,90       # (0,-1) 경유 → (1.5,-1) 에서 정지 → 3초 점검
-task> scan 1.5,1.5 -1,1.5,180      # 가는 동안 스캔
-task> look_around -1,1.5,180       # 도착 후 한 바퀴
-task> go -2,-1,0                   # 이동만
-task> inspect:5 1,0,0              # 작업 시간 5초
+task> go 0,-1 0,1 -2,-1,0          # 세 점을 차례로 들르고 마지막에 0° 를 보고 선다
+task> inspect:5 1.5,-1,90          # (1.5,-1) 에서 90° 를 보고 서서 5초 점검
 
 # 작업 하나만 보내고, 끝날 때까지 기다렸다가 종료 (종료 코드 0 = done)
 ros2 run bt_mission task_sender.py inspect 0,-1 1.5,-1,90
@@ -673,12 +711,11 @@ ros2 run bt_mission task_sender.py inspect 0,-1 1.5,-1,90
 printf 'inspect 0,-1 1.5,-1,90\ngo -2,-1,0\n' | ros2 run bt_mission task_sender.py
 ```
 
-- **한 줄 형식**: `<action>[:duration] x,y[,yaw_deg] [x,y[,yaw_deg] ...]` (map frame). 마지막 점이 작업 지점이고, 앞의 점은 경유점이다.
-- **yaw 생략**: 중간 점은 다음 점 쪽, 마지막 점은 직전 점에서 온 방향으로 채운다. 작업의 첫 점은 직전 작업의 마지막 점(첫 작업이면 TF 로 읽은 로봇 위치)에서 온 것으로 본다.
+- **한 줄 형식**은 9장의 `task_client.py` 와 같다. 형식과 예시는 [9-5](#9-5-명령-내리기-입력-형식과-예시) 에 모아 두었다.
 - **보내기 전에** BT 쪽 구독이 연결될 때까지 기다린다 (최대 10초). 토픽은 연결 전에 보낸 메시지를 버리기 때문이다.
-- **입력을 기다리는 동안에도** 상태 토픽을 받아 `<- t1 done` 처럼 출력한다. 스레드 없이 `select` 로 키보드 입력을 기다리면서 `rclpy.spin_once` 를 돌린다.
+- **입력을 기다리는 동안에도** 상태 토픽을 받아 `<- t1 arrived 1/3`, `<- t1 done` 처럼 출력한다. 스레드 없이 `select` 로 키보드 입력을 기다리면서 `rclpy.spin_once` 를 돌린다.
 
-입력 노드 없이 직접 보낼 수도 있다. 다른 노드(관제 서버 브리지, GUI)도 같은 토픽에 Task 를 발행하면 된다.
+입력 노드 없이 직접 보낼 수도 있다. 다른 노드(관제 서버 브리지, GUI)도 같은 토픽에 Task 를 발행하면 된다. 필드 쓰는 법은 9-5 의 `ros2 action send_goal` 예시에서 `task:` 아래 부분과 같다.
 
 ```bash
 ros2 topic pub -w 1 --once /mission/task bt_mission_msgs/msg/Task \
@@ -700,26 +737,20 @@ ros2 run bt_mission task_sender.py
 
 `bt_xml` 에 파일 이름만 주면 패키지의 `behavior_trees/` 에서 찾는다. 다른 위치의 파일은 전체 경로를 준다.
 
-입력 노드 출력 (가짜 로봇으로 실행한 실제 출력. 작업 4개를 한 번에 넣은 경우):
+입력 노드 출력 (가짜 로봇으로 실행한 실제 출력):
 
 ```
-task>   -> t1: inspect (0,-1,0°) -> (1.5,-1,90°), 3 s
-task>   -> t2: scan (1.5,1.5,180°) -> (-1,1.5,180°)
-task>   -> t3: look_around (-1,1.5,180°)
-task>   -> t4: go (-2,-1,0°)
-  <- t1 accepted: inspect, 2 poses
-  <- t1 started
-  <- t1 done
-  <- t2 accepted: scan, 2 poses
-  <- t2 started
-  <- t2 done
-  <- t3 accepted: look_around, 1 poses
-  <- t3 started
-  <- t3 done
-  <- t4 accepted: go, 1 poses
-  <- t4 started
-  <- t4 done
+$ ros2 run bt_mission task_sender.py go 0,-1 0,1 -2,-1,0
+  -> cli-015638: go (0,-1,90°) -> (0,1,-135°) -> (-2,-1,0°)
+  <- cli-015638 accepted: go, 3 poses
+  <- cli-015638 started
+  <- cli-015638 arrived 1/3
+  <- cli-015638 arrived 2/3
+  <- cli-015638 arrived 3/3
+  <- cli-015638 done
 ```
+
+`(0,-1,90°)` 처럼 yaw 를 적지 않은 점은 다음 점 쪽 방향으로 채워졌다. 그래서 (0,-1) 에 도착하면 (0,1) 쪽으로 돌아 둔다.
 
 ### 8-6. 한계와 다음 단계
 
@@ -727,7 +758,6 @@ task>   -> t4: go (-2,-1,0°)
 - **받은 순서대로만 실행한다.** 취소, 끼어들기(우선순위), 대기 중인 작업 비우기는 없다.
 - **상태가 문자열이다.** 사람이 읽기는 쉽지만 다른 프로그램이 해석하기에는 약하다.
 - 이런 기능이 필요해지면 Task 를 **액션 서버**로 받는 것이 보통이다. 액션에는 결과, 진행 상황, 취소가 표준으로 있다. Nav2 가 `navigate_to_pose` 를 토픽이 아니라 액션으로 받는 것과 같은 이유다. 9장이 이 방식이다.
-- 각 Task 안에서도 마지막 점이 앞 구간과 겹치지 않게 한다 ([MULTI_GOAL.md 4장](../simple_line/MULTI_GOAL.md#최종-goal-이-앞-구간과-겹치면-일찍-끝날-수-있다-humble)).
 
 ---
 
@@ -738,10 +768,10 @@ task>   -> t4: go (-2,-1,0°)
 ```
 task_client.py ──goal: ExecuteTask (Task)────▶ task_server (액션 서버 + BT 실행기)
    ◀── 수락 / 거절                               goal 마다 blackboard 를 채우고 task.xml 을 처음부터 tick
-   ◀── feedback: 실행 중인 노드, 지난 시간         cancel  → haltTree → Nav2 goal 취소 → CANCELED
+   ◀── feedback: 실행 중인 노드, 도착한 점 수     cancel  → haltTree → Nav2 goal 취소 → CANCELED
    ◀── result: success, message                  새 goal → 지금 작업 ABORTED("preempted by …") → 새 작업
-   ── cancel ──▶                                 트리 끝 → SUCCEEDED / ABORTED("<노드> failed")
-                                                    │ NavigateThroughPoses, Spin
+   ── cancel ──▶                                 트리 끝 → SUCCEEDED / ABORTED("<노드> failed at waypoint i/n")
+                                                    │ 점마다 NavigateToPose, Spin
                                                     ▼
                                          bt_navigator → planner / controller (그대로)
 ```
@@ -749,7 +779,7 @@ task_client.py ──goal: ExecuteTask (Task)────▶ task_server (액션
 | | 토픽 (8장) | 액션 (9장) |
 |---|---|---|
 | 받았는지 | `"t1 accepted"` 문자열 | goal 수락 / 거절 응답 |
-| 진행 상황 | 상태 문자열 | feedback (`task_id`, `running`, `elapsed`) |
+| 진행 상황 | 상태 문자열 (`"t1 arrived 1/3"`) | feedback (`task_id`, `running`, `waypoints_reached`, `waypoints_total`, `elapsed`) |
 | 결과 | `"done"` / `"failed"` 문자열 | 상태 SUCCEEDED / ABORTED / CANCELED + result (`success`, `message`) |
 | 취소 | 없음 | cancel → BT halt → Nav2 goal 취소 |
 | 실행 중에 새 작업 | 큐에 쌓임 | **선점**: 지금 작업을 멈추고 새 작업. 차례대로 하려면 보내는 쪽이 하나 끝나면 다음을 보낸다 |
@@ -764,16 +794,20 @@ Task task                     # 작업 내용 (Task.msg: id, waypoints, action, 
 ---
 # ---- result ----
 bool success
-string message                # "done", 또는 실패/중단 이유 ("go_inspect failed", "preempted by t2", "canceled")
+string message                # "done", 또는 실패/중단 이유
+                              # ("go_inspect failed at waypoint 2/3", "preempted by t2", "canceled")
 ---
 # ---- feedback ----
 string task_id
-string running                # 지금 RUNNING 인 액션 노드 (예: "go_scan, scanning")
+string running                # 지금 RUNNING 인 액션 노드 (이름 순, 예: "go_scan, scanning")
+uint32 waypoints_reached      # 지금까지 도착한 점 수 (0 ~ waypoints_total)
+uint32 waypoints_total        # 이 작업의 점 수
 float32 elapsed               # 작업 시작 후 지난 시간 [s]
 ```
 
 - goal 은 8장의 `Task` 메시지를 그대로 담는다.
 - goal 하나는 작업 하나다. 여러 작업의 순서와 조합은 보내는 쪽이 정한다. 미션 전체를 goal 하나로 보내면 "2번째 작업만 취소" 같은 일이 어렵다.
+- 점에 도착할 때마다 `waypoints_reached` 가 1씩 는다. 클라이언트는 이 값이 바뀌면 "도착" 으로 출력한다.
 
 ### 9-2. task.xml
 
@@ -781,11 +815,48 @@ float32 elapsed               # 작업 시작 후 지난 시간 [s]
 
 `task_loop.xml` 에서 반복(`KeepRunningUntilFailure`), `WaitForTask`, `Log` 를 뺀 것이다. 작업을 기다리고, 결과를 보고하고, 다음 작업을 받는 일은 서버가 맡는다. 그래서 트리에는 "작업 하나를 어떻게 하나" 만 남는다.
 
-- **action 별 동작**: 8-2 와 같다.
+- **action 별 동작**: 8-2 와 같다. 점마다 `ForEachWaypoint` 가 `NavigateToPose` 를 하나씩 보낸다.
 - **트리 결과와 goal 상태**: 트리가 SUCCESS 면 goal 은 SUCCEEDED, FAILURE 면 ABORTED 다.
-- **blackboard**: `{waypoints}` `{task_id}` `{action}` `{duration}` 은 서버가 goal 을 받을 때 채운다.
+- **blackboard**: `{waypoints}` `{task_id}` `{action}` `{duration}` 은 서버가 goal 을 받을 때 채운다. `{waypoint}` (지금 가는 점) 와 `{waypoints_reached}` 는 `ForEachWaypoint` 가 쓴다.
 
-### 9-3. TaskServer (`src/task_server.cpp`)
+### 9-3. 명령마다 BT 가 다르게 움직이는 이유
+
+`go 0,-1 0,1.5` 를 보내면 `NavigateToPose` 가 두 번 실행되고, `inspect:5 1,0,0` 을 보내면 한 번 실행된 뒤 5초 작업을 한다. 트리가 명령에 맞춰 바뀌는 것처럼 보이지만, **트리 모양은 바뀌지 않는다.** 바뀌는 것은 blackboard 에 든 값이다.
+
+```
+서버가 시작할 때 task.xml 로 트리를 한 번 만든다. 이후 모든 goal 이 같은 트리를 쓴다.
+
+goal 도착 ─▶ 서버가 blackboard 에 쓴다  (TaskServer::start → writeTask, src/bt_common.cpp)
+              {action}="inspect"  {waypoints}=[(1,0)]  {duration}=5  {task_id}="t2"
+          ─▶ 루트부터 tick
+              Switch3            {action} 을 읽고 "inspect" 가지 하나만 실행
+               └ Sequence
+                  ├ ForEachWaypoint  {waypoints} 를 읽고 점 수(1)만큼 자식을 다시 실행
+                  │   └ NavigateToPose   {waypoint} 를 읽어 goal 로 보낸다
+                  └ DoWork           {duration} 을 읽고 5초
+          ─▶ 끝나면 haltTree(): 모든 노드를 IDLE 로 (다음 goal 은 새 값으로 처음부터)
+```
+
+| 보낸 명령 | blackboard | 실행되는 노드 (차례대로) |
+|---|---|---|
+| `go 0,-1 0,1.5` | action=`go`, waypoints=2개 | Switch3 → (그 외 가지) ForEachWaypoint → NavigateToPose (0,-1) → 도착 → NavigateToPose (0,1.5) → 도착 |
+| `inspect:5 1,0,0` | action=`inspect`, waypoints=1개, duration=5 | Switch3 → inspect 가지 → ForEachWaypoint → NavigateToPose (1,0) → 도착 → DoWork 5초 |
+| `look_around -1,1.5` | action=`look_around`, waypoints=1개 | Switch3 → look_around 가지 → ForEachWaypoint → NavigateToPose (-1,1.5) → 도착 → Spin |
+
+이렇게 되는 이유는 세 가지다.
+
+1. **포트를 `{이름}` 으로 적으면 blackboard 값을 가리킨다.** `variable="{action}"` 은 "blackboard 의 action 값" 이라는 뜻이다 (3장). 노드는 실행할 때 `getInput()` 으로 그 순간의 값을 읽는다. 그래서 같은 노드라도 들어 있는 값에 따라 다르게 동작한다.
+2. **노드가 그 값으로 무엇을 할지 정한다.**
+   - `Switch3` 는 시작할 때 `{action}` 과 `case_1..3` 을 비교해서 가지 하나만 실행한다.
+   - `ForEachWaypoint` 는 `{waypoints}` 의 점 수만큼 자식을 다시 실행하고, 매번 `{waypoint}` 에 다음 점을 써서 `NavigateToPose` 의 goal 을 바꾼다.
+   - `DoWork` 는 `{duration}` 만큼 기다린다.
+3. **작업이 끝날 때마다 트리를 초기화한다.** 서버가 `haltTree()` 로 모든 노드를 IDLE 로 돌린다. 다음 goal 은 새 값으로 루트부터 다시 시작한다.
+
+bt_navigator 도 같은 방식이다. `navigate_to_pose` goal 이 오면 목표 위치를 blackboard 의 `{goal}` 에 쓰고, 같은 navigation BT 를 goal 마다 다시 돌린다 (2장, [MULTI_GOAL.md 1-1](../simple_line/MULTI_GOAL.md#1-1-재계획-주기0333hz와-지난-goal-반경07m은-어디에-있나)).
+
+명령으로 바꿀 수 없는 것도 있다. **어떤 action 이 있는지(가지의 종류)와 각 가지의 노드 배치**는 XML 이 정한다. 새 action 을 더하려면 XML 에 가지를 더한다. 이미 있는 노드만 쓰면 다시 빌드할 필요는 없고 서버만 다시 띄운다. 다른 XML 을 쓰려면 `bt_xml` 파라미터로 준다.
+
+### 9-4. TaskServer (`src/task_server.cpp`)
 
 실행 노드(`src/task_server_main.cpp`)의 준비 과정은 `mission_bt_runner` 와 같다.
 
@@ -813,11 +884,11 @@ void TaskServer::step()
   }
   const auto status = tree_.tickRoot();
   if (status == BT::NodeStatus::RUNNING) {
-    publishFeedback();                   // 실행 중인 노드가 바뀌었을 때, 아니면 0.5초마다
+    publishFeedback();                   // 실행 중인 노드나 도착한 점 수가 바뀌었을 때, 아니면 0.5초마다
   } else if (status == BT::NodeStatus::SUCCESS) {
     finish(Outcome::Succeeded, "done");
-  } else {
-    finish(Outcome::Aborted, logger_.lastFailed() + " failed");
+  } else {                               // "go_only failed at waypoint 2/3"
+    finish(Outcome::Aborted, failureMessage(logger_.lastFailed(), waypointsReached(blackboard_), total_));
   }
 }
 
@@ -830,39 +901,218 @@ void TaskServer::finish(Outcome outcome, const std::string & message)
 
 - **콜백은 누가 처리하나**: 액션 서버의 콜백은 서버만의 callback group 에 넣고, `step()` 에서 `spin_some()` 으로 처리한다 (8-3 의 `WaitForTask`, Nav2 BT 노드와 같은 방식). 콜백과 tick 이 같은 스레드에서 돌아서 잠금이 필요 없다.
 - **수락한 goal 은 다음 step 에 시작한다**: 수락한 step 에서 바로 시작하면, 첫 feedback 이 수락 응답보다 먼저 클라이언트에 도착한다. 그러면 클라이언트는 아직 모르는 goal 의 feedback 이라며 버린다. 테스트에서 이 문제를 찾아서 고쳤다.
-- **feedback 의 `running`**: `TransitionLogger` (`bt_common.cpp`) 가 상태 변화를 보면서, 지금 RUNNING 인 액션 노드와 마지막으로 실패한 노드를 기억한다. 실패한 노드 이름은 result 의 `message` 가 된다.
-- **트리를 goal 마다 다시 만들지 않는다**: 트리는 한 번 만들고, 작업이 끝날 때마다 `haltTree()` 로 초기화해서 다시 쓴다. Nav2 BT 노드는 만들 때 액션 서버를 찾느라 시간이 걸리기 때문이다.
+- **feedback 의 `running`**: `TransitionLogger` (`bt_common.cpp`) 가 상태 변화를 보면서, 지금 RUNNING 인 액션 노드와 마지막으로 실패한 노드를 기억한다. 실패한 노드 이름은 result 의 `message` 가 된다. 점을 다 들르지 못했으면 몇 번째 점으로 가다가 실패했는지도 붙인다.
+- **feedback 의 `waypoints_reached`**: `ForEachWaypoint` 가 blackboard 의 `{waypoints_reached}` 에 쓴 값을 읽어 보낸다.
+- **트리를 goal 마다 다시 만들지 않는다**: 트리는 한 번 만들고, 작업이 끝날 때마다 `haltTree()` 로 초기화해서 다시 쓴다 (9-3). Nav2 BT 노드는 만들 때 액션 서버를 찾느라 시간이 걸리기 때문이다.
 - **`prepareBlackboard()`**: 트리를 만들기 전에 `waypoints` 를 타입 없는 항목으로 만들어 둔다. `MakePoses` 와 같은 이유다 (5-3).
 - **서버 종료 (Ctrl-C)**: 실행 중인 작업을 멈추고(Nav2 goal 취소), 클라이언트에 ABORTED(`"task_server shutting down"`)를 보낸 뒤 끝난다.
 
-### 9-4. 클라이언트 (`scripts/task_client.py`)
+### 9-5. 명령 내리기: 입력 형식과 예시
+
+작업은 세 가지 방법으로 보낼 수 있다.
+
+| 방법 | 언제 | 아래 |
+|---|---|---|
+| `task_client.py` (대화형) | 터미널에서 여러 작업을 차례로, 선점, 취소 | 9-5-1 ~ 9-5-3 |
+| `task_client.py <작업>` (한 번) | 스크립트에서 작업 하나를 보내고 결과를 종료 코드로 | 9-5-4 |
+| `ros2 action send_goal` | 클라이언트 없이 메시지를 직접 | 9-5-5 |
+
+토픽 버전(8장)의 `task_sender.py` 도 한 줄 형식이 같다.
+
+#### 9-5-1. 한 줄 형식
+
+```
+<action>[:<duration>]  <점>  [<점> ...]
+
+점 = x,y          방향은 자동으로 채운다
+     x,y,yaw      yaw: 그 점에 도착했을 때 볼 방향 [도]
+```
+
+| 부분 | 쓰는 법 | 예 |
+|---|---|---|
+| `action` | `go`, `inspect`, `scan`, `look_around` 중 하나. 꼭 적는다 | `inspect` |
+| `:duration` | `inspect` 의 작업 시간 [초]. 생략하면 3초. 다른 action 에서는 쓰이지 않는다 | `inspect:5` |
+| 점 | `x,y` 또는 `x,y,yaw`. map 좌표 [m], yaw 는 **도(°)** | `1.5,-1`  `1.5,-1,90` |
+| 띄어쓰기 | action 과 점, 점과 점 사이는 공백. **점 안에는 공백 없이** 쉼표만 | `go 0,-1 1,1` |
+| 주석 | `#` 뒤는 무시 | `go 1,1  # 창고 앞` |
+
+| action | 로봇이 하는 일 |
+|---|---|
+| `go` | 점을 차례로 들른다 |
+| `inspect` | 점을 차례로 들른 뒤, 마지막 점에서 서서 `duration` 초 작업 |
+| `scan` | 점을 차례로 들르는 동안 0.5m 마다 스캔 (마지막 점에 도착하면 멈춤) |
+| `look_around` | 점을 차례로 들른 뒤, 마지막 점에서 제자리 한 바퀴 |
+
+어느 action 이든 로봇은 **점마다 멈춰서 위치와 방향을 맞추고**, 도착을 알린 뒤 다음 점으로 간다. 출발할 때는 다음 점 쪽으로 먼저 다 돌고 나서 직선으로 간다.
+
+**좌표와 방향** (빈 방 기준)
+
+```
+          y
+     3 ───┼──────────────┐ 벽          yaw (도착했을 때 볼 방향)
+          │              │                   90
+          │      ·(0,0)  │                    ▲
+          │              │            180 ◀───┼───▶ 0
+          │ ▶ 출발       │                    ▼
+    -3 ───┼──────────────┘                  -90
+         -3              3  x
+   출발 위치: (-2, -1), yaw 0°.  벽은 ±3m, 로봇 반지름을 생각해 ±2.5m 안을 쓴다
+```
+
+**yaw 를 생략하면** 이렇게 채운다.
+
+- 중간 점: **다음 점 쪽**. 도착하면 다음 점을 향해 돌아 두고, 다음 출발 때 회전이 없다.
+- 마지막 점: **직전 점에서 온 방향**. 따로 돌지 않고 선다.
+- 작업의 첫 점은 직전 작업의 마지막 점(첫 작업이면 로봇의 현재 위치)에서 온 것으로 본다.
+
+#### 9-5-2. 예시
+
+| 입력 | 로봇이 하는 일 |
+|---|---|
+| `go 1,-1` | (1,-1) 로 가서 선다. 방향은 온 방향 |
+| `go 1,-1,90` | (1,-1) 로 가서 +y 쪽(90°)을 보고 선다 |
+| `go 0,-1 0,1 -2,1` | (0,-1) → (0,1) → (-2,1) 을 차례로. 점마다 서서 다음 점 쪽으로 돈 뒤 출발 |
+| `go 0,-1 0,1 -2,-1,0` | 세 점을 돌고 마지막 점에서 +x 쪽(0°)을 보고 선다 |
+| `inspect 1.5,-1,90` | (1.5,-1) 에서 90° 를 보고 서서 3초 점검 |
+| `inspect:10 0,-1 1.5,-1,90` | (0,-1) 에 들렀다가 (1.5,-1) 에서 90° 를 보고 10초 점검 |
+| `scan 1.5,1.5 -1,1.5,180` | 두 점을 들르는 동안 0.5m 마다 스캔 |
+| `look_around -1,1.5` | (-1,1.5) 에 가서 제자리 한 바퀴 |
+
+#### 9-5-3. 대화형 (`task_client.py`)
 
 ```bash
 ros2 run bt_mission task_client.py
-task> inspect 0,-1 1.5,-1,90       # 작업 추가. 하고 있는 작업이 있으면 끝난 뒤에 보낸다
-task> scan 1.5,1.5 -1,1.5,180
-task> !go -2,-1,0                  # 지금 작업을 멈추고(선점) 바로 보낸다
-task> cancel                       # 지금 작업을 취소하고, 기다리는 작업도 비운다
-
-# 작업 하나만 보내고 끝날 때까지 기다림 (종료 코드 0 = SUCCEEDED)
-ros2 run bt_mission task_client.py inspect 0,-1 1.5,-1,90
 ```
 
-- **작업 한 줄 형식**: `task_sender.py` 와 같다 (8-4). 해석하는 함수도 그 파일에서 가져다 쓴다.
+| 입력 | 뜻 |
+|---|---|
+| `<작업 한 줄>` | 작업을 더한다. 실행 중인 작업이 있으면 끝난 뒤에 보낸다 (차례대로) |
+| `!<작업 한 줄>` | 지금 작업을 멈추고(선점) 바로 보낸다. 예) `!go -2,-1,0` |
+| `cancel` | 지금 작업을 취소하고, 기다리는 작업도 비운다 |
+| `help` | 도움말 |
+| `quit`, Ctrl-D | 끝낸다. 남은 작업이 있으면 다 끝날 때까지 기다린다 |
+| Ctrl-C | 지금 작업을 취소하고 끝낸다 |
+
+```
+task> go 0,-1 0,1.5 -2,1.5 -2,-1,0
+  -> t1: go (0,-1) -> (0,1.5) -> (-2,1.5) -> (-2,-1)
+  .. t1: go_only (0.0 s)
+  .. t1: arrived 1/4 (0,-1) (13.0 s)
+  .. t1: arrived 2/4 (0,1.5) (27.9 s)
+  .. t1: arrived 3/4 (-2,1.5) (40.8 s)
+  .. t1: arrived 4/4 (-2,-1)
+  <- t1 SUCCEEDED: done
+```
+
+| 출력 | 뜻 |
+|---|---|
+| `-> t1: ...` | 작업 t1 을 보냄 (id 는 클라이언트가 t1, t2, ... 로 붙인다) |
+| `.. t2 queued (1 waiting)` | 앞 작업이 끝나기를 기다리는 중 |
+| `.. t1: go_only (0.0 s)` | 지금 실행 중인 BT 노드 (feedback 의 `running`) |
+| `.. t1: arrived 2/4 (0,1.5) (27.9 s)` | 4개 중 2번째 점에 도착 |
+| `<- t1 SUCCEEDED: done` | 결과 |
+
+자주 하는 실수 (실제 메시지):
+
+| 입력 | 메시지 | 고칠 점 |
+|---|---|---|
+| `go 1, -1` | `'1,' is not x,y or x,y,yaw_deg` | 점 안에는 공백 없이: `go 1,-1` |
+| `go 1,-1 2` | `'2' is not x,y or x,y,yaw_deg` | 점마다 x 와 y 를 다 적는다 |
+| `move 1,1` | `unknown action 'move' (one of go, inspect, scan, look_around)` | action 이름 확인 |
+| `go` | `need an action and at least one point` | 점을 하나 이상 |
+| `inspect:abc 1,1` | `duration 'abc' is not a number (e.g. inspect:5)` | 작업 시간은 숫자 [초] |
+| `go 1,-1,1.57` | (오류 없음) | yaw 는 라디안이 아니라 **도**다. 1.57° 로 해석된다. 90° 면 `go 1,-1,90` |
+
+#### 9-5-4. 작업 하나만 보내기
+
+```bash
+# 끝날 때까지 기다렸다가 종료. 종료 코드 0 = SUCCEEDED, 1 = 그 외
+ros2 run bt_mission task_client.py inspect 0,-1 1.5,-1,90 && echo ok
+
+# 여러 작업을 파일에서 (한 줄에 하나, 차례대로 실행하고 모두 끝나면 종료)
+ros2 run bt_mission task_client.py < tasks.txt
+```
+
+#### 9-5-5. `ros2 action send_goal` 로 직접
+
+클라이언트 없이 goal 메시지를 직접 적는다. 필드는 9-1 의 `ExecuteTask` 와 8-1 의 `Task` 다.
+
+```bash
+ros2 action send_goal --feedback /execute_task bt_mission_msgs/action/ExecuteTask "
+task:
+  id: b1                                   # 작업 이름 (아무 문자열)
+  action: inspect                          # go | inspect | scan | look_around
+  duration: 2.0                            # inspect 의 작업 시간 [s]
+  waypoints:                               # 들를 점, 차례대로
+  - header: {frame_id: map}
+    pose:
+      position: {x: -2.0, y: 0.0}
+      orientation: {z: 1.0, w: 0.0}        # yaw 180°
+  - header: {frame_id: map}
+    pose:
+      position: {x: -2.0, y: -1.0}
+      orientation: {z: 0.0, w: 1.0}        # yaw 0°
+"
+```
+
+같은 내용을 한 줄로 (점 두 개, `go`):
+
+```bash
+ros2 action send_goal --feedback /execute_task bt_mission_msgs/action/ExecuteTask \
+  "{task: {id: a1, action: go, waypoints: [{header: {frame_id: map}, pose: {position: {x: -1.0, y: -1.0}, orientation: {w: 1.0}}}, {header: {frame_id: map}, pose: {position: {x: -1.0, y: 0.0}, orientation: {z: 0.7071, w: 0.7071}}}]}}"
+```
+
+**방향(yaw)은 quaternion 으로 적는다.** 바닥에서 도는 로봇이면 `z = sin(yaw/2)`, `w = cos(yaw/2)` 이고 x, y 는 0 이다.
+
+| yaw | `orientation` |
+|---|---|
+| 0° (+x) | `{z: 0.0, w: 1.0}` |
+| 45° | `{z: 0.3827, w: 0.9239}` |
+| 90° (+y) | `{z: 0.7071, w: 0.7071}` |
+| 180° (-x) | `{z: 1.0, w: 0.0}` |
+| -90° (-y) | `{z: -0.7071, w: 0.7071}` |
+
+- `orientation` 을 안 적으면 `{w: 1.0}`, 즉 0° 다. `ros2 action send_goal` 은 yaw 를 채워 주지 않는다. 그래서 점마다 방향을 적지 않으면 로봇이 점마다 0° 쪽으로 돌았다가 다음 점으로 간다. 방향을 자동으로 채우려면 `task_client.py` 를 쓴다.
+- `frame_id` 를 비우면 서버가 `map` 으로 채운다.
+- 점이 없는 goal 은 거절된다 (`Goal was rejected.`).
+
+출력 (실제, 줄임):
+
+```
+Goal accepted with ID: 07870e315a0a41d2bb0ec1f5dd11b015
+
+Feedback:
+    task_id: a1
+running: go_only
+waypoints_reached: 0
+waypoints_total: 2
+elapsed: 0.0010850010439753532
+...
+Feedback:
+    task_id: a1
+running: go_only
+waypoints_reached: 1
+waypoints_total: 2
+elapsed: 6.871181488037109
+...
+Result:
+    success: true
+message: done
+
+Goal finished with status: SUCCEEDED
+```
+
+### 9-6. 클라이언트가 하는 일 (`scripts/task_client.py`)
+
+- **한 줄 해석**: `task_sender.py` 의 함수(`parse_line`, `fill_yaws`)를 가져다 쓴다. 두 입력 노드의 형식이 같은 이유다.
 - **차례대로 실행**: 서버는 새 goal 이 오면 선점하므로, 기다리는 작업은 클라이언트가 큐에 들고 있다가 앞 작업의 result 를 받으면 다음 goal 을 보낸다.
+- **도착 출력**: feedback 의 `waypoints_reached` 가 늘면 그 점을 "arrived" 로 출력한다. 마지막 점에 도착하면서 끝나는 작업(`go`, `scan`)은 그 도착을 담은 feedback 없이 결과가 오므로, SUCCEEDED 를 받으면 남은 도착을 출력한다.
 - **Ctrl-C**: 지금 작업에 cancel 을 보내고, CANCELED 를 받은 뒤 끝낸다.
   - rclpy 기본 Ctrl-C 처리는 ROS 를 먼저 종료해서 cancel 을 보낼 수 없다.
   - 그래서 Ctrl-C 를 플래그로만 받고, 기다리는 루프에서 확인한다. 콜백 도중에 `KeyboardInterrupt` 가 나서 rclpy 내부가 꼬이는 일도 막는다.
 - **TF 는 시작할 때 한 번만 읽는다**: 첫 작업의 yaw 를 채우려고 로봇 위치를 한 번 읽고 TF 구독을 끊는다. 계속 받으면 초당 수십 개의 TF 메시지가 feedback, result 처리와 경쟁한다.
 
-클라이언트 없이 명령줄로도 보낼 수 있다:
-
-```bash
-ros2 action send_goal --feedback /execute_task bt_mission_msgs/action/ExecuteTask \
-  "{task: {id: cli, action: inspect, duration: 1.0, waypoints: [{header: {frame_id: map}, pose: {position: {x: -1.5, y: -1.0}, orientation: {w: 1.0}}}]}}"
-```
-
-### 9-5. 실행
+### 9-7. 실행
 
 ```bash
 # 터미널 1: 0장의 launch
@@ -874,7 +1124,7 @@ ros2 run bt_mission task_server
 ros2 run bt_mission task_client.py
 ```
 
-클라이언트 출력 (가짜 로봇으로 실행한 실제 출력):
+클라이언트 출력 (가짜 로봇으로 실행한 실제 출력. 작업 4개를 한 번에 넣은 경우):
 
 ```
 task>   -> t1: inspect (0,-1) -> (1.5,-1)
@@ -882,12 +1132,24 @@ task>   .. t2 queued (1 waiting)
 task>   .. t3 queued (2 waiting)
 task>   .. t4 queued (3 waiting)
   .. t1: go_inspect (0.0 s)
-  .. t1: work (15.6 s)
+  .. t1: arrived 1/2 (0,-1) (10.8 s)
+  .. t1: arrived 2/2 (1.5,-1) (21.7 s)
+  .. t1: work (21.7 s)
   <- t1 SUCCEEDED: done
   -> t2: scan (1.5,1.5) -> (-1,1.5)
   .. t2: go_scan, scanning (0.0 s)
+  .. t2: arrived 1/2 (1.5,1.5) (15.1 s)
+  .. t2: arrived 2/2 (-1,1.5)
   <- t2 SUCCEEDED: done
-  ...
+  -> t3: look_around (-1,1.5)
+  .. t3: go_look (0.0 s)
+  .. t3: arrived 1/1 (-1,1.5) (0.1 s)
+  .. t3: spin (0.1 s)
+  <- t3 SUCCEEDED: done
+  -> t4: go (-2,-1)
+  .. t4: go_only (0.0 s)
+  .. t4: arrived 1/1 (-2,-1)
+  <- t4 SUCCEEDED: done
 
 # 선점                               # 취소
 task>   -> t1: go (1.5,-1)           task>   -> t1: go (1.5,-1)
@@ -895,15 +1157,18 @@ task>   -> t1: go (1.5,-1)           task>   -> t1: go (1.5,-1)
   -> t2: go (-2,-1)                    .. canceling t1
   <- t1 ABORTED: preempted by t2       <- t1 CANCELED: canceled
   .. t2: go_only (0.0 s)
+  .. t2: arrived 1/1 (-2,-1)
   <- t2 SUCCEEDED: done
 ```
 
-### 9-6. 남은 것
+t3 는 t2 의 마지막 점과 같은 곳이라 바로 도착하고 회전한다.
+
+### 9-8. 남은 것
 
 - **실행은 한 번에 하나다.** 서버는 선점만 하고, 대기열은 보내는 쪽이 관리한다.
 - **feedback 의 `running` 은 BT 노드 이름이다.** 사람이 읽을 단계 이름이 필요하면 노드 이름을 그렇게 짓거나, feedback 에 필드를 더한다.
 - **Nav2 템플릿으로도 만들 수 있다.** Nav2 에는 이 구조를 위한 템플릿 `nav2_behavior_tree::BtActionServer` 가 있다 (bt_navigator 가 이것으로 만들어져 있다). 같은 일을 이 템플릿으로 한 버전과 비교는 10장에 있다.
-- **최종점 겹침에 주의한다.** 각 작업 안에서도 마지막 점이 앞 구간과 겹치지 않게 한다 ([MULTI_GOAL.md 4장](../simple_line/MULTI_GOAL.md#최종-goal-이-앞-구간과-겹치면-일찍-끝날-수-있다-humble)).
+- **점마다 서는 만큼 느려진다.** `mission.xml` 과 같은 작업 4개가 약 61초(경유점을 지나감)에서 78초(점마다 섬)가 됐다. 멈출 필요가 없는 점은 `mission.xml` 처럼 `NavigateThroughPoses` 로 지나가게 하는 가지를 따로 두면 된다.
 
 ---
 
@@ -990,16 +1255,17 @@ void TaskServerLifecycle::onPreempt(ExecuteTask::Goal::ConstSharedPtr goal)
 
 - **선점된 goal 의 result 는 빈 값이다.** `acceptPendingGoal()` 안에서 SimpleActionServer 가 빈 result 로 ABORTED 를 보낸다. `task_server` 처럼 `"preempted by t2"` 를 실어 보낼 방법이 없다.
 - **트리가 막 끝난 tick 에는 받지 않는다.** 그 tick 에 받으면, 끝난 작업의 SUCCESS 가 새 goal 의 결과로 보내진다.
-- **첫 feedback 은 50ms 늦춘다.** BtActionServer 는 goal 을 수락하자마자 다른 스레드에서 tick 을 시작한다. 그래서 첫 feedback 이 수락 응답보다 먼저 도착하면, 클라이언트는 모르는 goal 의 것으로 버린다. gtest 를 10번 돌렸을 때 이렇게 버려진 feedback 이 8개였고, 50ms 늦춘 뒤에는 0개였다. `task_server` 는 수락한 goal 을 다음 step 에 시작해서 같은 문제를 피한다 (9-3).
+- **첫 feedback 은 50ms 늦춘다.** BtActionServer 는 goal 을 수락하자마자 다른 스레드에서 tick 을 시작한다. 그래서 첫 feedback 이 수락 응답보다 먼저 도착하면, 클라이언트는 모르는 goal 의 것으로 버린다. gtest 를 10번 돌렸을 때 이렇게 버려진 feedback 이 8개였고, 50ms 늦춘 뒤에는 0개였다. `task_server` 는 수락한 goal 을 다음 step 에 시작해서 같은 문제를 피한다 (9-4).
 
 ### 10-4. 두 버전 비교
 
 같은 날 같은 Nav2 서버에 같은 순서로 보낸 결과와, 같은 경우를 확인하는 gtest (11-3, 11-4) 결과다.
+시간과 프로세스 수치는 점마다 멈추도록 바꾸기 전(`NavigateThroughPoses` 로 지나가던 때)에 쟀다. 두 버전의 차이를 보려는 것이라 그대로 두었다.
 
 | | `task_server` (직접 구현) | `task_server_lifecycle` (BtActionServer) |
 |---|---|---|
 | 작업 4개 (`mission.xml` 과 같은 것) | 모두 SUCCEEDED, 61.1 s | 모두 SUCCEEDED, 60.6 s |
-| 정상 / cancel / 이동 실패의 결과 | SUCCEEDED("done") / CANCELED("canceled") / ABORTED("go_look failed") | 같음 |
+| 정상 / cancel / 이동 실패의 결과 | SUCCEEDED("done") / CANCELED("canceled") / ABORTED("go_look failed at waypoint 1/1") | 같음 |
 | 선점된 작업 | ABORTED("preempted by t2") | ABORTED, message 빈 값 |
 | 점이 없는 작업 | 수락 단계에서 REJECTED | 수락된 뒤 ABORTED, message 빈 값 |
 | 작업 중 서버 Ctrl-C | ABORTED("task_server shutting down"). 신호 처리를 직접 짰다 | ABORTED("task server deactivated"). LifecycleNode 의 종료 처리 |
@@ -1049,30 +1315,34 @@ Gazebo 자체(월드, 스폰, AMCL)에서는 돌려 보지 못했다.
 | 항목 | BT 버전 | Python 버전 |
 |---|---|---|
 | 결과 | SUCCESS | SUCCESS |
-| 미션 시간 | 60.1~61.5 s (4회) | 59.8 s, 60.4 s (2회) |
+| 미션 시간 | 72.0 s | 71.5 s |
 | 경유점 (0,-1) 통과 속도 | 0.25 m/s (감속 없음) | 0.25 m/s |
-| 스캔 | 9개 (0.5 m 간격) | 9개 |
+| 스캔 | 10개 (0.5 m 간격) | 9개 |
 | B 에서 회전 | 363° | (같은 Spin) |
-| 정지 위치 오차 (A / B / 출발점) | 0.22 / 0.24 / 0.24 m | 출발점 0.24 m |
+| 정지 위치 오차 (A / B / 출발점) | 0.03 / 0.03 / 0.02 m | 0.03 / 0.04 / 0.04 m |
 | Ctrl-C | goal 취소, 로봇 정지 | goal 취소, 로봇 정지 |
+
+컨트롤러의 회전 정렬과 goal 허용오차를 바꾸기 전에는 미션 시간이 60~61.5 s, 정지 위치 오차가 0.22~0.24 m 였다.
+모서리에서 다 돈 뒤에 출발하고, 작업 지점에 더 가까이 가서 서는 만큼 시간이 늘었다.
 
 BT 버전 실행 중 노드별 RUNNING 구간과 로봇 속도:
 
 ![timeline](bt_mission/doc/timeline.png)
 
 - **경유점 (0,-1)**: 0.25 m/s 그대로 지나간다. `go_a` 하나가 경유점과 A 를 함께 처리한다.
-- **경유점 (1.5,1.5)**: 90° 꺾이는 곳이다. carrot 이 45° 넘게 틀어지면서 0.4초 제자리 회전했다. 컨트롤러 동작이고, 경유점이라서 멈춘 것은 아니다 ([MULTI_GOAL.md 4장](../simple_line/MULTI_GOAL.md#모서리에서)).
+- **경유점 (1.5,1.5)**: 90° 꺾이는 곳이다. carrot 이 45° 넘게 틀어지면 멈춰서, 다음 구간 쪽으로 방향이 다 맞을 때까지 1.2초 제자리 회전한 뒤 출발했다. 컨트롤러 동작이고, 경유점이라서 멈춘 것은 아니다 ([MULTI_GOAL.md 4장](../simple_line/MULTI_GOAL.md#모서리에서)).
 - **`scan`**: `go_b` 와 같은 구간에 RUNNING 이고, `go_b` 가 끝나는 순간 halt 된다.
-- **작업 지점 정지 위치**: A, B 모두 goal 에서 0.22~0.24 m 앞에서 멈췄다. goal checker 의 `xy_goal_tolerance` 0.25 m 안에 들어오면 도착으로 보기 때문이다. 더 정확히 서야 하면 이 값을 줄인다.
+- **작업 지점 정지 위치**: A, B 모두 goal 에서 0.03 m 안에 섰다. goal checker 의 `xy_goal_tolerance` 를 0.05 m 로 줄였기 때문이다 (Humble 기본 0.25 m 일 때는 0.22~0.24 m 앞에서 멈췄다).
 
 ### 11-2. 토픽으로 받은 작업 (`task_loop.xml`, `task_sender.py`)
 
-**단위 테스트** (`test/test_task_loop.cpp`, gtest 4개 통과): 실제 `task_loop.xml` 에 `mission/task` 토픽으로 Task 를 보내고, `mission/status` 와 노드 상태 변화를 본다. Nav2 노드만 가짜다.
+**단위 테스트** (`test/test_task_loop.cpp`, gtest 5개 통과): 실제 `task_loop.xml` 에 `mission/task` 토픽으로 Task 를 보내고, `mission/status` 와 노드 상태 변화를 본다. Nav2 노드만 가짜다.
 
 | 테스트 | 확인 내용 |
 |---|---|
-| `ActionChoosesTheBehavior` | 작업 5개(inspect, scan, look_around, 빈 action, 모르는 action). action 별로 맞는 가지가 실행되고(`scan` 은 주행이 끝나면 halt), 받은 순서대로 started → done. Task 의 waypoints 가 그대로 `goals` 로 전달됨 |
+| `ActionChoosesTheBehavior` | 작업 5개(inspect, scan, look_around, 빈 action, 모르는 action). action 별로 맞는 가지가 실행되고(`scan` 은 주행이 끝나면 halt), 받은 순서대로 started → arrived 1/2 → arrived 2/2 → done. Task 의 점이 차례로 `NavigateToPose` 의 goal 로 가고, 작업(`work`)은 마지막 점에 도착한 뒤 시작 |
 | `FailedTaskIsReportedAndTheLoopGoesOn` | 이동 실패 → `"t1 failed"` 보고, 다음 작업은 그대로 실행 |
+| `FailureStopsAtThatWaypoint` | 점 3개 중 둘째 점에서 이동 실패 → `"t1 arrived 1/3"` 뒤 `"t1 failed"`. 셋째 점으로는 가지 않음 |
 | `TaskWithoutWaypointsIsRejected` | 점이 없는 작업 → `"t1 rejected: no waypoints"`. id 가 없는 작업 → BT 가 `task2` 로 이름 붙임 |
 | `WaitsWhileThereIsNoTask` | 작업이 없으면 RUNNING 을 유지하고 `"waiting for a task"` 보고 |
 
@@ -1080,57 +1350,71 @@ BT 버전 실행 중 노드별 RUNNING 구간과 로봇 속도:
 
 | 항목 | 결과 |
 |---|---|
-| `mission.xml` 과 같은 작업 4개를 한 번에 입력 | 모두 done. 입력 노드 실행부터 마지막 done 까지 약 59초 (`mission.xml` 버전 60~61초) |
-| t1 경유점 (0,-1) 통과 속도 | 0.25 m/s (감속 없음) |
-| t2 스캔 | 9개 (0.5 m 간격), 주행이 끝나며 halt |
+| `mission.xml` 과 같은 작업 4개를 한 번에 입력 | 모두 done, 78.4 s. 점마다 `arrived i/n` 보고 (점마다 멈추기 전에는 약 59초) |
+| t2 스캔 | 10개 (0.5 m 간격), 마지막 점에 도착하며 halt |
 | t3 `look_around` | 이동 후 `Spin` SUCCESS |
-| 한 번만 보내기 (`inspect:1 -1,-1,0`) | done 을 받고 종료 코드 0 |
+| 한 번만 보내기 (`go 0,-1 0,1 -2,-1,0`) | arrived 1/3, 2/3, 3/3, done 을 받고 종료 코드 0 |
 | 작업 중 `mission_bt_runner` Ctrl-C | Nav2 goal 취소, 로봇 정지 |
 | 입력 노드 Ctrl-C | 오류 없이 종료 (BT 는 받은 작업을 계속) |
 
 ### 11-3. 액션으로 맡긴 작업 (`task_server`, `task_client.py`)
 
-**단위 테스트** (`test/test_task_server.cpp`, gtest 6개 통과): 실제 `task.xml` 과 `TaskServer` 에 액션 클라이언트로 goal 을 보낸다. Nav2 노드만 가짜다.
+**단위 테스트** (`test/test_task_server.cpp`, gtest 7개 통과. 30번 반복해서 210/210): 실제 `task.xml` 과 `TaskServer` 에 액션 클라이언트로 goal 을 보낸다. Nav2 노드만 가짜다.
 
 | 테스트 | 확인 내용 |
 |---|---|
-| `RunsATaskAndReportsFeedback` | inspect → SUCCEEDED("done"). feedback 의 `running` 이 `go_inspect` → `work` 로 바뀜. waypoints 가 그대로 `goals` 로 전달됨 |
+| `RunsATaskAndReportsFeedback` | 점 2개 inspect → SUCCEEDED("done"). feedback 이 (`go_inspect`, 도착 0) → (`go_inspect`, 1) → (`work`, 2) 로 바뀜. 점 사이에도 `running` 이 비지 않음. 점이 차례로 `NavigateToPose` 의 goal 로 감 |
 | `RunsTasksOneAfterAnother` | 같은 서버로 작업 두 개 (scan, look_around) 를 차례로 → 둘 다 SUCCEEDED (트리가 작업마다 초기화됨) |
 | `NewGoalPreemptsTheRunningOne` | 작업 a 실행 중에 b 를 보냄 → a 는 ABORTED("preempted by b"), a 의 이동 노드 halt, b 는 SUCCEEDED |
 | `CancelHaltsTheTask` | scan 실행 중 cancel → CANCELED, 이동과 스캔 노드 모두 halt |
-| `FailedNavigationAbortsWithTheNodeName` | 이동 실패 → ABORTED("go_look failed"), 회전은 하지 않음 |
+| `FailedNavigationAbortsWithTheNodeName` | 이동 실패 → ABORTED("go_look failed at waypoint 1/1"), 회전은 하지 않음 |
+| `FailureStopsAtThatWaypoint` | 점 3개 중 둘째 점에서 실패 → ABORTED("go_only failed at waypoint 2/3"), 셋째 점으로는 가지 않음 |
 | `RejectsATaskWithoutWaypoints` | 점이 없는 goal → 거절 |
+
+이 테스트는 30번 중 한 번꼴로 멈춰 있었다. 클라이언트가 서버를 찾은 직후에 보낸 goal 의 응답이 사라지는 경우인데 (서버가 아직 클라이언트의 응답 구독을 찾지 못한 때), 테스트가 응답을 시간 제한 없이 기다리고 있었다. 지금은 클라이언트를 만든 뒤 잠깐 기다리고, 응답이 없으면 멈추지 않고 실패로 끝낸다.
 
 **Nav2 서버로 실행**: `task_server` 를 띄우고 `task_client.py` 와 `ros2 action` 명령으로 보냈다.
 
 | 항목 | 결과 |
 |---|---|
-| `mission.xml` 과 같은 작업 4개를 한 번에 입력 (클라이언트가 차례로 보냄) | 모두 SUCCEEDED. 클라이언트 실행부터 끝까지 약 61초 |
-| t1 경유점 (0,-1) 통과 속도 | 0.25 m/s (감속 없음) |
-| t2 feedback | `go_scan, scanning` (이동과 스캔이 동시에 RUNNING) |
+| `mission.xml` 과 같은 작업 4개를 한 번에 입력 (클라이언트가 차례로 보냄) | 모두 SUCCEEDED, 78.5 s (점마다 멈추기 전 약 61초) |
+| 점마다 도착 | 6개 점 모두 도착 보고, 도착할 때 로봇과 점의 거리 3.5~4.9 cm |
+| t2 feedback | `go_scan, scanning` (이동과 스캔이 동시에 RUNNING), 스캔 10개 |
 | 선점 (`!go`) | t1 ABORTED("preempted by t2"), 이어서 t2 SUCCEEDED |
 | `cancel` 명령 | t1 CANCELED, bt_navigator 의 goal 취소, 로봇 정지 |
 | 클라이언트 Ctrl-C | t1 CANCELED, 로봇 정지 |
-| `ros2 action send_goal --feedback` | feedback `go_inspect` → `work`, SUCCEEDED |
+| `ros2 action send_goal --feedback` (9-5-5 의 두 명령) | 도착할 때마다 `waypoints_reached` 증가, SUCCEEDED. 점이 없는 goal 은 `Goal was rejected.` |
 | 작업 중 `task_server` Ctrl-C | 클라이언트에 ABORTED("task_server shutting down"), Nav2 goal 취소, 로봇 정지 |
+
+점 4개짜리 작업(`go 0,-1 0,1.5 -2,1.5 -2,-1,0`, 사각형)의 구간별 결과. 출발할 때 남은 방향 오차는 다음 점을 향해 다 돈 뒤 출발했는지를 보여 준다.
+
+| 구간 | 출발할 때 남은 방향 오차 | 직선에서 벗어난 최대 거리 | 정지 위치와 점의 거리 |
+|---|---|---|---|
+| (-2,-1) → (0,-1) | 0.0° | 0.0 cm | 3.5 cm |
+| (0,-1) → (0,1.5) | 1.7° | 1.0 cm | 3.4 cm |
+| (0,1.5) → (-2,1.5) | 0.6° | 0.2 cm | 3.1 cm |
+| (-2,1.5) → (-2,-1) | 0.3° | 0.2 cm | 3.0 cm |
+
+(0,-1) 처럼 yaw 를 생략한 점에서는 도착할 때 다음 점 쪽으로 돌아 둔다. 그래서 다음 구간은 출발할 때 더 돌지 않는다.
 
 액션 버전을 만들면서 토픽 버전의 문제를 하나 찾아 고쳤다. `WaitForTask` 와 `Log` 가 상태 publisher 를 따로 쓰고 있어서, `"started"` 가 `"accepted"` 보다 먼저 도착하는 일이 있었다. 지금은 ROS 노드마다 publisher 하나를 같이 쓴다.
 
 ### 11-4. BtActionServer 버전 (`task_server_lifecycle`)
 
-**단위 테스트** (`test/test_task_server_lifecycle.cpp`, gtest 7개 통과. 10번 반복해서 70/70): 11-3 과 같은 경우를 lifecycle 노드로 확인한다. 서버 노드는 다른 스레드에서 spin 하고, Nav2 노드는 가짜 플러그인(`test_fake_nav2`)으로 바꿨다. 직접 만든 노드는 `bt_mission_plugin` 을 그대로 쓴다.
+**단위 테스트** (`test/test_task_server_lifecycle.cpp`, gtest 8개 통과. 10번 반복해서 80/80): 11-3 과 같은 경우를 lifecycle 노드로 확인한다. 서버 노드는 다른 스레드에서 spin 하고, Nav2 노드는 가짜 플러그인(`test_fake_nav2`)으로 바꿨다. 직접 만든 노드는 `bt_mission_plugin` 을 그대로 쓴다.
 
 | 테스트 | 확인 내용 |
 |---|---|
-| `RunsATaskAndReportsFeedback` | inspect → SUCCEEDED("done"). feedback 의 `running` 이 `go_inspect` → `work`. waypoints 가 그대로 `goals` 로 |
+| `RunsATaskAndReportsFeedback` | 점 2개 inspect → SUCCEEDED("done"). feedback 이 (`go_inspect`, 0) → (`go_inspect`, 1) → (`work`, 2) |
 | `RunsTasksOneAfterAnother` | 작업 두 개 (scan, look_around) 를 차례로 → 둘 다 SUCCEEDED |
 | `NewGoalPreemptsTheRunningOne` | a 는 ABORTED (message 빈 값), a 의 이동 노드 halt, b 는 SUCCEEDED |
 | `CancelHaltsTheTask` | feedback `go_scan, scanning` → cancel → CANCELED("canceled"), 이동 노드 halt |
-| `FailedNavigationAbortsWithTheNodeName` | ABORTED("go_look failed"), 회전은 하지 않음 |
+| `FailedNavigationAbortsWithTheNodeName` | ABORTED("go_look failed at waypoint 1/1"), 회전은 하지 않음 |
+| `FailureStopsAtThatWaypoint` | ABORTED("go_only failed at waypoint 2/3"), 셋째 점으로는 가지 않음 |
 | `TaskWithoutWaypointsIsAcceptedThenAborted` | 점이 없는 goal → 수락된 뒤 ABORTED (`task_server` 는 거절) |
 | `DeactivateStopsTheRunningTask` | 작업 중 deactivate → ABORTED("task server deactivated"), 이동 노드 halt. inactive 에서는 goal 거절 |
 
-**Nav2 서버로 실행**: launch 로 lifecycle_manager 와 같이 띄우고 11-3 과 같은 순서로 보냈다.
+**Nav2 서버로 실행**: launch 로 lifecycle_manager 와 같이 띄우고 11-3 과 같은 순서로 보냈다. 아래 표는 점마다 멈추도록 바꾸기 전에 쟀고, 바꾼 뒤에는 점 2개 inspect (`inspect:1 0,-1 0,1,90`) 를 보내 arrived 1/2 → 2/2 → work → SUCCEEDED 를 확인했다.
 
 | 항목 | 결과 |
 |---|---|
@@ -1151,7 +1435,7 @@ BT 버전 실행 중 노드별 RUNNING 구간과 로봇 속도:
 | 경유점을 멈추지 않고 지나 최종 goal 에서만 서면 된다 | `NavigateThroughPoses` ([MULTI_GOAL.md](../simple_line/MULTI_GOAL.md) 의 `send_waypoints.py`, 또는 미션의 한 단계) |
 | 지점마다 멈춰서 같은 작업을 하고, 순서가 고정이다 | `waypoint_follower` ([MULTI_GOAL.md 5장](../simple_line/MULTI_GOAL.md#5-멈춰-가며-경유하기-waypoint_follower)). 작업은 task executor 플러그인으로 |
 | 경유, 정지 작업, 주행 중 작업, 실패 처리가 섞인다 | 상위 작업 계층 (이 문서) |
-| 위와 같고, 어디로 가서 무엇을 할지는 실행 중에 사람이나 서버가 정한다 | **`task_server` + ExecuteTask 액션 (9장)**. 결과, 취소, 선점이 표준으로 있다. 토픽 버전(8장)은 가장 단순한 형태 |
+| 위와 같고, 어디로 가서 무엇을 할지는 실행 중에 사람이나 서버가 정한다 | **`task_server` + ExecuteTask 액션 (9장)**. 점마다 멈춰서 도착을 알리고, 결과, 취소, 선점이 표준으로 있다. 토픽 버전(8장)은 가장 단순한 형태 |
 | 위와 같고, 서버를 Nav2 처럼 lifecycle_manager 로 관리한다 | `task_server_lifecycle` (10장). 비교와 고르는 기준은 10-4, 10-5 |
 
 상위 작업 계층은 Python 으로 시작해서, 복잡해지면 BT 로 옮기는 것을 권한다.
@@ -1182,6 +1466,8 @@ BT 버전 실행 중 노드별 RUNNING 구간과 로봇 속도:
 - **도착 직후 회전 감속이 조금 남는다.** goal checker 가 도착을 판정한 직후에도 velocity_smoother 가 감속하는 0.2초 정도 각속도가 남았다 (최대 0.68 rad/s). 작업이 완전한 정지를 요구하면, 작업 노드 앞에 "속도가 0 인지" 확인하는 조건 노드를 두면 된다.
 - **토픽으로 받은 작업은 취소할 수 없다.** 받은 순서대로 끝까지 실행한다 (8-6). 취소가 필요하면 액션 버전(9장)을 쓴다.
 - **goals 포트 타입, tick 주기**: 5-3 을 본다.
+- **점에 얼마나 정확히 서나**: goal checker 의 `xy_goal_tolerance` / `yaw_goal_tolerance` 가 정한다. `simple_line_params.yaml` 에서 0.05m / 0.05rad 로 줄였다 (Humble 기본 0.25 / 0.25). 실측으로 점에서 3~5cm 안에 섰다.
+- **`ros2 action send_goal` 로 보낼 때 방향**: `orientation` 을 안 적으면 0° 다. 점마다 0° 로 돌았다가 다음 점으로 가므로, 방향을 적거나 `task_client.py` 를 쓴다 (9-5-5).
 - **`task_server` 와 `task_server_lifecycle` 은 같이 띄우지 않는다.** 둘 다 `/execute_task` 액션을 연다.
 
 ---
@@ -1196,15 +1482,15 @@ bt_navigator/
 └── bt_mission/
     ├── behavior_trees/
     │   ├── mission.xml                      좌표가 XML 에 있는 미션 (1~7장)
-    │   ├── task_loop.xml                    토픽으로 받은 작업을 하나씩 실행 (8장)
-    │   └── task.xml                         액션으로 받은 작업 하나를 실행 (9장)
+    │   ├── task_loop.xml                    토픽으로 받은 작업을 하나씩 실행, 점마다 NavigateToPose (8장)
+    │   └── task.xml                         액션으로 받은 작업 하나를 실행, 점마다 NavigateToPose (9장)
     ├── include/bt_mission/
     │   ├── mission_nodes.hpp                직접 만든 BT 노드 선언 (포트 포함)
     │   ├── bt_common.hpp                    노드 등록, blackboard, bt_navigator 대기, 상태 로거
     │   ├── task_server.hpp                  ExecuteTask 액션 서버 + BT 실행 (9장)
     │   └── task_server_lifecycle.hpp        같은 일을 BtActionServer + lifecycle 노드로 (10장)
     ├── src/
-    │   ├── mission_nodes.cpp                MakePose(s), DoWork, ScanWhileMoving, Log, WaitForTask
+    │   ├── mission_nodes.cpp                MakePose(s), DoWork, ScanWhileMoving, Log, WaitForTask, ForEachWaypoint
     │   ├── bt_common.cpp                    실행 노드들이 같이 쓰는 준비 코드 (노드 등록, 작업 → blackboard)
     │   ├── mission_bt_runner.cpp            XML 하나를 끝날 때까지 tick (mission.xml, task_loop.xml)
     │   ├── task_server.cpp                  goal 수락, 선점, 취소, feedback, result
@@ -1215,8 +1501,8 @@ bt_navigator/
     ├── launch/task_server_lifecycle.launch.py   task_server_lifecycle + lifecycle_manager
     ├── scripts/
     │   ├── mission_node.py                  mission.xml 과 같은 미션의 Python 버전 (BasicNavigator)
-    │   ├── task_sender.py                   8장의 입력 노드: Task 토픽 보내기, 상태 출력
-    │   └── task_client.py                   9장의 액션 클라이언트: 대기열, 선점(!), cancel, Ctrl-C 취소
+    │   ├── task_sender.py                   8장의 입력 노드: Task 토픽 보내기, 상태 출력 (한 줄 형식 해석)
+    │   └── task_client.py                   9장의 액션 클라이언트: 대기열, 선점(!), cancel, 도착 출력, Ctrl-C 취소
     ├── test/
     │   ├── test_mission.cpp                 gtest: 위치 문자열 해석 + mission.xml 흐름
     │   ├── test_task_loop.cpp               gtest: Task 토픽 → task_loop.xml 흐름

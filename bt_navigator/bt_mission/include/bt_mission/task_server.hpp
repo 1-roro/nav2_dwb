@@ -17,10 +17,10 @@ namespace bt_mission
 // ExecuteTask 액션 서버. goal 하나 = 작업 하나를 BT(task.xml)로 실행한다.
 //
 //   goal 수락   blackboard 에 waypoints / task_id / action / duration 을 쓰고 트리를 처음부터 tick
-//   실행 중     feedback: 지금 RUNNING 인 액션 노드, 지난 시간
+//   실행 중     feedback: 지금 RUNNING 인 액션 노드, 도착한 점 수, 지난 시간
 //   새 goal     지금 작업을 멈추고 ABORTED("preempted by <새 id>") 로 끝낸 뒤 새 작업 시작 (선점)
 //   cancel      트리를 halt (실행 중인 Nav2 goal 도 취소) 하고 CANCELED
-//   트리 끝     SUCCESS → SUCCEEDED("done"), FAILURE → ABORTED("<실패한 노드> failed")
+//   트리 끝     SUCCESS → SUCCEEDED("done"), FAILURE → ABORTED("<실패한 노드> failed [at waypoint i/n]")
 //
 // 요청 처리와 tick 은 모두 step() 안에서 한다. 실행 노드가 step() 을 tick_hz 로 부른다.
 class TaskServer
@@ -70,6 +70,8 @@ private:
   std::chrono::steady_clock::time_point started_;
   std::chrono::steady_clock::time_point last_feedback_;
   std::string last_running_;
+  int last_reached_{0};
+  int total_{0};                         // 이 작업의 점 수
   int count_{0};
 };
 

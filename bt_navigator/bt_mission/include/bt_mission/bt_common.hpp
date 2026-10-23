@@ -36,6 +36,13 @@ BT::Blackboard::Ptr createBlackboard(
 std::string writeTask(
   const BT::Blackboard::Ptr & blackboard, bt_mission_msgs::msg::Task task, int count);
 
+// ForEachWaypoint 가 blackboard 의 {waypoints_reached} 에 쓴, 지금까지 도착한 점 수 (없으면 0)
+int waypointsReached(const BT::Blackboard::Ptr & blackboard);
+
+// 트리가 FAILURE 로 끝났을 때 result 의 message.
+// "<실패한 노드> failed", 점을 다 들르지 못했으면 " at waypoint <i>/<n>" (가던 점) 을 붙인다
+std::string failureMessage(const std::string & failed_node, int reached, int total);
+
 // '/' 가 없는 이름은 이 패키지의 share/bt_mission/behavior_trees/ 에서 찾는다
 std::string resolveTreePath(const std::string & name);
 
@@ -56,7 +63,7 @@ public:
     BT::NodeStatus prev, BT::NodeStatus status) override;
   void flush() override {}
 
-  std::string running() const;                       // "go_scan, scanning"
+  std::string running() const;                       // 이름 순: "go_scan, scanning"
   const std::string & lastFailed() const {return last_failed_;}
   void clear();
 

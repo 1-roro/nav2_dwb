@@ -37,7 +37,7 @@ import tf2_ros
 from task_sender import fill_yaws, parse_line
 
 HELP = '''작업: <action>[:duration] x,y[,yaw_deg] [x,y[,yaw_deg] ...]   (map frame)
-  action: go | inspect | scan | look_around. 마지막 점에서 정지, 앞의 점은 경유점
+  action: go | inspect | scan | look_around. 점마다 멈춰서 도착을 알리고 다음 점으로, 작업은 마지막 점에서
   예) inspect 0,-1 1.5,-1,90    scan 1.5,1.5 -1,1.5,180    look_around -1,1.5,180    go -2,-1,0
   !<작업>: 지금 작업을 멈추고 바로 보냄    cancel: 지금 작업 취소 + 대기 비우기
   help: 이 도움말, quit 또는 Ctrl-D: 끝내기 (남은 작업이 끝날 때까지 기다림), Ctrl-C: 취소하고 끝내기'''
@@ -67,6 +67,8 @@ class TaskClient(Node):
         self.handles = {}           # 작업 id → goal handle
         self.last_xy = None         # 직전 작업의 마지막 점 (yaw 채우기용, 처음엔 로봇 위치)
         self.last_running = {}
+        self.last_reached = {}      # 작업 id → 도착을 출력한 점 수
+        self.sent = {}              # 작업 id → 보낸 Task (도착한 점 좌표 출력용)
         self.results = {}           # 작업 id → (상태, 메시지)
         self.count = 0
 
@@ -145,6 +147,7 @@ class TaskClient(Node):
                             for p in task.waypoints)
         print(f'  -> {task.id}: {task.action} {route}', flush=True)
         self.active = task.id
+        self.sent[task.id] = task
         future = self.client.send_goal_async(
             ExecuteTask.Goal(task=task),
             feedback_callback=lambda msg: self.on_feedback(msg.feedback))
@@ -171,11 +174,24 @@ class TaskClient(Node):
         self.handles[task_id] = handle
         handle.get_result_async().add_done_callback(lambda f: self.on_result(task_id, f))
 
+    def print_arrivals(self, task_id, reached, when=''):
+        """지난번 출력 뒤로 새로 도착한 점을 하나씩 출력한다."""
+        task = self.sent.get(task_id)
+        total = len(task.waypoints) if task is not None else reached
+        for i in range(self.last_reached.get(task_id, 0), reached):
+            where = ''
+            if task is not None and i < total:
+                p = task.waypoints[i].pose.position
+                where = f' ({p.x:g},{p.y:g})'
+            print(f'  .. {task_id}: arrived {i + 1}/{total}{where}{when}', flush=True)
+        self.last_reached[task_id] = max(self.last_reached.get(task_id, 0), reached)
+
     def on_feedback(self, feedback):
-        if feedback.running and feedback.running != self.last_running.get(feedback.task_id):
-            print(f'  .. {feedback.task_id}: {feedback.running} ({feedback.elapsed:.1f} s)',
-                  flush=True)
-        self.last_running[feedback.task_id] = feedback.running
+        task_id = feedback.task_id
+        self.print_arrivals(task_id, feedback.waypoints_reached, f' ({feedback.elapsed:.1f} s)')
+        if feedback.running and feedback.running != self.last_running.get(task_id):
+            print(f'  .. {task_id}: {feedback.running} ({feedback.elapsed:.1f} s)', flush=True)
+        self.last_running[task_id] = feedback.running
 
     def on_result(self, task_id, future):
         response = future.result()
@@ -183,6 +199,10 @@ class TaskClient(Node):
                       response.result.message)
 
     def finished(self, task_id, state, message):
+        # 마지막 점에 도착하면서 끝나는 작업(go, scan)은 그 도착을 담은 feedback 없이 결과가 온다.
+        # SUCCEEDED 면 모든 점에 도착한 것이므로 남은 도착을 여기서 출력한다
+        if state == 'SUCCEEDED' and task_id in self.sent:
+            self.print_arrivals(task_id, len(self.sent[task_id].waypoints))
         print(f'  <- {task_id} {state}: {message}', flush=True)
         self.results[task_id] = (state, message)
         self.handles.pop(task_id, None)

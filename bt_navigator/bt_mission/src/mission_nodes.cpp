@@ -1,6 +1,7 @@
 #include "bt_mission/mission_nodes.hpp"
 
 #include <cmath>
+#include <cstdio>
 #include <map>
 #include <memory>
 #include <stdexcept>
@@ -293,6 +294,88 @@ BT::NodeStatus Log::tick()
 
 // ---------------------------------------------------------------------------------------------
 
+ForEachWaypoint::ForEachWaypoint(const std::string & name, const BT::NodeConfiguration & config)
+: BT::DecoratorNode(name, config),
+  node_(config.blackboard->get<rclcpp::Node::SharedPtr>("node"))
+{
+  config.blackboard->get("tf_buffer", tf_);
+  status_pub_ = statusPublisher(node_);
+}
+
+BT::NodeStatus ForEachWaypoint::tick()
+{
+  if (status() == BT::NodeStatus::IDLE) {
+    poses_.clear();
+    if (!getInput("poses", poses_) || poses_.empty()) {
+      RCLCPP_ERROR(node_->get_logger(), "%s: no poses to visit", name().c_str());
+      return BT::NodeStatus::FAILURE;
+    }
+    index_ = 0;
+    setOutput("reached", 0);
+    setOutput("pose", poses_[0]);
+  }
+  setStatus(BT::NodeStatus::RUNNING);
+
+  // 한 점에 도착하면 같은 tick 에 다음 점을 시작한다. 점 사이에 실행 중인 노드가 없는 tick 이 생기지 않는다
+  while (true) {
+    const auto child_status = child_node_->executeTick();
+    if (child_status == BT::NodeStatus::RUNNING) {
+      return BT::NodeStatus::RUNNING;
+    }
+    haltChild();                         // 자식을 IDLE 로 돌려서 다음 점은 처음부터 시작하게 한다
+    if (child_status == BT::NodeStatus::FAILURE) {
+      return BT::NodeStatus::FAILURE;
+    }
+    ++index_;
+    setOutput("reached", static_cast<int>(index_));
+    reportArrival();
+    if (index_ == poses_.size()) {
+      return BT::NodeStatus::SUCCESS;
+    }
+    setOutput("pose", poses_[index_]);
+  }
+}
+
+void ForEachWaypoint::halt()
+{
+  index_ = 0;
+  BT::DecoratorNode::halt();
+}
+
+void ForEachWaypoint::reportArrival()
+{
+  std::string task_id, robot_frame;
+  getInput("task_id", task_id);
+  getInput("robot_frame", robot_frame);
+  const auto & goal = poses_[index_ - 1];
+  const std::string state =
+    "arrived " + std::to_string(index_) + "/" + std::to_string(poses_.size());
+
+  char where[96];
+  std::snprintf(
+    where, sizeof(where), " (%.2f, %.2f)", goal.pose.position.x, goal.pose.position.y);
+  std::string detail = where;
+  if (tf_) {
+    try {
+      const auto robot = tf_->lookupTransform(
+        goal.header.frame_id, robot_frame, tf2::TimePointZero).transform.translation;
+      std::snprintf(
+        where, sizeof(where), ", robot %.3f m away",
+        std::hypot(robot.x - goal.pose.position.x, robot.y - goal.pose.position.y));
+      detail += where;
+    } catch (const tf2::TransformException &) {
+    }
+  }
+  const std::string prefix = task_id.empty() ? "" : task_id + " ";
+  RCLCPP_INFO(
+    node_->get_logger(), "[waypoint] %s%s%s", prefix.c_str(), state.c_str(), detail.c_str());
+  std_msgs::msg::String status;
+  status.data = prefix + state;
+  status_pub_->publish(status);
+}
+
+// ---------------------------------------------------------------------------------------------
+
 WaitForTask::WaitForTask(const std::string & name, const BT::NodeConfiguration & config)
 : BT::StatefulActionNode(name, config),
   node_(config.blackboard->get<rclcpp::Node::SharedPtr>("node"))
@@ -374,6 +457,7 @@ void registerNodes(BT::BehaviorTreeFactory & factory)
   factory.registerNodeType<ScanWhileMoving>("ScanWhileMoving");
   factory.registerNodeType<Log>("Log");
   factory.registerNodeType<WaitForTask>("WaitForTask");
+  factory.registerNodeType<ForEachWaypoint>("ForEachWaypoint");
 }
 
 }  // namespace bt_mission

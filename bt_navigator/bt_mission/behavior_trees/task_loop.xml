@@ -6,12 +6,14 @@
 
   mission.xml 과 달리 좌표가 XML 에 없다. 위치와 할 일은 Task 메시지가 정하고,
   BT 는 "작업을 받으면 action 에 따라 어떻게 움직이고 무엇을 할지" 만 정한다.
+  점마다 ForEachWaypoint 가 NavigateToPose 를 한 번씩 보낸다. 로봇은 점마다 멈춰서 위치와 방향을 맞추고,
+  도착을 알린 뒤("t1 arrived 1/3") 다음 점으로 간다.
 
     action       동작
-    go (그 외)   경유점을 지나 마지막 점까지 이동
-    inspect      이동 → 정지 상태로 duration 초 작업
-    scan         가는 동안 0.5m 마다 스캔
-    look_around  이동 → 제자리에서 한 바퀴
+    go (그 외)   점을 차례로 들르기만
+    inspect      점을 차례로 들른 뒤, 마지막 점에서 정지 상태로 duration 초 작업
+    scan         점을 차례로 들르는 동안 0.5m 마다 스캔
+    look_around  점을 차례로 들른 뒤, 마지막 점에서 제자리 한 바퀴
 
   작업 하나가 실패해도 보고만 하고 다음 작업을 기다린다. 스스로 끝나지 않으므로 Ctrl-C 로 멈춘다.
 
@@ -33,18 +35,30 @@
             <Switch3 name="by_action" variable="{action}"
                      case_1="inspect" case_2="scan" case_3="look_around">
               <Sequence name="inspect">
-                <NavigateThroughPoses name="go_inspect" goals="{waypoints}"/>
+                <ForEachWaypoint name="inspect_points" poses="{waypoints}" pose="{waypoint}"
+                                 task_id="{task_id}">
+                  <NavigateToPose name="go_inspect" goal="{waypoint}"/>
+                </ForEachWaypoint>
                 <DoWork name="work" task="{task_id}" duration="{duration}"/>
               </Sequence>
               <Parallel name="scan" success_threshold="1" failure_threshold="1">
-                <NavigateThroughPoses name="go_scan" goals="{waypoints}"/>
+                <ForEachWaypoint name="scan_points" poses="{waypoints}" pose="{waypoint}"
+                                 task_id="{task_id}">
+                  <NavigateToPose name="go_scan" goal="{waypoint}"/>
+                </ForEachWaypoint>
                 <ScanWhileMoving name="scanning" interval="0.5"/>
               </Parallel>
               <Sequence name="look_around">
-                <NavigateThroughPoses name="go_look" goals="{waypoints}"/>
+                <ForEachWaypoint name="look_points" poses="{waypoints}" pose="{waypoint}"
+                                 task_id="{task_id}">
+                  <NavigateToPose name="go_look" goal="{waypoint}"/>
+                </ForEachWaypoint>
                 <Spin name="spin" spin_dist="6.28" time_allowance="20" is_recovery="false"/>
               </Sequence>
-              <NavigateThroughPoses name="go_only" goals="{waypoints}"/>
+              <ForEachWaypoint name="go_points" poses="{waypoints}" pose="{waypoint}"
+                               task_id="{task_id}">
+                <NavigateToPose name="go_only" goal="{waypoint}"/>
+              </ForEachWaypoint>
             </Switch3>
             <Log name="report_done" task_id="{task_id}" message="done"/>
           </Sequence>

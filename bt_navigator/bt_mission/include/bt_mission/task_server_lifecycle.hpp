@@ -64,6 +64,8 @@ private:
   std::chrono::steady_clock::time_point started_;
   std::chrono::steady_clock::time_point last_feedback_;
   std::string last_running_;
+  int last_reached_{0};
+  int total_{0};                         // 이 작업의 점 수
   int count_{0};
 };
 

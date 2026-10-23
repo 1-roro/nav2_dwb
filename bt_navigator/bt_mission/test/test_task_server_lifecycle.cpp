@@ -52,6 +52,7 @@ protected:
     client_node_ = std::make_shared<rclcpp::Node>("test_task_client");
     client_ = rclcpp_action::create_client<ExecuteTask>(client_node_, "execute_task");
     ASSERT_TRUE(client_->wait_for_action_server(5s));
+    spinFor(100ms);                     // 서버도 클라이언트의 응답 구독을 찾을 시간 (test_task_server.cpp 참고)
   }
 
   void TearDown() override
@@ -95,18 +96,27 @@ protected:
         feedback_.push_back(*feedback);
       };
     auto future = client_->async_send_goal(goal, options);
-    EXPECT_EQ(
-      rclcpp::spin_until_future_complete(client_node_, future, 5s),
-      rclcpp::FutureReturnCode::SUCCESS);
+    if (rclcpp::spin_until_future_complete(client_node_, future, 5s) !=
+      rclcpp::FutureReturnCode::SUCCESS)
+    {
+      ADD_FAILURE() << "no response to goal " << goal.task.id;
+      return nullptr;
+    }
     return future.get();
   }
 
   GoalHandle::WrappedResult waitResult(const GoalHandle::SharedPtr & handle)
   {
     auto future = client_->async_get_result(handle);
-    EXPECT_EQ(
-      rclcpp::spin_until_future_complete(client_node_, future, 30s),
-      rclcpp::FutureReturnCode::SUCCESS);
+    if (rclcpp::spin_until_future_complete(client_node_, future, 30s) !=
+      rclcpp::FutureReturnCode::SUCCESS)
+    {
+      ADD_FAILURE() << "no result";
+      GoalHandle::WrappedResult none;
+      none.code = ResultCode::UNKNOWN;
+      none.result = std::make_shared<ExecuteTask::Result>();
+      return none;
+    }
     return future.get();
   }
 
@@ -116,11 +126,14 @@ protected:
       client_node_, std::promise<void>().get_future(), duration);
   }
 
-  bool sawFeedback(const std::string & running) const
+  bool sawFeedback(const std::string & running, int reached = -1) const
   {
     return std::any_of(
       feedback_.begin(), feedback_.end(),
-      [&](const ExecuteTask::Feedback & f) {return f.running == running;});
+      [&](const ExecuteTask::Feedback & f) {
+        return f.running == running &&
+        (reached < 0 || f.waypoints_reached == static_cast<unsigned>(reached));
+      });
   }
 
   std::shared_ptr<bt_mission::TaskServerLifecycle> server_;
@@ -141,15 +154,17 @@ TEST_F(TaskServerLifecycleTest, RunsATaskAndReportsFeedback)
   EXPECT_TRUE(result.result->success);
   EXPECT_EQ(result.result->message, "done");
 
-  EXPECT_EQ(countFakeEvent("go_inspect:SUCCESS"), 1);
+  EXPECT_EQ(countFakeEvent("go_inspect:SUCCESS"), 2);  // 점마다 NavigateToPose 한 번
   const auto goals = fakeGoals("go_inspect");
-  ASSERT_EQ(goals.size(), 2u);                    // goal 의 waypoints 가 그대로 goals 로
+  ASSERT_EQ(goals.size(), 2u);                    // goal 의 점이 차례로 NavigateToPose 로
   EXPECT_DOUBLE_EQ(goals[1].pose.position.x, 1.5);
 
   ASSERT_FALSE(feedback_.empty());
   EXPECT_EQ(feedback_.front().task_id, "t1");
-  EXPECT_TRUE(sawFeedback("go_inspect"));
-  EXPECT_TRUE(sawFeedback("work"));
+  EXPECT_EQ(feedback_.front().waypoints_total, 2u);
+  EXPECT_TRUE(sawFeedback("go_inspect", 0));
+  EXPECT_TRUE(sawFeedback("go_inspect", 1));
+  EXPECT_TRUE(sawFeedback("work", 2));
 }
 
 TEST_F(TaskServerLifecycleTest, RunsTasksOneAfterAnother)
@@ -161,7 +176,7 @@ TEST_F(TaskServerLifecycleTest, RunsTasksOneAfterAnother)
   ASSERT_TRUE(second);
   EXPECT_EQ(waitResult(second).code, ResultCode::SUCCEEDED);
 
-  EXPECT_EQ(countFakeEvent("go_scan:SUCCESS"), 1);
+  EXPECT_EQ(countFakeEvent("go_scan:SUCCESS"), 2);
   EXPECT_EQ(countFakeEvent("go_look:SUCCESS"), 1);
   EXPECT_EQ(countFakeEvent("spin:SUCCESS"), 1);
 }
@@ -182,8 +197,8 @@ TEST_F(TaskServerLifecycleTest, NewGoalPreemptsTheRunningOne)
   EXPECT_EQ(waitResult(b).code, ResultCode::SUCCEEDED);
   EXPECT_EQ(countFakeEvent("go_only:HALTED"), 1); // a 의 이동을 멈춤 (실제로는 Nav2 goal 취소)
   const auto goals = fakeGoals("go_only");
-  ASSERT_EQ(goals.size(), 1u);
-  EXPECT_DOUBLE_EQ(goals[0].pose.position.x, 2.0);
+  ASSERT_EQ(goals.size(), 2u);                    // a 의 점, b 의 점
+  EXPECT_DOUBLE_EQ(goals[1].pose.position.x, 2.0);
 }
 
 TEST_F(TaskServerLifecycleTest, CancelHaltsTheTask)
@@ -211,8 +226,22 @@ TEST_F(TaskServerLifecycleTest, FailedNavigationAbortsWithTheNodeName)
   const auto result = waitResult(handle);
   EXPECT_EQ(result.code, ResultCode::ABORTED);
   EXPECT_FALSE(result.result->success);
-  EXPECT_EQ(result.result->message, "go_look failed");
+  EXPECT_EQ(result.result->message, "go_look failed at waypoint 1/1");
   EXPECT_EQ(countFakeEvent("spin:RUNNING"), 0);   // 이동이 실패하면 회전은 하지 않는다
+}
+
+TEST_F(TaskServerLifecycleTest, FailureStopsAtThatWaypoint)
+{
+  {
+    std::lock_guard<std::mutex> lock(g_fake_mutex);
+    g_outcomes["go_only"] = {true, false};        // 첫 점은 도착, 둘째 점에서 실패
+  }
+  auto handle = send(makeGoal("w", "go", {{1.0, 0.0}, {2.0, 0.0}, {2.0, 1.0}}));
+  ASSERT_TRUE(handle);
+  const auto result = waitResult(handle);
+  EXPECT_EQ(result.code, ResultCode::ABORTED);
+  EXPECT_EQ(result.result->message, "go_only failed at waypoint 2/3");
+  EXPECT_EQ(fakeGoals("go_only").size(), 2u);     // 셋째 점으로는 가지 않는다
 }
 
 TEST_F(TaskServerLifecycleTest, TaskWithoutWaypointsIsAcceptedThenAborted)
