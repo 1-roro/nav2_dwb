@@ -5,7 +5,9 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <functional>
 #include <future>
 #include <memory>
 #include <string>
@@ -40,8 +42,8 @@ protected:
     bt_mission::registerNodes(factory_);
 
     node_ = std::make_shared<rclcpp::Node>("test_task_server");
-    auto blackboard = bt_mission::createBlackboard(
-      node_, std::make_shared<tf2_ros::Buffer>(node_->get_clock()), 100.0);
+    tf_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
+    auto blackboard = bt_mission::createBlackboard(node_, tf_, 100.0);
     bt_mission::TaskServer::prepareBlackboard(blackboard);
     tree_ = factory_.createTreeFromFile(TASK_XML, blackboard);
     recorder_ = std::make_unique<Recorder>(tree_.rootNode());
@@ -62,9 +64,7 @@ protected:
   {
     server_->stop("test end");
     server_.reset();
-    g_outcomes.clear();
-    g_goals.clear();
-    g_ticks_to_finish = 3;
+    resetFakes();
   }
 
   void step()
@@ -74,6 +74,7 @@ protected:
     std::this_thread::sleep_for(2ms);
   }
 
+  // 이 테스트에는 레이저가 없으므로 obstacle 은 none (stop & go 는 test_stop_and_go.cpp 에서 본다)
   static ExecuteTask::Goal makeGoal(
     const std::string & id, const std::string & action,
     const std::vector<std::pair<double, double>> & points)
@@ -82,6 +83,7 @@ protected:
     goal.task.id = id;
     goal.task.action = action;
     goal.task.duration = 0.1;
+    goal.task.obstacle = bt_mission_msgs::msg::Task::OBSTACLE_NONE;
     for (const auto & [x, y] : points) {
       geometry_msgs::msg::PoseStamped pose;
       pose.header.frame_id = "map";
@@ -130,6 +132,7 @@ protected:
 
   BT::BehaviorTreeFactory factory_;
   rclcpp::Node::SharedPtr node_;
+  std::shared_ptr<tf2_ros::Buffer> tf_;
   BT::Tree tree_;
   std::unique_ptr<Recorder> recorder_;
   std::unique_ptr<bt_mission::TaskServer> server_;
@@ -248,6 +251,75 @@ TEST_F(TaskServerTest, FailureStopsAtThatWaypoint)
   EXPECT_EQ(result.code, ResultCode::ABORTED);
   EXPECT_EQ(result.result->message, "go_only failed at waypoint 2/3");
   EXPECT_EQ(g_goals["go_only"].size(), 2u);             // 셋째 점으로는 가지 않는다
+}
+
+TEST_F(TaskServerTest, StopAndGoWaitsForTheObstacleAndReportsIt)
+{
+  // 로봇은 map 의 (0, 0) 에서 +x 를 보고, 레이저는 로봇 중심에 있다
+  geometry_msgs::msg::TransformStamped t;
+  t.transform.rotation.w = 1.0;
+  t.header.frame_id = "map";
+  t.child_frame_id = "base_link";
+  tf_->setTransform(t, "test", true);
+  t.header.frame_id = "base_link";
+  t.child_frame_id = "base_scan";
+  tf_->setTransform(t, "test", true);
+  auto scan_pub = client_node_->create_publisher<sensor_msgs::msg::LaserScan>(
+    "scan", rclcpp::SensorDataQoS());
+  // steps 만큼 step 하면서 20 step(약 50ms) 마다 scan 을 보낸다. until 이 참이 되면 멈춘다
+  const auto run = [&](int steps, const std::vector<std::array<double, 3>> & obstacles,
+      const std::function<bool()> & until) {
+      for (int i = 0; i < steps && !until(); ++i) {
+        if (i % 20 == 0) {
+          scan_pub->publish(makeScan(obstacles));
+        }
+        step();
+      }
+      return until();
+    };
+  const auto saw_blocked = [this](bool value) {
+      return std::any_of(
+        feedback_.begin(), feedback_.end(),
+        [value](const ExecuteTask::Feedback & f) {return f.blocked == value;});
+    };
+
+  g_ticks_to_finish = 100000;
+  auto goal = makeGoal("s", "go", {{3.0, 0.0}});
+  goal.task.obstacle = "stop";
+  auto handle = send(goal);
+  ASSERT_TRUE(handle);
+  ASSERT_TRUE(run(1000, {}, [] {return fakeGoals("go_only").size() == 1;}));   // 출발
+
+  // 앞 0.4m 에 물체 → 이동을 멈추고(Nav2 goal 취소) feedback 의 blocked 가 true
+  feedback_.clear();
+  ASSERT_TRUE(run(1000, {{0.5, 0.0, 0.1}}, [&] {return saw_blocked(true);}));
+  EXPECT_EQ(countFakeEvent("go_only:HALTED"), 1);
+  EXPECT_TRUE(feedback_.back().running.empty());        // 기다리는 동안 RUNNING 인 이동 노드가 없다
+
+  // 길이 비면 1초(resume_delay) 뒤 같은 점으로 다시 출발하고, blocked 가 false
+  g_ticks_to_finish = 3;
+  feedback_.clear();
+  ASSERT_TRUE(run(2000, {}, [] {return fakeGoals("go_only").size() == 2;}));
+  const auto result = waitResult(handle);
+  EXPECT_EQ(result.code, ResultCode::SUCCEEDED);
+  EXPECT_TRUE(saw_blocked(false));
+}
+
+TEST_F(TaskServerTest, WithoutAScanTheRobotDoesNotStart)
+{
+  // 레이저가 없으면 막힌 것으로 보고 출발하지 않는다. task.xml 의 max_wait 는 0(계속 기다림)이라 취소로 끝낸다
+  auto goal = makeGoal("n", "go", {{1.0, 0.0}});
+  goal.task.obstacle = "stop";
+  auto handle = send(goal);
+  ASSERT_TRUE(handle);
+  for (int i = 0; i < 1000 && feedback_.empty(); ++i) {
+    step();
+  }
+  ASSERT_FALSE(feedback_.empty());
+  EXPECT_TRUE(feedback_.back().blocked);
+  EXPECT_TRUE(fakeGoals("go_only").empty());            // 출발하지 않았다
+  client_->async_cancel_goal(handle);
+  EXPECT_EQ(waitResult(handle).code, ResultCode::CANCELED);
 }
 
 TEST_F(TaskServerTest, RejectsATaskWithoutWaypoints)

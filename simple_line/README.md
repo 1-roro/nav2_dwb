@@ -118,6 +118,10 @@ ros2 launch simple_line_bringup simple_line.launch.py
 `params/simple_line_params.yaml` 을 덮어써서 `tb3_simulation_launch.py` 에 넘긴다.
 플러그인 이름을 기본 BT 가 부르는 `GridBased` / `FollowPath` 그대로 두었기 때문에 BT 는 바꾸지 않는다.
 
+같은 파일에 장애물을 피해 가는 planner `Avoid`(NavFn)와 controller `FollowPathAvoid`(Regulated Pure Pursuit)도
+등록되어 있다. 기본 BT 는 이 둘을 부르지 않는다. bt_navigator 미션에서 작업을 `avoid` 로 보낼 때만
+`navigate_avoid.xml` 트리를 통해 쓰인다 ([bt_navigator 7-3](../bt_navigator/README.md#7-3-돌아가게-하려면-avoid)).
+
 goal 에 도착했다고 보는 범위(goal checker)도 줄였다. Humble 기본값(xy 0.25m / yaw 0.25rad)이면 로봇이 goal
 20cm 남짓 앞에서 멈춘다.
 

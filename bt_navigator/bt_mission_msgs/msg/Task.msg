@@ -14,3 +14,8 @@ string ACTION_SCAN = "scan"               #   이동하는 동안 0.5m 마다 �
 string ACTION_LOOK_AROUND = "look_around" #   마지막 점에 도착한 뒤 제자리에서 한 바퀴 회전
 
 float64 duration                          # inspect 의 작업 시간 [s]
+
+string obstacle                           # 가는 길에 장애물이 있으면 어떻게 할지. 아래 중 하나, 빈 값이면 stop
+string OBSTACLE_STOP = "stop"             #   멈춰서 기다렸다가, 길이 비면 다시 간다 (stop & go, 레이저 /scan 필요)
+string OBSTACLE_AVOID = "avoid"           #   돌아서 간다 (장애물을 보는 planner / controller 와 navigate_avoid.xml)
+string OBSTACLE_NONE = "none"             #   장애물을 보지 않는다 (레이저가 없을 때. 장애물에 부딪힐 수 있다)

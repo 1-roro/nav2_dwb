@@ -12,16 +12,18 @@ task_loop.xml 로 실행 중인 미션 BT 에 작업을 보낸다.
   task> look_around -1,1.5,180      도착 후 제자리 한 바퀴
   task> go -2,-1,0                  이동만
   task> inspect:5 1,0,0             작업 시간 5초
+  task> go avoid 1,1                장애물이 있으면 돌아서 간다 (기본은 stop: 멈췄다가 비면 간다)
 
   # 작업 하나만 보내고, 끝날 때까지 기다렸다가 종료
   ros2 run bt_mission task_sender.py inspect 0,-1 1.5,-1,90
 
-한 줄 형식: <action>[:duration] x,y[,yaw_deg] [x,y[,yaw_deg] ...]
+한 줄 형식: <action>[:duration] [stop|avoid|none] x,y[,yaw_deg] [x,y[,yaw_deg] ...]
   - 좌표는 map frame. 로봇은 점마다 멈춰서 위치와 방향을 맞추고(도착 보고) 다음 점으로 간다.
     작업(inspect 의 점검, look_around 의 회전)은 마지막 점에서 한다
   - yaw 는 그 점에 도착했을 때 볼 방향 [deg]. 생략하면 중간 점은 다음 점 쪽,
     마지막 점은 직전 점에서 온 방향으로 채운다.
     작업의 첫 점은 직전 작업의 마지막 점(첫 작업이면 로봇 현재 위치)에서 온 것으로 본다
+  - stop | avoid | none: 길에 장애물이 있을 때. 생략하면 stop (멈춰서 기다렸다가 길이 비면 다시 간다)
 """
 
 import math
@@ -38,17 +40,22 @@ from std_msgs.msg import String
 import tf2_ros
 
 ACTIONS = (Task.ACTION_GO, Task.ACTION_INSPECT, Task.ACTION_SCAN, Task.ACTION_LOOK_AROUND)
+OBSTACLE_MODES = (Task.OBSTACLE_STOP, Task.OBSTACLE_AVOID, Task.OBSTACLE_NONE)
 DEFAULT_DURATION = 3.0
 FINAL_STATES = ('done', 'failed', 'rejected')
 
-HELP = '''한 줄에 작업 하나: <action>[:duration] x,y[,yaw_deg] [x,y[,yaw_deg] ...]   (map frame)
+HELP = '''한 줄에 작업 하나: <action>[:duration] [stop|avoid|none] x,y[,yaw_deg] [x,y[,yaw_deg] ...]   (map frame)
   action: go | inspect | scan | look_around. 점마다 멈춰서 도착을 알리고 다음 점으로, 작업은 마지막 점에서
-  예) inspect 0,-1 1.5,-1,90    scan 1.5,1.5 -1,1.5,180    look_around -1,1.5,180    go -2,-1,0
+  장애물: stop (기본, 멈췄다가 비면 다시 간다) | avoid (돌아서 간다) | none (보지 않는다)
+  예) inspect 0,-1 1.5,-1,90    scan 1.5,1.5 -1,1.5,180    look_around -1,1.5,180    go avoid -2,-1,0
   help: 이 도움말, quit 또는 Ctrl-D: 끝내기 (보낸 작업이 남아 있으면 끝날 때까지 기다림)'''
 
 
 def parse_line(text):
-    """'inspect:5 0,-1 1.5,-1,90' -> ('inspect', 5.0, [(0, -1, None), (1.5, -1, 90)])"""
+    """'inspect:5 avoid 0,-1 1.5,-1,90' -> ('inspect', 5.0, [(0, -1, None), (1.5, -1, 90)], 'avoid')
+
+    장애물 모드(stop | avoid | none)는 action 뒤 어디에 적어도 된다. 없으면 빈 값 (= stop).
+    """
     tokens = text.split()
     if len(tokens) < 2:
         raise ValueError('need an action and at least one point')
@@ -60,15 +67,22 @@ def parse_line(text):
     except ValueError:
         raise ValueError(f"duration '{duration}' is not a number (e.g. inspect:5)") from None
     points = []
+    obstacle = ''
     for token in tokens[1:]:
+        if token in OBSTACLE_MODES:
+            obstacle = token
+            continue
         try:
             values = [float(v) for v in token.split(',')]
         except ValueError:
             values = []
         if len(values) not in (2, 3):
-            raise ValueError(f"'{token}' is not x,y or x,y,yaw_deg")
+            raise ValueError(f"'{token}' is not x,y or x,y,yaw_deg "
+                             f"(or an obstacle mode: {', '.join(OBSTACLE_MODES)})")
         points.append((values[0], values[1], values[2] if len(values) == 3 else None))
-    return action, duration, points
+    if not points:
+        raise ValueError('need at least one point')
+    return action, duration, points, obstacle
 
 
 def fill_yaws(start_xy, points):
@@ -122,10 +136,10 @@ class TaskSender(Node):
             rclpy.spin_once(self, timeout_sec=0.1)
         return True
 
-    def send(self, task_id, action, duration, points):
+    def send(self, task_id, action, duration, points, obstacle=''):
         start = self.last_xy or self.robot_xy() or (points[0][0], points[0][1])
         filled = fill_yaws(start, points)
-        task = Task(id=task_id, action=action, duration=duration)
+        task = Task(id=task_id, action=action, duration=duration, obstacle=obstacle)
         stamp = self.get_clock().now().to_msg()
         for x, y, yaw in filled:
             pose = PoseStamped()
@@ -141,7 +155,8 @@ class TaskSender(Node):
         self.last_xy = (points[-1][0], points[-1][1])
         route = ' -> '.join(f'({x:g},{y:g},{math.degrees(yaw):.0f}°)' for x, y, yaw in filled)
         print(f'  -> {task_id}: {action} {route}' +
-              (f', {duration:g} s' if action == Task.ACTION_INSPECT else ''), flush=True)
+              (f', {duration:g} s' if action == Task.ACTION_INSPECT else '') +
+              (f', obstacle {obstacle}' if obstacle else ''), flush=True)
 
     def wait_until_finished(self, task_ids=None):
         while self.pending if task_ids is None else self.pending & set(task_ids):
@@ -176,7 +191,7 @@ def interactive(node):
             print(HELP)
             continue
         try:
-            action, duration, points = parse_line(line)
+            action, duration, points, obstacle = parse_line(line)
         except ValueError as e:
             print(f'  ! {e}')
             continue
@@ -185,21 +200,21 @@ def interactive(node):
                   'Is mission_bt_runner running with bt_xml:=task_loop.xml ?')
             continue
         count += 1
-        node.send(f't{count}', action, duration, points)
+        node.send(f't{count}', action, duration, points, obstacle)
     if node.pending:
         print(f'waiting for {len(node.pending)} task(s) to finish (Ctrl-C to quit)')
         node.wait_until_finished()
 
 
 def once(node, args):
-    action, duration, points = parse_line(' '.join(args))
+    action, duration, points, obstacle = parse_line(' '.join(args))
     if not node.wait_for_bt():
         print('no subscriber on mission/task. '
               'Is mission_bt_runner running with bt_xml:=task_loop.xml ?')
         return 1
     task_id = time.strftime('cli-%H%M%S')
     node.watch = task_id
-    node.send(task_id, action, duration, points)
+    node.send(task_id, action, duration, points, obstacle)
     node.wait_until_finished([task_id])
     return 0
 

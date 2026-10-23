@@ -68,6 +68,7 @@ protected:
     resetFakes();
   }
 
+  // 이 테스트에는 레이저가 없으므로 obstacle 은 none (stop & go 는 test_stop_and_go.cpp 에서 본다)
   static ExecuteTask::Goal makeGoal(
     const std::string & id, const std::string & action,
     const std::vector<std::pair<double, double>> & points)
@@ -76,6 +77,7 @@ protected:
     goal.task.id = id;
     goal.task.action = action;
     goal.task.duration = 0.1;
+    goal.task.obstacle = bt_mission_msgs::msg::Task::OBSTACLE_NONE;
     for (const auto & [x, y] : points) {
       geometry_msgs::msg::PoseStamped pose;
       pose.header.frame_id = "map";

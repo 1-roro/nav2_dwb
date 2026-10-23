@@ -16,6 +16,7 @@
 #include "nav2_behavior_tree/bt_conversions.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "bt_mission_msgs/msg/task.hpp"
+#include "sensor_msgs/msg/laser_scan.hpp"
 #include "std_msgs/msg/string.hpp"
 #include "tf2_ros/buffer.h"
 
@@ -170,6 +171,7 @@ public:
       BT::OutputPort<std::string>("task_id"),
       BT::OutputPort<std::string>("action"),
       BT::OutputPort<double>("duration"),
+      BT::OutputPort<std::string>("obstacle"),
     };
   }
 
@@ -189,6 +191,103 @@ private:
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
   std::deque<bt_mission_msgs::msg::Task> queue_;
   int count_{0};
+};
+
+// ---------------------------------------------------------------------------------------------
+// 장애물 처리
+// ---------------------------------------------------------------------------------------------
+
+// 작업의 obstacle 값(빈 값 / stop / avoid / none)을 아래 두 blackboard 값으로 바꾼다.
+//   stop_and_go : StopAndGo 를 켤지. stop, 빈 값이면 true
+//   nav_bt      : NavigateToPose 가 bt_navigator 에 보낼 navigation BT 파일.
+//                 avoid 면 avoid_bt (장애물을 보는 planner / controller 를 부르는 트리), 아니면 빈 값(기본 트리)
+// 모르는 값이면 FAILURE.
+class ObstacleMode : public BT::SyncActionNode
+{
+public:
+  ObstacleMode(const std::string & name, const BT::NodeConfiguration & config);
+
+  static BT::PortsList providedPorts()
+  {
+    return {
+      BT::InputPort<std::string>("mode", "", "stop | avoid | none, empty: stop"),
+      BT::InputPort<std::string>(
+        "avoid_bt", "navigate_avoid.xml",
+        "navigation BT for avoid. A name without '/' is looked up in bt_mission's behavior_trees/"),
+      BT::OutputPort<bool>("stop_and_go"),
+      BT::OutputPort<std::string>("nav_bt"),
+    };
+  }
+
+  BT::NodeStatus tick() override;
+
+private:
+  rclcpp::Node::SharedPtr node_;
+};
+
+// stop & go. 자식(NavigateToPose)이 가는 길에 장애물이 있으면 자식을 멈추고(Nav2 goal 취소) 기다리다가,
+// 길이 resume_delay 초 동안 비어 있으면 자식을 다시 시작한다(같은 goal 을 다시 보낸다).
+//   길    : 로봇에서 goal 까지의 직선 가운데 앞쪽 stop_distance 까지, 폭 2 x half_width 인 띠
+//   장애물: 레이저(scan_topic)의 점. scan 이 scan_timeout 초 넘게 오지 않으면 막힌 것으로 본다
+// 멈춰 있는 동안 blocked 에 true 를 쓰고, mission/status 로 "<task_id> blocked: ..." / "resumed" 를 알린다.
+// max_wait > 0 이면 그보다 오래 막혀 있을 때 FAILURE. enabled 가 false 면 아무것도 보지 않고 자식만 실행한다.
+//
+// Nav2 의 bt_navigator 에 맡기지 않고 여기서 멈추는 이유: simple_line 의 planner / controller 는 장애물을
+// 보지 않는다. 또 goal 을 그대로 둔 채 로봇만 세우면 controller_server 의 progress checker 가 10초 뒤
+// 실패를 내고, bt_navigator 가 recovery(제자리 회전, 후진)를 시작한다.
+class StopAndGo : public BT::DecoratorNode
+{
+public:
+  StopAndGo(const std::string & name, const BT::NodeConfiguration & config);
+
+  static BT::PortsList providedPorts()
+  {
+    return {
+      BT::InputPort<bool>("enabled", true, "false: just run the child"),
+      BT::InputPort<geometry_msgs::msg::PoseStamped>("goal", "where the child is going"),
+      BT::InputPort<double>("stop_distance", 0.6, "stop for an obstacle this close ahead [m]"),
+      BT::InputPort<double>("half_width", 0.25, "half width of the path [m] (robot radius + margin)"),
+      BT::InputPort<double>("resume_delay", 1.0, "the path must stay clear this long [s]"),
+      BT::InputPort<double>("max_wait", 0.0, "fail after being blocked this long [s], 0: wait"),
+      BT::InputPort<std::string>("scan_topic", "scan", "sensor_msgs/LaserScan topic"),
+      BT::InputPort<double>("scan_timeout", 1.0, "no scan for this long counts as blocked [s]"),
+      BT::InputPort<std::string>("robot_frame", "base_link", "robot base frame"),
+      BT::InputPort<std::string>("task_id", "", "prefix of the status report"),
+      BT::OutputPort<bool>("blocked", "true while stopped for an obstacle"),
+    };
+  }
+
+  void halt() override;
+
+private:
+  // 길 검사 결과. blocked 이면 reason 에 이유 ("obstacle 0.52 m ahead", "no scan on scan")
+  struct PathCheck
+  {
+    bool blocked{false};
+    std::string reason;
+  };
+
+  BT::NodeStatus tick() override;
+  PathCheck checkPath(const geometry_msgs::msg::PoseStamped & goal);
+  BT::NodeStatus startChild();
+  void report(const std::string & text, bool warn);
+
+  enum class State {kIdle, kGoing, kWaiting};
+
+  rclcpp::Node::SharedPtr node_;
+  std::shared_ptr<tf2_ros::Buffer> tf_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
+  // scan 콜백은 이 노드를 tick 할 때만 처리한다 (WaitForTask 와 같은 방식)
+  rclcpp::CallbackGroup::SharedPtr callback_group_;
+  rclcpp::executors::SingleThreadedExecutor executor_;
+  rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
+  sensor_msgs::msg::LaserScan::ConstSharedPtr scan_;
+  std::string scan_topic_;
+  std::chrono::system_clock::time_point scan_time_;   // scan 을 보낸 시각
+  State state_{State::kIdle};
+  std::chrono::steady_clock::time_point blocked_since_;
+  std::chrono::steady_clock::time_point clear_since_;
+  bool clear_{false};                    // 기다리는 동안 길이 비어 있는지 (clear_since_ 부터)
 };
 
 }  // namespace bt_mission

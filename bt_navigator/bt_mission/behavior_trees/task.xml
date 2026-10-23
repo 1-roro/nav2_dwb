@@ -4,8 +4,8 @@
     task_client.py ──(execute_task 액션: goal = Task)──▶ task_server ─▶ 이 트리를 처음부터 tick
                    ◀─ feedback (실행 중인 노드, 도착한 점 수), result (성공 여부, 이유) ─┘
 
-  task_server 가 goal 을 받으면 blackboard 에 {waypoints} {task_id} {action} {duration} 을 쓰고 이 트리를
-  끝날 때까지 tick 한다. 트리가 SUCCESS 면 goal 은 SUCCEEDED, FAILURE 면 ABORTED 가 된다.
+  task_server 가 goal 을 받으면 blackboard 에 {waypoints} {task_id} {action} {duration} {obstacle} 을 쓰고
+  이 트리를 끝날 때까지 tick 한다. 트리가 SUCCESS 면 goal 은 SUCCEEDED, FAILURE 면 ABORTED 가 된다.
   작업을 기다리고, 실패를 보고하고, 다음 작업을 받는 일은 서버가 하므로 트리에는 "한 작업을 어떻게 하나" 만 남는다.
 
   점마다 ForEachWaypoint 가 NavigateToPose 를 한 번씩 보낸다. 로봇은 점마다 멈춰서 위치와 방향을 맞추고,
@@ -16,36 +16,61 @@
     inspect      점을 차례로 들른 뒤, 마지막 점에서 정지 상태로 duration 초 작업
     scan         점을 차례로 들르는 동안 0.5m 마다 스캔
     look_around  점을 차례로 들른 뒤, 마지막 점에서 제자리 한 바퀴
+
+  장애물 (작업의 obstacle 값. 맨 앞의 ObstacleMode 가 {stop_and_go} 와 {nav_bt} 로 바꾼다)
+
+    obstacle      동작
+    stop (기본)   StopAndGo 가 레이저로 로봇 앞길을 본다. 막히면 NavigateToPose 를 멈추고(goal 취소) 기다리다가,
+                  길이 1초 동안 비어 있으면 같은 점으로 다시 보낸다 (stop & go)
+    avoid         StopAndGo 는 꺼진다. NavigateToPose 가 navigate_avoid.xml 을 보내서, bt_navigator 가
+                  장애물을 보는 planner / controller (Avoid / FollowPathAvoid) 로 돌아간다
+    none          장애물을 보지 않는다
 -->
 <root main_tree_to_execute="Task">
   <BehaviorTree ID="Task">
-    <Switch3 name="by_action" variable="{action}"
-             case_1="inspect" case_2="scan" case_3="look_around">
-      <Sequence name="inspect">
-        <ForEachWaypoint name="inspect_points" poses="{waypoints}" pose="{waypoint}"
+    <Sequence name="task">
+      <ObstacleMode name="obstacle_mode" mode="{obstacle}" avoid_bt="navigate_avoid.xml"
+                    stop_and_go="{stop_and_go}" nav_bt="{nav_bt}"/>
+      <Switch3 name="by_action" variable="{action}"
+               case_1="inspect" case_2="scan" case_3="look_around">
+        <Sequence name="inspect">
+          <ForEachWaypoint name="inspect_points" poses="{waypoints}" pose="{waypoint}"
+                           reached="{waypoints_reached}" task_id="{task_id}">
+            <StopAndGo name="stop_go" enabled="{stop_and_go}" goal="{waypoint}"
+                       blocked="{blocked}" task_id="{task_id}">
+              <NavigateToPose name="go_inspect" goal="{waypoint}" behavior_tree="{nav_bt}"/>
+            </StopAndGo>
+          </ForEachWaypoint>
+          <DoWork name="work" task="{task_id}" duration="{duration}"/>
+        </Sequence>
+        <Parallel name="scan" success_threshold="1" failure_threshold="1">
+          <ForEachWaypoint name="scan_points" poses="{waypoints}" pose="{waypoint}"
+                           reached="{waypoints_reached}" task_id="{task_id}">
+            <StopAndGo name="stop_go" enabled="{stop_and_go}" goal="{waypoint}"
+                       blocked="{blocked}" task_id="{task_id}">
+              <NavigateToPose name="go_scan" goal="{waypoint}" behavior_tree="{nav_bt}"/>
+            </StopAndGo>
+          </ForEachWaypoint>
+          <ScanWhileMoving name="scanning" interval="0.5"/>
+        </Parallel>
+        <Sequence name="look_around">
+          <ForEachWaypoint name="look_points" poses="{waypoints}" pose="{waypoint}"
+                           reached="{waypoints_reached}" task_id="{task_id}">
+            <StopAndGo name="stop_go" enabled="{stop_and_go}" goal="{waypoint}"
+                       blocked="{blocked}" task_id="{task_id}">
+              <NavigateToPose name="go_look" goal="{waypoint}" behavior_tree="{nav_bt}"/>
+            </StopAndGo>
+          </ForEachWaypoint>
+          <Spin name="spin" spin_dist="6.28" time_allowance="20" is_recovery="false"/>
+        </Sequence>
+        <ForEachWaypoint name="go_points" poses="{waypoints}" pose="{waypoint}"
                          reached="{waypoints_reached}" task_id="{task_id}">
-          <NavigateToPose name="go_inspect" goal="{waypoint}"/>
+          <StopAndGo name="stop_go" enabled="{stop_and_go}" goal="{waypoint}"
+                     blocked="{blocked}" task_id="{task_id}">
+            <NavigateToPose name="go_only" goal="{waypoint}" behavior_tree="{nav_bt}"/>
+          </StopAndGo>
         </ForEachWaypoint>
-        <DoWork name="work" task="{task_id}" duration="{duration}"/>
-      </Sequence>
-      <Parallel name="scan" success_threshold="1" failure_threshold="1">
-        <ForEachWaypoint name="scan_points" poses="{waypoints}" pose="{waypoint}"
-                         reached="{waypoints_reached}" task_id="{task_id}">
-          <NavigateToPose name="go_scan" goal="{waypoint}"/>
-        </ForEachWaypoint>
-        <ScanWhileMoving name="scanning" interval="0.5"/>
-      </Parallel>
-      <Sequence name="look_around">
-        <ForEachWaypoint name="look_points" poses="{waypoints}" pose="{waypoint}"
-                         reached="{waypoints_reached}" task_id="{task_id}">
-          <NavigateToPose name="go_look" goal="{waypoint}"/>
-        </ForEachWaypoint>
-        <Spin name="spin" spin_dist="6.28" time_allowance="20" is_recovery="false"/>
-      </Sequence>
-      <ForEachWaypoint name="go_points" poses="{waypoints}" pose="{waypoint}"
-                       reached="{waypoints_reached}" task_id="{task_id}">
-        <NavigateToPose name="go_only" goal="{waypoint}"/>
-      </ForEachWaypoint>
-    </Switch3>
+      </Switch3>
+    </Sequence>
   </BehaviorTree>
 </root>

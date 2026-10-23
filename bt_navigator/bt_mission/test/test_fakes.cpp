@@ -5,6 +5,7 @@
 
 std::map<std::string, std::deque<bool>> g_outcomes;
 std::map<std::string, std::vector<geometry_msgs::msg::PoseStamped>> g_goals;
+std::map<std::string, std::string> g_behavior_trees;
 std::atomic<int> g_ticks_to_finish{3};
 std::vector<std::string> g_fake_events;
 std::mutex g_fake_mutex;
@@ -27,6 +28,7 @@ void resetFakes()
   std::lock_guard<std::mutex> lock(g_fake_mutex);
   g_outcomes.clear();
   g_goals.clear();
+  g_behavior_trees.clear();
   g_fake_events.clear();
   g_ticks_to_finish = 3;
 }

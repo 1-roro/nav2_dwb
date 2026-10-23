@@ -85,7 +85,8 @@ void TaskServer::step()
   } else {
     finish(
       Outcome::Aborted,
-      failureMessage(logger_.lastFailed(), waypointsReached(blackboard_), total_));
+      failureMessage(
+        logger_.lastFailed(), waypointsReached(blackboard_), total_, isBlocked(blackboard_)));
   }
 }
 
@@ -112,6 +113,7 @@ void TaskServer::start(const std::shared_ptr<GoalHandle> & goal)
   logger_.clear();
   last_running_.clear();
   last_reached_ = 0;
+  last_blocked_ = false;
   started_ = std::chrono::steady_clock::now();
   last_feedback_ = started_;
   active_ = goal;
@@ -145,11 +147,14 @@ void TaskServer::finish(Outcome outcome, const std::string & message)
 
 void TaskServer::publishFeedback()
 {
-  // 실행 중인 노드나 도착한 점 수가 바뀌었을 때, 아니면 0.5초마다
+  // 실행 중인 노드, 도착한 점 수, 장애물로 멈춘 상태가 바뀌었을 때, 아니면 0.5초마다
   const auto now = std::chrono::steady_clock::now();
   const auto running = logger_.running();
   const int reached = waypointsReached(blackboard_);
-  if (running == last_running_ && reached == last_reached_ && now - last_feedback_ < 500ms) {
+  const bool blocked = isBlocked(blackboard_);
+  if (running == last_running_ && reached == last_reached_ && blocked == last_blocked_ &&
+    now - last_feedback_ < 500ms)
+  {
     return;
   }
   auto feedback = std::make_shared<ExecuteTask::Feedback>();
@@ -157,10 +162,12 @@ void TaskServer::publishFeedback()
   feedback->running = running;
   feedback->waypoints_reached = reached;
   feedback->waypoints_total = total_;
+  feedback->blocked = blocked;
   feedback->elapsed = std::chrono::duration<float>(now - started_).count();
   active_->publish_feedback(feedback);
   last_running_ = running;
   last_reached_ = reached;
+  last_blocked_ = blocked;
   last_feedback_ = now;
 }
 

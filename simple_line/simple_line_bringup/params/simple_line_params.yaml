@@ -13,10 +13,18 @@ amcl:
 
 planner_server:
   ros__parameters:
-    # 기본 BT 가 planner_id="GridBased" 로 부르므로 이름은 그대로 둔다
+    # GridBased: 기본 navigation BT 가 부르는 이름. 장애물을 보지 않고 직선을 긋는다
+    # Avoid    : bt_mission 의 navigate_avoid.xml 이 부르는 이름 (작업의 obstacle 이 avoid 일 때).
+    #            global costmap 의 장애물(레이저로 채운 obstacle_layer)을 피해 경로를 만든다
+    planner_plugins: ["GridBased", "Avoid"]
     GridBased:
       plugin: "simple_line_planner::SimpleLinePlanner"
       interpolation_resolution: 0.1        # [m]
+    Avoid:
+      plugin: "nav2_navfn_planner/NavfnPlanner"
+      tolerance: 0.5                       # goal 이 막혔을 때 이 거리 안의 빈 곳까지 경로를 만든다 [m]
+      use_astar: false
+      allow_unknown: true
 
 controller_server:
   ros__parameters:
@@ -25,7 +33,10 @@ controller_server:
     general_goal_checker:
       xy_goal_tolerance: 0.05              # [m]
       yaw_goal_tolerance: 0.05             # [rad] (약 3°)
-    # 기본 BT 가 controller_id="FollowPath" 로 부르므로 이름은 그대로 둔다
+    # FollowPath     : 기본 navigation BT 가 부르는 이름. 장애물을 보지 않는다
+    # FollowPathAvoid: navigate_avoid.xml 이 부르는 이름. Regulated Pure Pursuit (Nav2 제공).
+    #                  경로 앞이 local costmap 에서 막혀 있으면 멈추고, 경로가 바뀌기를 기다린다
+    controller_plugins: ["FollowPath", "FollowPathAvoid"]
     FollowPath:
       plugin: "simple_line_controller::SimpleLineController"
       desired_linear_vel: 0.25             # [m/s]  (velocity_smoother 상한 0.26)
@@ -41,6 +52,31 @@ controller_server:
       min_approach_linear_vel: 0.05        # [m/s]
       transform_tolerance: 0.1             # [s]
       max_robot_pose_search_dist: -1.0     # 가장 가까운 경로 점을 찾을 범위 [m], <= 0 이면 local costmap 반폭
+    FollowPathAvoid:
+      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+      desired_linear_vel: 0.25             # [m/s]  (FollowPath 와 같게)
+      lookahead_dist: 0.6                  # [m]
+      min_lookahead_dist: 0.3
+      max_lookahead_dist: 0.9
+      lookahead_time: 1.5
+      use_velocity_scaled_lookahead_dist: false
+      # 제자리 회전 속도. RPP 는 목표 방향에 들어올 때까지 이 속도로 돌고 바로 명령을 끊는다.
+      # 그 뒤 velocity_smoother 가 3.2 rad/s^2 로 줄이는 동안 더 돌아서, 1.0 이면 goal 에서 8도 넘게 지나쳤다
+      rotate_to_heading_angular_vel: 0.5   # [rad/s]
+      use_rotate_to_heading: true          # 경로와 방향이 크게 다르면 제자리에서 먼저 돈다
+      rotate_to_heading_min_angle: 0.785   # [rad]
+      max_angular_accel: 3.2               # [rad/s^2]
+      allow_reversing: false
+      min_approach_linear_velocity: 0.05   # [m/s]
+      approach_velocity_scaling_dist: 0.6  # goal 이 이 거리 안이면 감속 [m]
+      use_collision_detection: true        # 앞으로 갈 길이 costmap 에서 막혀 있으면 멈춘다
+      max_allowed_time_to_collision_up_to_carrot: 1.0   # 이 시간 [s] 동안 갈 길까지 본다
+      use_regulated_linear_velocity_scaling: true       # 급히 꺾을 때 감속
+      use_cost_regulated_linear_velocity_scaling: false
+      regulated_linear_scaling_min_radius: 0.9
+      regulated_linear_scaling_min_speed: 0.1
+      transform_tolerance: 0.1             # [s]
+      max_robot_pose_search_dist: 10.0     # [m]
 
 waypoint_follower:
   ros__parameters:

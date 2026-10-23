@@ -63,6 +63,7 @@ protected:
     g_goals.clear();
   }
 
+  // 이 테스트에는 레이저가 없으므로 obstacle 은 none (stop & go 는 test_stop_and_go.cpp 에서 본다)
   static Task makeTask(
     const std::string & id, const std::string & action,
     const std::vector<std::pair<double, double>> & points, double duration = 0.1)
@@ -71,6 +72,7 @@ protected:
     task.id = id;
     task.action = action;
     task.duration = duration;
+    task.obstacle = Task::OBSTACLE_NONE;
     for (const auto & [x, y] : points) {
       geometry_msgs::msg::PoseStamped pose;
       pose.header.frame_id = "map";
@@ -127,7 +129,7 @@ TEST_F(TaskLoopTree, ActionChoosesTheBehavior)
   ASSERT_TRUE(tickUntil("t5 done"));
 
   // 받은 순서대로 하나씩 실행하고 보고한다
-  EXPECT_TRUE(has("t1 accepted: inspect, 2 poses"));
+  EXPECT_TRUE(has("t1 accepted: inspect, 2 poses, obstacle none"));
   for (const char * id : {"t1", "t2", "t3", "t4", "t5"}) {
     EXPECT_LT(indexOf(std::string(id) + " started"), indexOf(std::string(id) + " done")) << id;
   }

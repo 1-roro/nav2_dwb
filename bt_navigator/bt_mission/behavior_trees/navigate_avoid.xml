@@ -1,0 +1,42 @@
+<!--
+  avoid 모드의 navigation BT. bt_navigator 가 실행한다 (미션 BT 가 아니다)
+
+  미션 BT 의 NavigateToPose 가 behavior_tree="{nav_bt}" 로 이 파일 경로를 goal 에 실어 보내면,
+  bt_navigator 는 기본 트리 대신 이 트리로 goal 까지 간다 (task.xml 의 ObstacleMode 참고).
+
+  Nav2 Humble 의 기본 트리(navigate_to_pose_w_replanning_and_recovery.xml)와 같고, 부르는 플러그인만 다르다.
+    planner_id="Avoid"               NavfnPlanner. global costmap 의 장애물을 피해 경로를 만든다
+    controller_id="FollowPathAvoid"  RegulatedPurePursuitController. 앞길이 막히면 멈춘다
+  두 이름은 simple_line_params.yaml 의 planner_server / controller_server 에 등록되어 있다.
+  1초마다 경로를 다시 계산하므로, 움직이는 장애물이 costmap 에 들어오면 경로가 그때그때 바뀐다.
+-->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+      <PipelineSequence name="NavigateWithReplanning">
+        <RateController hz="1.0">
+          <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+            <ComputePathToPose goal="{goal}" path="{path}" planner_id="Avoid"/>
+            <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+          </RecoveryNode>
+        </RateController>
+        <RecoveryNode number_of_retries="1" name="FollowPath">
+          <FollowPath path="{path}" controller_id="FollowPathAvoid"/>
+          <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_local_costmap"/>
+        </RecoveryNode>
+      </PipelineSequence>
+      <ReactiveFallback name="RecoveryFallback">
+        <GoalUpdated/>
+        <RoundRobin name="RecoveryActions">
+          <Sequence name="ClearingActions">
+            <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
+            <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
+          </Sequence>
+          <Spin spin_dist="1.57"/>
+          <Wait wait_duration="5"/>
+          <BackUp backup_dist="0.30" backup_speed="0.05"/>
+        </RoundRobin>
+      </ReactiveFallback>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>

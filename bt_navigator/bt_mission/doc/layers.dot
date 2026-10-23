@@ -22,18 +22,20 @@ digraph layers {
       fillcolor="#fbdccf", color="#eb6834"];
   bt [label=<<b>task_server</b>, <b>task_server_lifecycle</b>  (task.xml)<br/><b>mission_bt_runner</b>  (task_loop.xml)<br/><font point-size="10">BehaviorTree.CPP v3</font>>,
       fillcolor="#fbdccf", color="#eb6834"];
-  nt [label=<<b>navigate_to_pose</b><br/><font point-size="10">한 점까지 가서 정지</font>>,
+  nt [label=<<b>navigate_to_pose</b><br/><font point-size="10">한 점까지 가서 정지<br/>avoid 면 navigate_avoid.xml 트리로</font>>,
       fillcolor="#cde2fb", color="#2a78d6"];
-  planner [label=<<b>planner_server</b><br/><font point-size="10">GridBased = SimpleLinePlanner (이 저장소)</font>>,
+  planner [label=<<b>planner_server</b><br/><font point-size="10">GridBased = SimpleLinePlanner (이 저장소)<br/>Avoid = NavFn (avoid 일 때, /scan 이 채운 costmap 을 본다)</font>>,
            fillcolor="#cde2fb", color="#2a78d6"];
-  controller [label=<<b>controller_server</b><br/><font point-size="10">FollowPath = SimpleLineController (이 저장소)</font>>,
+  controller [label=<<b>controller_server</b><br/><font point-size="10">FollowPath = SimpleLineController (이 저장소)<br/>FollowPathAvoid = Regulated Pure Pursuit (avoid 일 때)</font>>,
               fillcolor="#cde2fb", color="#2a78d6"];
   behavior [label=<<b>behavior_server</b><br/><font point-size="10">spin, wait, backup ...</font>>,
             fillcolor="#cde2fb", color="#2a78d6"];
   robot [label=<<b>로봇</b><br/><font point-size="10">/cmd_vel 을 받아 움직인다</font>>,
          fillcolor="#f0efec", color="#52514e"];
+  laser [label=<<b>레이저</b><br/><font point-size="10">/scan</font>>,
+         fillcolor="#f0efec", color="#52514e"];
 
-  {rank=same; L0; ts}
+  {rank=same; L0; ts; laser}
   {rank=same; L1; bt}
   {rank=same; L2; nt}
   {rank=same; L3; planner; controller; behavior}
@@ -42,6 +44,7 @@ digraph layers {
   L1 -> bt [style=invis];
   L2 -> nt [style=invis];
   L3 -> planner -> controller -> behavior [style=invis];
+  ts -> laser [style=invis];
 
   ts -> bt [label=" execute_task (액션: goal, cancel)\l mission/task (토픽)\l"];
   bt -> ts [style=dashed, label=" feedback, result\l mission/status\l"];
@@ -51,4 +54,5 @@ digraph layers {
   nt -> controller [label=" FollowPath"];
   controller -> robot [label=" /cmd_vel_nav → velocity_smoother\l → /cmd_vel\l"];
   behavior -> robot [label=" /cmd_vel (바로)"];
+  laser -> bt [style=dashed, label=" stop & go: 앞길 검사\l (StopAndGo)\l"];
 }

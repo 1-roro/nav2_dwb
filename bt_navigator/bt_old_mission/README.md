@@ -376,7 +376,7 @@ mission SUCCESS in 72.0 s
 
 ## 7. 확인한 것
 
-본문 [7장](../README.md#7-확인한-것)과 같은 환경이다. 실제 Nav2 Humble 서버를 쓰고, Gazebo 대신 `cmd_vel` 을 적분하는 가짜 로봇을 썼다. 출발점은 (-2.0, -1.0, 0°) 이다.
+본문 [8장](../README.md#8-확인한-것)과 같은 환경이다. 실제 Nav2 Humble 서버를 쓰고, Gazebo 대신 `cmd_vel` 을 적분하는 가짜 로봇을 썼다. 출발점은 (-2.0, -1.0, 0°) 이다.
 
 **단위 테스트** (`test/test_old_mission.cpp`, gtest 6개 통과): 실제 `mission.xml` 로 테스트한다. Nav2 노드 3개만 3 tick 뒤 정해 둔 결과를 내는 가짜로 바꿨다.
 

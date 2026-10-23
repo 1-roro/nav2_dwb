@@ -31,7 +31,7 @@ BT::Blackboard::Ptr createBlackboard(
   const rclcpp::Node::SharedPtr & node, const std::shared_ptr<tf2_ros::Buffer> & tf_buffer,
   double tick_hz);
 
-// 작업 하나를 task.xml 의 blackboard 항목 {waypoints} {task_id} {action} {duration} 에 쓴다.
+// 작업 하나를 task.xml 의 blackboard 항목 {waypoints} {task_id} {action} {duration} {obstacle} 에 쓴다.
 // frame 이 빈 점은 map 으로, id 가 비면 "task<count>" 로 채운다. 쓴 task_id 를 돌려준다.
 std::string writeTask(
   const BT::Blackboard::Ptr & blackboard, bt_mission_msgs::msg::Task task, int count);
@@ -39,9 +39,13 @@ std::string writeTask(
 // ForEachWaypoint 가 blackboard 의 {waypoints_reached} 에 쓴, 지금까지 도착한 점 수 (없으면 0)
 int waypointsReached(const BT::Blackboard::Ptr & blackboard);
 
+// StopAndGo 가 blackboard 의 {blocked} 에 쓴, 장애물 때문에 멈춰 있는지 (없으면 false)
+bool isBlocked(const BT::Blackboard::Ptr & blackboard);
+
 // 트리가 FAILURE 로 끝났을 때 result 의 message.
-// "<실패한 노드> failed", 점을 다 들르지 못했으면 " at waypoint <i>/<n>" (가던 점) 을 붙인다
-std::string failureMessage(const std::string & failed_node, int reached, int total);
+// "<실패한 노드> failed" (막혀서 포기했으면 "blocked by an obstacle"),
+// 점을 다 들르지 못했으면 " at waypoint <i>/<n>" (가던 점) 을 붙인다
+std::string failureMessage(const std::string & failed_node, int reached, int total, bool blocked);
 
 // '/' 가 없는 이름은 이 패키지의 share/bt_mission/behavior_trees/ 에서 찾는다
 std::string resolveTreePath(const std::string & name);
