@@ -85,6 +85,8 @@ private:
   double lookahead_dist_{0.6};
   double rotate_to_heading_min_angle_{0.785};
   double rotate_to_heading_angular_vel_{1.0};
+  double rotate_to_heading_tolerance_{0.03};      // 제자리 회전을 끝내는 방향 오차 [rad]
+  double rotate_settled_angular_vel_{0.05};       // 회전이 멈췄다고 보는 각속도 [rad/s]
   double max_linear_accel_{0.5};
   double max_angular_accel_{3.2};
   double approach_dist_{0.6};
@@ -93,6 +95,7 @@ private:
   double max_robot_pose_search_dist_{-1.0};   // <= 0 이면 local costmap 반폭
 
   double control_duration_{0.05};
+  bool rotating_{false};              // 경로 쪽으로 제자리 회전 중 (방향이 맞을 때까지 계속)
   double speed_limit_{0.0};           // 0 = 제한 없음
   bool speed_limit_is_percentage_{false};
 

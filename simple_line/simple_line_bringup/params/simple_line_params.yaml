@@ -20,6 +20,11 @@ planner_server:
 
 controller_server:
   ros__parameters:
+    # goal 에 도착했다고 보는 범위. Humble 기본값(0.25m / 0.25rad)이면 goal 20cm 앞에서 멈춘다.
+    # plugin 키를 적지 않았으므로 기본 설정(SimpleGoalChecker, stateful)에 이 두 값만 덮어쓴다
+    general_goal_checker:
+      xy_goal_tolerance: 0.05              # [m]
+      yaw_goal_tolerance: 0.05             # [rad] (약 3°)
     # 기본 BT 가 controller_id="FollowPath" 로 부르므로 이름은 그대로 둔다
     FollowPath:
       plugin: "simple_line_controller::SimpleLineController"
@@ -28,6 +33,8 @@ controller_server:
       lookahead_dist: 0.6                  # [m]
       rotate_to_heading_min_angle: 0.785   # 경로가 이보다 크게 틀어져 있으면 제자리 회전 [rad]
       rotate_to_heading_angular_vel: 1.0   # [rad/s]
+      rotate_to_heading_tolerance: 0.03    # 제자리 회전은 방향 오차가 이 안으로 들어올 때까지 계속한다 [rad]
+      rotate_settled_angular_vel: 0.05     # 회전이 이 각속도 아래로 멈춘 뒤에 출발한다 [rad/s]
       max_linear_accel: 0.5                # [m/s^2]
       max_angular_accel: 3.2               # [rad/s^2]
       approach_dist: 0.6                   # goal 이 이 거리 안이면 감속 [m]

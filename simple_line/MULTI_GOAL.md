@@ -212,7 +212,7 @@ for (size_t i = 0; i < plan_.size(); ++i) {
 
 컨트롤러는 "goal 까지 거리" 를 두 곳에 쓴다.
 
-- 이 거리가 goal 허용오차(0.25m) 이하이면 → 도착한 것으로 보고 제자리에서 goal yaw 로 회전
+- 이 거리가 goal 허용오차(xy_goal_tolerance, 0.05m) 이하이면 → 도착한 것으로 보고 제자리에서 goal yaw 로 회전
 - 이 거리가 `approach_dist`(0.6m) 이하이면 → 감속
 
 **직선 거리로 잴 때의 문제**: 꺾은선에서는 최종 goal 이 **가까이 보여도 아직 돌아야 할 구간이 남아 있을 수 있다.**
@@ -232,6 +232,9 @@ for (size_t i = 1; i < plan_.size(); ++i) goal_dist += 거리(plan_[i-1], plan_[
 
 결과: 출발점으로 돌아오는 경로를 끝까지 돌고 도착했다 (33.9s). 최종 goal 근처를 지날 때도 감속하지 않았다 (0.250 m/s).
 
+이 장의 수치(3-1, 3-2)는 제자리 회전 정렬과 goal 허용오차를 바꾸기 전([README](README.md) 의 컨트롤러 설명)에 잰 값이다.
+두 동작이 있을 때와 없을 때의 차이를 보려는 것이라 그대로 두었다. 지금 설정의 결과는 6-1 에 있다.
+
 ---
 
 ## 4. 경유 경로의 동작 특성과 한계
@@ -241,7 +244,9 @@ for (size_t i = 1; i < plan_.size(); ++i) goal_dist += 거리(plan_[i-1], plan_[
 다음 구간이 꺾이면 lookahead(0.6m) 지점의 carrot 이 다음 구간으로 넘어간다.
 
 - carrot 방향이 45°(`rotate_to_heading_min_angle`) 이하 → 호를 그리며 모서리를 돈다
-- 45° 초과 (예: 90° 모서리) → 모서리 근처에서 멈추고 제자리 회전 후 출발한다. 경유 goal 이라서 멈추는 것이 아니라 컨트롤러 동작이다 ([bt_navigator 미션의 실행 기록](../bt_navigator/README.md#11-1-미션-mission_bt_runner-mission_nodepy)에서 0.4초)
+- 45° 초과 (예: 90° 모서리) → 모서리 근처에서 멈추고, 다음 구간 쪽으로 **방향이 다 맞을 때까지** 제자리 회전한 뒤
+  출발한다. 경유 goal 이라서 멈추는 것이 아니라 컨트롤러 동작이다
+  ([bt_navigator 미션의 실행 기록](../bt_navigator/README.md#11-1-미션-mission_bt_runner-mission_nodepy)에서 1.2초)
 
 ### 경유 goal 을 정확히 밟지는 않는다
 
@@ -255,7 +260,7 @@ BT 의 `RemovePassedGoals` 는 로봇이 goal **0.7m 안**에 들어오면 그 g
 
 controller_server 의 도착 판정(`SimpleGoalChecker`)은 남은 경로와 상관없이 **로봇과 경로 끝점(= 최종 goal)의 위치·방향 차이**만 본다.
 
-- 최종 goal 이 출발점이나 앞 구간과 0.25m 안으로 겹친다.
+- 최종 goal 이 출발점이나 앞 구간과 xy 허용오차(0.05m) 안으로 겹친다.
 - 그 지점에서 로봇의 **방향까지** 최종 goal 과 맞는다.
 
 두 조건이 맞으면 중간 goal 을 다 돌기 전에 SUCCEEDED 가 된다. 컨트롤러 쪽에서는 막을 수 없는 Nav2 Humble 의 동작이다.
@@ -309,15 +314,15 @@ controller_server 의 도착 판정(`SimpleGoalChecker`)은 남은 경로와 상
 ```
 start (-2.00, -1.00), 4 waypoints
   [1/4] heading to (1.00, -1.00, 90 deg)
-  [1/4] done in 14.9 s
+  [1/4] done in 18.7 s
   [2/4] heading to (1.00, 1.50, 180 deg)
-  [2/4] done in 12.9 s
+  [2/4] done in 15.8 s
   [3/4] heading to (-1.50, 1.50, -101 deg)
-  [3/4] done in 12.7 s
+  [3/4] done in 15.6 s
   [4/4] heading to (-2.00, -1.00, 0 deg)
-  [4/4] done in 13.5 s
-result: SUCCEEDED in 54.0 s, missed waypoints: none
-final error: xy 0.21 m, yaw 1.8 deg
+  [4/4] done in 16.0 s
+result: SUCCEEDED in 65.9 s, missed waypoints: none
+final error: xy 0.04 m, yaw 0.7 deg
 ```
 
 ### 명령이 C++ planner / controller 까지 가는 길
@@ -328,7 +333,7 @@ follow_waypoints.py ──(FollowWaypoints: poses[4])──▶ waypoint_follower
    ──(NavigateToPose: pose[i])──▶ bt_navigator   (기본 BT: navigate_to_pose_w_replanning_and_recovery.xml, 1초마다 재계획)
         ├ ComputePathToPose ──▶ planner_server    → SimpleLinePlanner::createPlan(로봇, goal[i])  : 직선 한 개
         └ FollowPath        ──▶ controller_server → SimpleLineController::computeVelocityCommands : 20Hz 로 cmd_vel
-   goal[i] 도착 (위치 0.25m + yaw 0.25rad) → WaitAtWaypoint 0.2초 → goal[i+1] 로
+   goal[i] 도착 (위치 0.05m + yaw 0.05rad) → WaitAtWaypoint 0.2초 → goal[i+1] 로
 ```
 
 실측 로그(헤드리스 테스트)도 이 순서 그대로다:
@@ -384,7 +389,7 @@ waypoint_follower:
 | 재계획 주기 (기본 BT) | 3초 (0.333Hz) | 1초 (1Hz) |
 | 최종 goal 이 출발점·앞 구간과 겹칠 때 | 일찍 끝날 수 있음 (4장) | 문제없음 |
 | 중간 goal 하나가 실패하면 | 전체 실패 | 건너뛰고 계속 (`stop_on_failure: false`) |
-| 같은 사각형 경로 소요 시간 | 32.0 s (경유 2 + 최종 1) | 54.0 s (goal 4개, 출발점 복귀 포함) |
+| 같은 사각형 경로 소요 시간 | 35.7 s (경유 2 + 최종 1) | 65.9 s (goal 4개, 출발점 복귀 포함) |
 
 ---
 
@@ -400,6 +405,22 @@ Gazebo 자체(월드, 스폰, AMCL)에서는 돌려 보지 못했다.
 
 ### 6-1. 경유 경로 (NavigateThroughPoses, `send_waypoints.py`)
 
+지금 설정(제자리 회전은 방향이 다 맞을 때까지, goal 허용오차 0.05m / 0.05rad)으로 잰 결과:
+
+| 경로 (경유 → … → 최종) | 결과 | 최종 오차 | 경유점에 가장 가까이 간 거리 |
+|---|---|---|---|
+| 사각형: (1,-1) → (1,1.5) → (-1.5,1.5,180°) | SUCCEEDED 35.7s | 0.05 m | 0.23, 0.23 m |
+| 교차: (1.5,-1) → (1.5,1.5) → (-0.5,1.5) → (-0.5,-2.2,-90°) | SUCCEEDED 51.3s | 0.03 m | 0.50, 0.40, 0.32 m |
+| 지그재그: (-1,0) → (0,-1.5) → (1,0) → (2,-1.5) | SUCCEEDED 32.5s | 0.03 m | 0.46, 0.51, 0.25 m |
+| 헤어핀: (1.5,-1) → (1.5,-0.5) → (-1.5,-0.5,180°) | SUCCEEDED 31.2s | 0.03 m | 0.36, 0.58 m |
+| 최종 goal 근처 통과: (1,-1) → (1,0) → (-1,-0.55,180°) | SUCCEEDED 28.9s | 0.05 m | 0.23, 0.47 m |
+| 출발점 복귀, yaw 다름: (1,-1) → (1,1) → (-2,-1) (`--force`) | 끝까지 돌고 SUCCEEDED 37.6s | 0.04 m | 0.23, 0.58 m |
+| 출발점 복귀, yaw 같음: 위와 같고 최종 yaw 0° (`--force`) | 움직이지 않고 1.8s 만에 SUCCEEDED (Humble 한계, 4장) | | |
+
+경유점은 여전히 0.23~0.58m 거리로 지나간다 (`RemovePassedGoals` 반경 0.7m, 4장). 점마다 정확히 서야 하면
+`waypoint_follower`(5장)나, 점마다 `NavigateToPose` 를 보내는 BT([bt_navigator](../bt_navigator/README.md))를 쓴다.
+
+아래는 3장의 두 동작을 넣기 전과 비교한 것으로, 제자리 회전 정렬과 허용오차를 바꾸기 전에 쟀다.
 "없을 때" 는 3장의 두 동작이 없는 컨트롤러다.
 
 | 경로 (경유 → … → 최종) | 3장 동작 있음 | 없을 때 |
@@ -412,14 +433,15 @@ Gazebo 자체(월드, 스폰, AMCL)에서는 돌려 보지 못했다.
 | 출발점 복귀, yaw 다름: (1,-1) → (1,1) → (-2,-1) (`--force`) | 끝까지 돌고 SUCCEEDED 33.9s | **움직이지 않고 6.5s 만에 SUCCEEDED** |
 | 출발점 복귀, yaw 같음: 위와 같고 최종 yaw 0° (`--force`) | 움직이지 않고 1.9s 만에 SUCCEEDED (Humble 한계, 4장) | |
 
-단일 goal 7개(정면, 등 뒤, 대각선, yaw 90° 차이, 0.15m, 제자리 회전, 스폰 복귀)도 3장 동작을 넣은 뒤 다시 돌렸다. 모두 SUCCEEDED, 소요 시간 차이는 1초 이내였다.
+단일 goal 7개(정면, 등 뒤, 대각선, yaw 90° 차이, 0.15m, 제자리 회전, 스폰 복귀)도 3장 동작을 넣은 뒤 다시 돌렸다. 모두 SUCCEEDED, 소요 시간 차이는 1초 이내였다. 지금 설정의 단일 goal 결과는 [README](README.md#확인한-것) 에 있다.
 
 ### 6-2. waypoint_follower (`follow_waypoints.py`)
 
 기본 `WAYPOINTS` (goal 4개, 출발점으로 같은 yaw 로 복귀)를 `ros2 run` 과 `python3` 직접 실행으로 한 번씩 돌렸다.
 
 - 둘 다 SUCCEEDED, missed waypoint 없음.
-- 54.0 s / 53.2 s, 최종 오차 xy 0.21 / 0.23 m, yaw 1.8 / 5.9°.
+- 지금 설정: 65.9 s, 최종 오차 xy 0.04 m, yaw 0.7°.
+  (회전 정렬과 허용오차를 바꾸기 전: 54.0 s / 53.2 s, 최종 오차 xy 0.21 / 0.23 m, yaw 1.8 / 5.9°)
 - NavigateThroughPoses 에서 1.9초 만에 끝나 버리던 "출발점 복귀 + 같은 yaw" 경우도 끝까지 돈다.
 
 ---
