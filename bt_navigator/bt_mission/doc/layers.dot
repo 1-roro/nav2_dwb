@@ -10,7 +10,7 @@ digraph layers {
 
   // 왼쪽 열: 계층 이름
   node [shape=plaintext, style="", fontsize=12, fontcolor="#52514e", margin=0];
-  L0 [label=<<b>입력</b> (8, 9장)<br/>어디로, 무엇을>];
+  L0 [label=<<b>입력</b> (4, 5장)<br/>어디로, 무엇을>];
   L1 [label=<<b>상위 작업 계층</b><br/>무엇을, 어떤 순서로,<br/>실패하면 어떻게>];
   L2 [label=<<b>bt_navigator</b><br/>goal 까지 어떻게 갈지<br/>(내부 BT: 재계획, recovery)>];
   L3 [label=<<b>서버</b><br/>경로 계산, 경로 추종,<br/>제자리 동작>];
@@ -20,12 +20,8 @@ digraph layers {
   node [shape=box, style="rounded,filled", fontsize=12, fontcolor="#0b0b0b", margin="0.15,0.08"];
   ts [label=<<b>task_client.py</b> (액션)<br/><b>task_sender.py</b> (토픽)<br/><font point-size="10">또는 관제 서버, ros2 action / topic 명령</font>>,
       fillcolor="#fbdccf", color="#eb6834"];
-  bt [label=<<b>task_server</b>, <b>task_server_lifecycle</b>  (task.xml)<br/><b>mission_bt_runner</b>  (mission.xml, task_loop.xml)<br/><font point-size="10">BehaviorTree.CPP v3</font>>,
+  bt [label=<<b>task_server</b>, <b>task_server_lifecycle</b>  (task.xml)<br/><b>mission_bt_runner</b>  (task_loop.xml)<br/><font point-size="10">BehaviorTree.CPP v3</font>>,
       fillcolor="#fbdccf", color="#eb6834"];
-  py [label=<<b>mission_node.py</b><br/><font point-size="10">Python + BasicNavigator</font>>,
-      fillcolor="#fbdccf", color="#eb6834"];
-  ntp [label=<<b>navigate_through_poses</b><br/><font point-size="10">경유점은 지나가고 마지막 점에서 정지</font>>,
-       fillcolor="#cde2fb", color="#2a78d6"];
   nt [label=<<b>navigate_to_pose</b><br/><font point-size="10">한 점까지 가서 정지</font>>,
       fillcolor="#cde2fb", color="#2a78d6"];
   planner [label=<<b>planner_server</b><br/><font point-size="10">GridBased = SimpleLinePlanner (이 저장소)</font>>,
@@ -38,28 +34,21 @@ digraph layers {
          fillcolor="#f0efec", color="#52514e"];
 
   {rank=same; L0; ts}
-  {rank=same; L1; bt; py}
-  {rank=same; L2; ntp; nt}
+  {rank=same; L1; bt}
+  {rank=same; L2; nt}
   {rank=same; L3; planner; controller; behavior}
   {rank=same; L4; robot}
   L0 -> ts [style=invis];
   L1 -> bt [style=invis];
-  bt -> py [arrowhead=none, style=dotted, label="  또는  "];
-  L2 -> ntp -> nt [style=invis];
+  L2 -> nt [style=invis];
   L3 -> planner -> controller -> behavior [style=invis];
 
   ts -> bt [label=" execute_task (액션: goal, cancel)\l mission/task (토픽)\l"];
   bt -> ts [style=dashed, label=" feedback, result\l mission/status\l"];
-  bt -> ntp [label=" NavigateThroughPoses"];
-  bt -> nt [label=" NavigateToPose"];
-  py -> ntp [style=dashed];
-  py -> nt [style=dashed];
+  bt -> nt [label=" NavigateToPose\l (점마다 한 번)\l"];
   bt -> behavior [label=" Spin"];
-  py -> behavior [style=dashed];
-  ntp -> planner [label=" ComputePath\l ThroughPoses\l"];
   nt -> planner [label=" ComputePath\l ToPose\l"];
-  ntp -> controller [label=" FollowPath"];
-  nt -> controller;
+  nt -> controller [label=" FollowPath"];
   controller -> robot [label=" /cmd_vel_nav → velocity_smoother\l → /cmd_vel\l"];
   behavior -> robot [label=" /cmd_vel (바로)"];
 }

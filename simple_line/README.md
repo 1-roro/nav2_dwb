@@ -33,8 +33,18 @@ simple_line/
 2. **carrot 선택**: 로봇에서 `lookahead_dist` 이상 떨어진 첫 점. 없으면 마지막 점.
 3. **명령 계산** (위에서부터 먼저 맞는 것):
    - goal 까지 남은 **경로 길이** ≤ goal checker 의 xy 허용오차 → 제자리에서 goal yaw 로 회전
-   - carrot 방향이 `rotate_to_heading_min_angle` 보다 크게 틀어짐 → 제자리에서 carrot 쪽으로 회전
+   - 제자리 회전 중 → carrot 쪽으로 계속 회전. 방향 오차가 `rotate_to_heading_tolerance` 안으로 들어오고
+     회전이 멈추면(`rotate_settled_angular_vel` 이하) 끝낸다
    - 그 외 → pure pursuit: 곡률 `k = 2·y / L²` (carrot 의 로봇 좌표 (x, y), `L² = x² + y²`), `w = v·k`
+
+   제자리 회전은 이럴 때 시작한다.
+   - 주행 중에 carrot 방향이 `rotate_to_heading_min_angle` 보다 크게 틀어졌을 때 (꺾인 경로)
+   - **서 있다가 출발할 때** 방향이 `rotate_to_heading_tolerance` 보다 틀어져 있을 때
+
+   한 번 시작한 회전은 방향이 다 맞을 때까지 계속한다. 덜 돈 채로 출발하면 남은 오차를 pure pursuit 가
+   호를 그리며 줄이므로 경로가 휜다. 그래서 다 돈 뒤에 출발해서 직선으로 간다.
+   회전 속도는 남은 각도에서 감속해 멈출 수 있는 속도 `sqrt(a·|θ|)` 를 넘지 않는다 (`a` = `max_angular_accel`).
+   감속도를 한계의 절반(`a/2`)으로 계획해서, velocity_smoother 를 거치며 생기는 지연에도 목표 방향을 지나치지 않는다.
 4. **제한**
    - goal 까지 남은 경로 길이가 `approach_dist` 안이면 `v · 거리 / approach_dist` 로 감속 (하한 `min_approach_linear_vel`)
    - 선가속도 `max_linear_accel`, 제자리 회전 시 각가속도 `max_angular_accel`
@@ -50,6 +60,8 @@ RViz 확인용 토픽: `/simple_line/local_plan` (잘라 낸 경로), `/simple_l
 | `lookahead_dist` | 0.6 | carrot 거리 [m] |
 | `rotate_to_heading_min_angle` | 0.785 | 이보다 틀어져 있으면 제자리 회전 [rad] |
 | `rotate_to_heading_angular_vel` | 1.0 | 제자리 회전 속도 [rad/s] |
+| `rotate_to_heading_tolerance` | 0.03 | 제자리 회전을 끝내는 방향 오차 [rad]. 서 있다가 출발할 때 이보다 틀어져 있으면 먼저 회전 |
+| `rotate_settled_angular_vel` | 0.05 | 회전이 이 각속도 아래로 멈춘 뒤에 출발 [rad/s] |
 | `max_linear_accel` | 0.5 | [m/s²] |
 | `max_angular_accel` | 3.2 | [rad/s²] |
 | `approach_dist` | 0.6 | goal 감속 시작 거리 [m] |
@@ -60,7 +72,7 @@ RViz 확인용 토픽: `/simple_line/local_plan` (잘라 낸 경로), `/simple_l
 여러 goal 을 도는 방법:
 
 - [MULTI_GOAL.md](MULTI_GOAL.md): 명령 하나로 경유하기 (`NavigateThroughPoses`, `waypoint_follower`), 꺾은선을 위한 컨트롤러 동작
-- [`../bt_navigator/`](../bt_navigator/README.md): 경유 구간과 작업 지점(정지 작업, 주행 중 작업)을 섞은 미션.
+- [`../bt_navigator/`](../bt_navigator/README.md): 작업(들를 점 + 정지 작업, 주행 중 작업)을 토픽 / 액션으로 받아 실행하는 BT. 경유 구간과 작업 지점을 XML 에 적어 둔 미션은 [`bt_fixed_mission/`](../bt_navigator/bt_fixed_mission/README.md).
   이 폴더의 planner / controller / launch 위에서 상위 작업 BT 가 Nav2 명령을 조합한다
 
 ## 빌드
@@ -106,20 +118,44 @@ ros2 launch simple_line_bringup simple_line.launch.py
 `params/simple_line_params.yaml` 을 덮어써서 `tb3_simulation_launch.py` 에 넘긴다.
 플러그인 이름을 기본 BT 가 부르는 `GridBased` / `FollowPath` 그대로 두었기 때문에 BT 는 바꾸지 않는다.
 
+goal 에 도착했다고 보는 범위(goal checker)도 줄였다. Humble 기본값(xy 0.25m / yaw 0.25rad)이면 로봇이 goal
+20cm 남짓 앞에서 멈춘다.
+
+| 파라미터 (`controller_server.general_goal_checker`) | Humble 기본 | 여기서 | 설명 |
+|---|---|---|---|
+| `xy_goal_tolerance` | 0.25 | 0.05 | goal 위치에서 이 거리 안이면 도착 [m] |
+| `yaw_goal_tolerance` | 0.25 | 0.05 | goal 방향과 이 각도 안이면 도착 [rad] (약 3°) |
+
+더 정확히 서야 하면 더 줄인다. 다만 위치 추정(AMCL) 오차보다 작게 하면 도착 판정이 늦어지거나 안 날 수 있다.
+
 ## 확인한 것
 
 - Nav2 1.1.18 (Humble) 로 빌드, 경고 없음.
 - 실제 Nav2 Humble 서버(map_server, planner_server, controller_server, behavior_server, bt_navigator,
   velocity_smoother)와 Nav2 기본 BT 에 두 플러그인을 올리고, Gazebo 대신 cmd_vel 을 적분하는 가짜 로봇으로
-  goal 7개를 이어서 보냈다. 전부 SUCCEEDED, 최종 오차는 xy 0.25m / yaw 6° 이내 (goal checker 허용오차 0.25m / 0.25rad).
+  goal 7개를 이어서 보냈다. 전부 SUCCEEDED, 최종 오차는 xy 0.05m / yaw 1.2° 이내.
 
-  | goal | 결과 |
-  |---|---|
-  | 정면 3m | 12.5 s |
-  | 정반대(등 뒤) 3m | 14.6 s |
-  | 왼쪽 대각선 | 13.3 s |
-  | 진행 방향과 yaw 90° 다름 | 11.4 s |
-  | 0.15m 짧은 이동 | 2.0 s |
-  | 제자리 회전 180° | 3.7 s |
-  | 스폰 위치로 복귀 | 21.2 s |
+  | goal | 시간 | 최종 오차 xy / yaw | (회전 정렬, 허용오차 변경 전) |
+  |---|---|---|---|
+  | 정면 3m | 15.2 s | 0.05 m / 0.0° | 12.5 s |
+  | 정반대(등 뒤) 3m | 18.9 s | 0.05 m / 0.2° | 14.6 s |
+  | 왼쪽 대각선 | 17.2 s | 0.05 m / 0.2° | 13.3 s |
+  | 진행 방향과 yaw 90° 다름 | 15.3 s | 0.03 m / 0.0° | 11.4 s |
+  | 0.15m 짧은 이동 | 3.6 s | 0.03 m / 0.4° | 2.0 s |
+  | 제자리 회전 180° | 4.0 s | 0.03 m / 1.2° | 3.7 s |
+  | 스폰 위치로 복귀 | 25.9 s | 0.04 m / 1.2° | 21.2 s |
+
+  예전보다 느린 것은 goal 에 더 가까이(0.25m → 0.05m) 가서 서고, 다 돈 뒤에 출발하기 때문이다.
+- **출발할 때 회전** (서 있다가 방향이 틀어진 goal 로 출발, 4가지):
+
+  | 출발할 때 틀어진 각도 | 출발 순간 남은 방향 오차 | 직선에서 벗어난 최대 거리 | 최종 오차 xy / yaw |
+  |---|---|---|---|
+  | 19° | 0.4° (전: 19.3°) | 0.1 cm (전: 7.5 cm) | 0.035 m / 0.1° |
+  | 53° | 1.5° (전: 42.9°) | 0.6 cm (전: 15.5 cm) | 0.044 m / 0.3° |
+  | 90° | 0.1° (전: 32.4°) | 0.0 cm (전: 13.1 cm) | 0.046 m / 0.0° |
+  | 180° | 0.4° (전: 40.8°) | 0.2 cm (전: 14.2 cm) | 0.049 m / 0.1° |
+
+  "전" 은 바꾸기 전 컨트롤러다. 그때는 방향이 45° 안으로 들어오면 바로 출발해서 남은 오차만큼 호를 그렸다.
+  감속 계획을 한계 가속도 그대로(`a`) 잡았을 때는 목표 방향을 3~6° 지나쳤다가 되돌아왔고, 절반(`a/2`)으로 잡은 뒤에는
+  지나치지 않았다.
 - Gazebo 자체(월드 로드, 스폰, AMCL)는 돌려 보지 못했다.

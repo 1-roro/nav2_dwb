@@ -1,13 +1,14 @@
 // BT XML 을 읽어 트리를 만들고, 끝날 때까지 tick 한다.
 //
-//   ros2 run bt_mission mission_bt_runner                                  # mission.xml
-//   ros2 run bt_mission mission_bt_runner --ros-args -p bt_xml:=task_loop.xml
+//   ros2 run bt_mission mission_bt_runner                                  # task_loop.xml
 //   ros2 run bt_mission mission_bt_runner --ros-args -p bt_xml:=/path/to/other.xml
 //
 // bt_xml 에 '/' 가 없으면 이 패키지의 share/.../behavior_trees/ 에서 찾는다.
+// 다른 패키지의 BT 노드를 쓰는 XML 이면 그 노드의 플러그인 라이브러리를 extra_plugin_libs 로 준다
+// (예: bt_fixed_mission 의 mission.launch.py 가 bt_fixed_mission_nodes 를 준다).
 //
 // 순서 (1, 2 의 내용은 bt_common.cpp):
-//   1. factory 에 BT 노드 종류를 등록한다 (Nav2 가 제공하는 노드 + 이 패키지의 노드)
+//   1. factory 에 BT 노드 종류를 등록한다 (Nav2 가 제공하는 노드 + 이 패키지의 노드 + extra_plugin_libs)
 //   2. blackboard 에 노드들이 같이 쓰는 값(ROS node, TF, timeout)을 넣는다
 //   3. XML 로 트리를 만든다
 //   4. 루트가 RUNNING 이 아닐 때까지 tick_hz 로 tick 한다
@@ -17,8 +18,10 @@
 #include <csignal>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "behaviortree_cpp_v3/bt_factory.h"
+#include "behaviortree_cpp_v3/utils/shared_library.h"
 #include "rclcpp/rclcpp.hpp"
 #include "bt_mission/bt_common.hpp"
 #include "tf2_ros/buffer.h"
@@ -45,7 +48,9 @@ int main(int argc, char ** argv)
 
   auto node = std::make_shared<rclcpp::Node>("mission_bt");
   const std::string bt_xml = bt_mission::resolveTreePath(
-    node->declare_parameter("bt_xml", std::string("mission.xml")));
+    node->declare_parameter("bt_xml", std::string("task_loop.xml")));
+  const auto extra_plugin_libs =
+    node->declare_parameter("extra_plugin_libs", std::vector<std::string>{});
   // bt_navigator 와 같은 100Hz (bt_loop_duration 10ms). Nav2 BT 노드는 tick 할 때마다 액션 메시지를
   // 조금씩만 처리하므로, 10Hz 로 낮추면 빠르게 오는 feedback 에 밀려 결과를 1초가량 늦게 받았다.
   const double tick_hz = node->declare_parameter("tick_hz", 100.0);
@@ -57,6 +62,10 @@ int main(int argc, char ** argv)
   // 1. BT 노드 종류 등록
   BT::BehaviorTreeFactory factory;
   bt_mission::registerAllNodes(factory);
+  BT::SharedLibrary loader;
+  for (const auto & lib : extra_plugin_libs) {   // 다른 패키지의 BT 노드
+    factory.registerFromPlugin(loader.getOSName(lib));
+  }
 
   // 2. blackboard
   auto blackboard = bt_mission::createBlackboard(node, tf_buffer, tick_hz);

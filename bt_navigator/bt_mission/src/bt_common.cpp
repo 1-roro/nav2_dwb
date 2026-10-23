@@ -63,7 +63,24 @@ std::string writeTask(
   blackboard->set("task_id", task_id);
   blackboard->set("action", task.action);
   blackboard->set("duration", task.duration);
+  blackboard->set("waypoints_reached", 0);
   return task_id;
+}
+
+int waypointsReached(const BT::Blackboard::Ptr & blackboard)
+{
+  int reached = 0;
+  blackboard->get("waypoints_reached", reached);
+  return reached;
+}
+
+std::string failureMessage(const std::string & failed_node, int reached, int total)
+{
+  std::string message = (failed_node.empty() ? std::string("task") : failed_node) + " failed";
+  if (reached < total) {
+    message += " at waypoint " + std::to_string(reached + 1) + "/" + std::to_string(total);
+  }
+  return message;
 }
 
 std::string resolveTreePath(const std::string & name)
@@ -130,8 +147,11 @@ void TransitionLogger::callback(
 
 std::string TransitionLogger::running() const
 {
+  // 이름 순으로. 점마다 다시 시작하는 이동 노드가 있어도 같은 노드들이면 같은 문자열이 된다
+  auto names = running_;
+  std::sort(names.begin(), names.end());
   std::string out;
-  for (const auto & name : running_) {
+  for (const auto & name : names) {
     out += (out.empty() ? "" : ", ") + name;
   }
   return out;

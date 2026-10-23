@@ -22,6 +22,7 @@
 
 // 가짜 Nav2 노드: g_ticks_to_finish tick 동안 RUNNING 후, 정해 둔 결과(기본 SUCCESS)를 돌려준다
 extern std::map<std::string, std::deque<bool>> g_outcomes;            // 노드 이름 → 차례로 쓸 결과
+// 노드 이름 → 받은 목표. goals(NavigateThroughPoses)는 받은 목록, goal(NavigateToPose)은 받은 차례대로 쌓는다
 extern std::map<std::string, std::vector<geometry_msgs::msg::PoseStamped>> g_goals;
 extern std::atomic<int> g_ticks_to_finish;
 // 가짜 노드의 상태 변화 "이름:RUNNING|SUCCESS|FAILURE|HALTED". BT 가 다른 스레드에서 돌 때를 위해
@@ -56,7 +57,7 @@ public:
     if (has_goals) {
       g_goals[name()] = goals;
     } else if (has_goal) {
-      g_goals[name()] = {goal};
+      g_goals[name()].push_back(goal);
     }
     g_fake_events.push_back(name() + ":RUNNING");
     ticks_ = g_ticks_to_finish;

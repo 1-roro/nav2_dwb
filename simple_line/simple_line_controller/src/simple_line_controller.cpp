@@ -67,6 +67,8 @@ void SimpleLineController::configure(
   param("lookahead_dist", lookahead_dist_);
   param("rotate_to_heading_min_angle", rotate_to_heading_min_angle_);
   param("rotate_to_heading_angular_vel", rotate_to_heading_angular_vel_);
+  param("rotate_to_heading_tolerance", rotate_to_heading_tolerance_);
+  param("rotate_settled_angular_vel", rotate_settled_angular_vel_);
   param("max_linear_accel", max_linear_accel_);
   param("max_angular_accel", max_angular_accel_);
   param("approach_dist", approach_dist_);
@@ -223,15 +225,42 @@ geometry_msgs::msg::TwistStamped SimpleLineController::computeVelocityCommands(
         w, velocity.angular.z - max_angular_accel_ * dt,
         velocity.angular.z + max_angular_accel_ * dt);
     };
+  // 제자리 회전 속도. 남은 각도 err 에서 감속도 a 로 멈출 수 있는 속도 sqrt(2·a·|err|) 를 넘지 않게 해서,
+  // 목표 방향을 지나치지 않고 감속하며 멈춘다. a 는 max_angular_accel 의 절반으로 잡는다. 명령이
+  // velocity_smoother 를 거쳐 로봇에 닿기까지 지연이 있어서, 한계값 그대로 계획하면 3~6° 지나쳤다
+  auto rotate_w = [&](double err) {
+      const double speed = std::min(
+        rotate_to_heading_angular_vel_, std::sqrt(max_angular_accel_ * std::fabs(err)));
+      return limit_w(sign(err) * speed);
+    };
+
+  // 제자리 회전을 시작하는 경우:
+  //   - 주행 중에 경로가 rotate_to_heading_min_angle 보다 크게 틀어졌을 때 (꺾인 경로)
+  //   - 서 있는 상태에서 출발할 때 방향이 rotate_to_heading_tolerance 보다 틀어져 있을 때
+  // 한 번 시작하면 방향 오차가 rotate_to_heading_tolerance 안으로 들어오고 회전이 멈출 때까지 계속한다.
+  // 덜 돈 채로 출발하면 남은 오차를 pure pursuit 가 호를 그리며 줄여서 경로가 휜다.
+  const bool stopped = std::fabs(velocity.linear.x) < 0.01;
+  if (!rotating_ &&
+    (std::fabs(carrot_angle) > rotate_to_heading_min_angle_ ||
+    (stopped && std::fabs(carrot_angle) > rotate_to_heading_tolerance_)))
+  {
+    rotating_ = true;
+  }
+  if (rotating_ && std::fabs(carrot_angle) <= rotate_to_heading_tolerance_ &&
+    std::fabs(velocity.angular.z) <= rotate_settled_angular_vel_)
+  {
+    rotating_ = false;
+  }
 
   double v = 0.0;
   double w = 0.0;
   if (goal_dist <= goal_tolerance) {
     // goal 의 xy 에 도착: 제자리에서 goal yaw 로 회전
-    w = limit_w(sign(goal_yaw_err) * rotate_to_heading_angular_vel_);
-  } else if (std::fabs(carrot_angle) > rotate_to_heading_min_angle_) {
-    // 경로 쪽으로 크게 틀어져 있음: 제자리에서 먼저 회전
-    w = limit_w(sign(carrot_angle) * rotate_to_heading_angular_vel_);
+    rotating_ = false;
+    w = rotate_w(goal_yaw_err);
+  } else if (rotating_) {
+    // 경로 쪽으로 제자리 회전. 방향이 맞았으면 회전이 멈출 때까지 0 을 낸다
+    w = std::fabs(carrot_angle) > rotate_to_heading_tolerance_ ? rotate_w(carrot_angle) : 0.0;
   } else {
     // pure pursuit
     const double L2 = carrot.x * carrot.x + carrot.y * carrot.y;

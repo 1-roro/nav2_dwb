@@ -3,7 +3,7 @@
 BehaviorTree.CPP v3 XML 을 그림(png / svg)으로 그린다. graphviz 의 dot 이 필요하다.
 
   sudo apt install graphviz fonts-nanum
-  python3 draw_bt.py ../behavior_trees/mission.xml ../doc/mission_bt.png
+  python3 draw_bt.py ../behavior_trees/task.xml ../doc/task.png
 
 - 노드 색: 제어 노드(회색), 데코레이터(흰색 점선), Nav2 BT 노드(파랑), 그 외 액션(주황)
 - 액션 노드 앞의 번호는 실행 순서 (모두 성공했을 때)
@@ -29,6 +29,7 @@ DECORATOR = {
     'KeepRunningUntilFailure', 'RateController', 'DistanceController', 'SpeedController',
     'GoalUpdater', 'SingleTrigger', 'Delay', 'SubTree',
 }
+MY_DECORATOR = {'ForEachWaypoint'}     # 이 패키지에서 만든 데코레이터
 NAV2 = {
     'NavigateToPose', 'NavigateThroughPoses', 'ComputePathToPose', 'ComputePathThroughPoses',
     'FollowPath', 'SmoothPath', 'Spin', 'Wait', 'BackUp', 'DriveOnHeading', 'ClearEntireCostmap',
@@ -39,6 +40,7 @@ NAV2 = {
 STYLE = {   # fill, border, border style
     'control': ('#f0efec', '#52514e', 'rounded,filled'),
     'decorator': ('#ffffff', '#52514e', 'rounded,filled,dashed'),
+    'mydecorator': ('#fbdccf', '#eb6834', 'rounded,filled,dashed'),
     'nav2': ('#cde2fb', '#2a78d6', 'rounded,filled'),
     'action': ('#fbdccf', '#eb6834', 'rounded,filled'),
 }
@@ -51,6 +53,8 @@ def kind_of(tag):
         return 'control'
     if tag in DECORATOR:
         return 'decorator'
+    if tag in MY_DECORATOR:
+        return 'mydecorator'
     if tag in NAV2:
         return 'nav2'
     return 'action'
@@ -74,7 +78,7 @@ class Drawer:
         name = el.get('name', '')
         if kind == 'control':
             rows.append(f'<b>{esc(CONTROL[tag])} {esc(tag)}</b>')
-        elif kind == 'decorator':
+        elif kind in ('decorator', 'mydecorator'):
             rows.append(f'<b>{esc(tag)}</b>')
         else:
             self.order += 1
@@ -129,13 +133,15 @@ class Drawer:
             f'<td bgcolor="{STYLE[k][0]}" border="1" color="{STYLE[k][1]}">&nbsp;{esc(t)}&nbsp;</td>'
             f'<td>&nbsp;&nbsp;</td>'
             for k, t in [('control', '제어 노드'), ('decorator', '데코레이터'),
-                         ('nav2', 'Nav2 BT 노드 (서버에 요청)'), ('action', '직접 만든 노드')])
+                         ('nav2', 'Nav2 BT 노드 (서버에 요청)'), ('action', '직접 만든 노드'),
+                         ('mydecorator', '직접 만든 데코레이터')])
         caption = (f'<table border="0" cellspacing="0" cellpadding="4">'
                    f'<tr><td><table border="0" cellspacing="0" cellpadding="4"><tr>{legend}</tr>'
                    f'</table></td></tr>'
                    f'<tr><td><font color="{INK2}" point-size="11">번호: 자식을 왼쪽부터 tick 하는 순서.'
                    f'  Parallel 의 자식은 동시에, Fallback 의 뒤 자식(점선)은 앞 자식이 실패할 때만,'
-                   f' Switch 는 값이 맞는 자식 하나만 실행'
+                   f' Switch 는 값이 맞는 자식 하나만 실행.'
+                   f'  ForEachWaypoint 는 점마다 자식을 한 번씩 다시 실행'
                    f'</font></td></tr></table>')
         self.subtree(root)
         head = [

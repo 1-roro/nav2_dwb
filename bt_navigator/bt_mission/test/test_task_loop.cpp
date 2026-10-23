@@ -134,21 +134,43 @@ TEST_F(TaskLoopTree, ActionChoosesTheBehavior)
   EXPECT_LT(indexOf("t1 done"), indexOf("t2 started"));
   EXPECT_LT(indexOf("t4 done"), indexOf("t5 started"));
 
-  // action 별로 다른 가지가 실행된다
+  // 점마다 도착을 알린 뒤 작업을 끝낸다
+  EXPECT_LT(indexOf("t1 arrived 1/2"), indexOf("t1 arrived 2/2"));
+  EXPECT_LT(indexOf("t1 arrived 2/2"), indexOf("t1 done"));
+  EXPECT_TRUE(has("t2 arrived 2/2"));
+
+  // action 별로 다른 가지가 실행된다. 이동 노드는 점마다 한 번씩 SUCCESS
   const auto & r = *recorder_;
-  EXPECT_EQ(r.count("go_inspect:SUCCESS"), 1);
-  EXPECT_EQ(r.count("work:SUCCESS"), 1);            // inspect: 도착 후 작업
-  EXPECT_EQ(r.count("go_scan:SUCCESS"), 1);
+  EXPECT_EQ(r.count("go_inspect:SUCCESS"), 2);
+  EXPECT_EQ(r.count("work:SUCCESS"), 1);            // inspect: 마지막 점에 도착한 뒤 작업
+  EXPECT_EQ(r.count("go_scan:SUCCESS"), 2);
   EXPECT_EQ(r.count("scanning:HALTED"), 1);         // scan: 주행이 끝나면 스캔도 멈춤
   EXPECT_EQ(r.count("go_look:SUCCESS"), 1);
   EXPECT_EQ(r.count("spin:SUCCESS"), 1);            // look_around: 도착 후 회전
   EXPECT_EQ(r.count("go_only:SUCCESS"), 2);         // t4, t5
   EXPECT_EQ(r.count("report_failed:SUCCESS"), 0);
 
-  // Task 의 waypoints 가 그대로 NavigateThroughPoses 의 goals 로 간다
+  // Task 의 점이 차례로 NavigateToPose 의 goal 로 간다
   ASSERT_EQ(g_goals["go_inspect"].size(), 2u);
+  EXPECT_DOUBLE_EQ(g_goals["go_inspect"][0].pose.position.y, -1.0);
   EXPECT_DOUBLE_EQ(g_goals["go_inspect"][1].pose.position.x, 1.5);
   EXPECT_EQ(g_goals["go_inspect"][1].header.frame_id, "map");
+
+  // 작업은 마지막 점에 도착한 다음에 시작한다
+  const auto & e = r.events;
+  const auto last_arrival = std::find(e.rbegin(), e.rend(), "go_inspect:SUCCESS");
+  const auto work_start = std::find(e.begin(), e.end(), "work:RUNNING");
+  EXPECT_LT(e.rend() - last_arrival - 1, work_start - e.begin());
+}
+
+TEST_F(TaskLoopTree, FailureStopsAtThatWaypoint)
+{
+  g_outcomes["go_only"] = {true, false};          // 첫 점은 도착, 둘째 점에서 실패
+  task_pub_->publish(makeTask("t1", "go", {{1.0, 0.0}, {2.0, 0.0}, {2.0, 1.0}}));
+  ASSERT_TRUE(tickUntil("t1 failed"));
+  EXPECT_TRUE(has("t1 arrived 1/3"));
+  EXPECT_FALSE(has("t1 arrived 2/3"));
+  EXPECT_EQ(g_goals["go_only"].size(), 2u);       // 셋째 점으로는 가지 않는다
 }
 
 TEST_F(TaskLoopTree, FailedTaskIsReportedAndTheLoopGoesOn)
