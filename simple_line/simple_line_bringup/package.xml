@@ -13,9 +13,9 @@
   <exec_depend>simple_line_controller</exec_depend>
   <exec_depend>nav2_bringup</exec_depend>
   <exec_depend>nav2_waypoint_follower</exec_depend>
-  <!-- avoid 모드용 planner (Avoid) / controller (FollowPathAvoid), params/simple_line_params.yaml -->
-  <exec_depend>nav2_navfn_planner</exec_depend>
-  <exec_depend>nav2_regulated_pure_pursuit_controller</exec_depend>
+  <!-- stop & go: collision_monitor 와 그것만 맡는 lifecycle_manager (launch/simple_line.launch.py) -->
+  <exec_depend>nav2_collision_monitor</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
   <exec_depend>turtlebot3_gazebo</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
@@ -24,6 +24,7 @@
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>nav2_msgs</exec_depend>
   <exec_depend>action_msgs</exec_depend>
+  <exec_depend>gazebo_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>rcl_interfaces</exec_depend>
 

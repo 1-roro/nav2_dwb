@@ -1,16 +1,12 @@
 #include "bt_mission/mission_nodes.hpp"
 
-#include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <limits>
 #include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "ament_index_cpp/get_package_prefix.hpp"  // PackageNotFoundError
-#include "ament_index_cpp/get_package_share_directory.hpp"
 #include "tf2/exceptions.h"
 
 namespace bt_mission
@@ -34,16 +30,6 @@ rclcpp::Publisher<std_msgs::msg::String>::SharedPtr statusPublisher(
     weak = publisher;
   }
   return publisher;
-}
-
-double yawOf(const geometry_msgs::msg::Quaternion & q)
-{
-  return std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
-}
-
-std::chrono::duration<double> seconds(double s)
-{
-  return std::chrono::duration<double>(s);
 }
 
 }  // namespace
@@ -220,246 +206,11 @@ void ForEachWaypoint::reportArrival()
 
 // ---------------------------------------------------------------------------------------------
 
-ObstacleMode::ObstacleMode(const std::string & name, const BT::NodeConfiguration & config)
-: BT::SyncActionNode(name, config),
-  node_(config.blackboard->get<rclcpp::Node::SharedPtr>("node"))
-{
-}
-
-BT::NodeStatus ObstacleMode::tick()
-{
-  using Task = bt_mission_msgs::msg::Task;
-  std::string mode, avoid_bt;
-  getInput("mode", mode);
-  getInput("avoid_bt", avoid_bt);
-  if (mode.empty() || mode == Task::OBSTACLE_STOP) {
-    setOutput("stop_and_go", true);
-    setOutput("nav_bt", std::string());                // bt_navigator 의 기본 트리
-  } else if (mode == Task::OBSTACLE_AVOID) {
-    if (avoid_bt.find('/') == std::string::npos) {
-      try {
-        avoid_bt = ament_index_cpp::get_package_share_directory("bt_mission") +
-          "/behavior_trees/" + avoid_bt;
-      } catch (const ament_index_cpp::PackageNotFoundError & e) {
-        RCLCPP_ERROR(node_->get_logger(), "%s: %s", name().c_str(), e.what());
-        return BT::NodeStatus::FAILURE;
-      }
-    }
-    setOutput("stop_and_go", false);
-    setOutput("nav_bt", avoid_bt);
-  } else if (mode == Task::OBSTACLE_NONE) {
-    setOutput("stop_and_go", false);
-    setOutput("nav_bt", std::string());
-  } else {
-    RCLCPP_ERROR(
-      node_->get_logger(), "%s: unknown obstacle mode '%s' (stop, avoid, none)",
-      name().c_str(), mode.c_str());
-    return BT::NodeStatus::FAILURE;
-  }
-  return BT::NodeStatus::SUCCESS;
-}
-
-// ---------------------------------------------------------------------------------------------
-
-StopAndGo::StopAndGo(const std::string & name, const BT::NodeConfiguration & config)
-: BT::DecoratorNode(name, config),
-  node_(config.blackboard->get<rclcpp::Node::SharedPtr>("node")),
-  scan_topic_("scan")
-{
-  config.blackboard->get("tf_buffer", tf_);
-  status_pub_ = statusPublisher(node_);
-  getInput("scan_topic", scan_topic_);
-  callback_group_ = node_->create_callback_group(
-    rclcpp::CallbackGroupType::MutuallyExclusive, false);
-  executor_.add_callback_group(callback_group_, node_->get_node_base_interface());
-  rclcpp::SubscriptionOptions options;
-  options.callback_group = callback_group_;
-  scan_sub_ = node_->create_subscription<sensor_msgs::msg::LaserScan>(
-    scan_topic_, rclcpp::SensorDataQoS(),
-    [this](sensor_msgs::msg::LaserScan::ConstSharedPtr msg, const rclcpp::MessageInfo & info) {
-      // 받은 시각이 아니라 보낸 시각으로 오래됐는지 본다. 이 노드를 한동안 tick 하지 않았으면
-      // 큐에 남아 있던 scan 을 지금 처리하게 되는데, 그 scan 이 새것처럼 보이면 안 되기 때문이다
-      const auto sent = info.get_rmw_message_info().source_timestamp;
-      scan_time_ = sent > 0 ?
-      std::chrono::system_clock::time_point(std::chrono::nanoseconds(sent)) :
-      std::chrono::system_clock::now();
-      scan_ = msg;
-    },
-    options);
-}
-
-BT::NodeStatus StopAndGo::tick()
-{
-  bool enabled = true;
-  getInput("enabled", enabled);
-  if (!enabled) {                        // avoid, none: 장애물은 보지 않는다
-    setStatus(BT::NodeStatus::RUNNING);
-    return child_node_->executeTick();
-  }
-  geometry_msgs::msg::PoseStamped goal;
-  if (!getInput("goal", goal)) {
-    RCLCPP_ERROR(node_->get_logger(), "%s: no goal", name().c_str());
-    return BT::NodeStatus::FAILURE;
-  }
-  setStatus(BT::NodeStatus::RUNNING);
-  executor_.spin_some();                 // 도착한 scan 을 받는다
-  const auto check = checkPath(goal);
-  const auto now = std::chrono::steady_clock::now();
-
-  if (state_ != State::kWaiting) {
-    if (!check.blocked) {
-      if (state_ == State::kIdle) {
-        setOutput("blocked", false);
-      }
-      return startChild();
-    }
-    // 길이 막혔다. 가고 있었으면 자식을 멈춘다 (NavigateToPose 의 halt = Nav2 goal 취소 → 로봇 정지)
-    haltChild();
-    state_ = State::kWaiting;
-    blocked_since_ = now;
-    clear_ = false;
-    setOutput("blocked", true);
-    report("blocked: " + check.reason, true);
-    return BT::NodeStatus::RUNNING;
-  }
-
-  // 멈춰서 기다리는 중
-  char text[64];
-  if (check.blocked) {
-    clear_ = false;
-    double max_wait = 0.0;
-    getInput("max_wait", max_wait);
-    if (max_wait > 0.0 && now - blocked_since_ > seconds(max_wait)) {
-      std::snprintf(text, sizeof(text), "gave up: blocked for %.1f s", max_wait);
-      report(text, true);
-      state_ = State::kIdle;
-      return BT::NodeStatus::FAILURE;    // blocked 는 true 로 둔다: 서버가 실패 이유로 쓴다
-    }
-    return BT::NodeStatus::RUNNING;
-  }
-  if (!clear_) {
-    clear_ = true;
-    clear_since_ = now;
-  }
-  double resume_delay = 1.0;
-  getInput("resume_delay", resume_delay);
-  if (now - clear_since_ < seconds(resume_delay)) {
-    return BT::NodeStatus::RUNNING;      // 잠깐 비었다가 다시 막히는 경우를 걸러 낸다
-  }
-  std::snprintf(
-    text, sizeof(text), "resumed after %.1f s",
-    std::chrono::duration<double>(now - blocked_since_).count());
-  report(text, false);
-  setOutput("blocked", false);
-  return startChild();                   // 같은 goal 을 다시 보낸다. 경로는 지금 위치에서 다시 계산된다
-}
-
-BT::NodeStatus StopAndGo::startChild()
-{
-  state_ = State::kGoing;
-  const auto status = child_node_->executeTick();
-  if (status != BT::NodeStatus::RUNNING) {
-    state_ = State::kIdle;
-  }
-  return status;
-}
-
-void StopAndGo::halt()
-{
-  state_ = State::kIdle;
-  clear_ = false;
-  BT::DecoratorNode::halt();
-}
-
-StopAndGo::PathCheck StopAndGo::checkPath(const geometry_msgs::msg::PoseStamped & goal)
-{
-  double scan_timeout = 1.0;
-  getInput("scan_timeout", scan_timeout);
-  if (!scan_ || std::chrono::system_clock::now() - scan_time_ > seconds(scan_timeout)) {
-    return {true, "no scan on " + scan_topic_};
-  }
-  if (!tf_) {
-    return {true, "no tf_buffer on the blackboard"};
-  }
-  std::string robot_frame = "base_link";
-  getInput("robot_frame", robot_frame);
-  geometry_msgs::msg::Transform robot, sensor;
-  try {
-    robot = tf_->lookupTransform(goal.header.frame_id, robot_frame, tf2::TimePointZero).transform;
-    sensor = tf_->lookupTransform(
-      goal.header.frame_id, scan_->header.frame_id, tf2::TimePointZero).transform;
-  } catch (const tf2::TransformException & e) {
-    return {true, std::string("no TF (") + e.what() + ")"};
-  }
-
-  // 길: 로봇에서 goal 쪽으로 난 직선. SimpleLinePlanner 가 긋는 경로와 같다
-  const double rx = robot.translation.x;
-  const double ry = robot.translation.y;
-  const double dx = goal.pose.position.x - rx;
-  const double dy = goal.pose.position.y - ry;
-  const double dist = std::hypot(dx, dy);
-  if (dist < 1e-3) {
-    return {};                           // goal 위에 있다 (방향만 맞추면 된다)
-  }
-  const double ux = dx / dist;
-  const double uy = dy / dist;
-  double stop_distance = 0.6;
-  double half_width = 0.25;
-  getInput("stop_distance", stop_distance);
-  getInput("half_width", half_width);
-  const double reach = std::min(stop_distance, dist);   // goal 너머의 물체는 보지 않는다
-
-  // scan 의 점을 goal 의 frame 으로 옮겨서, 길 방향(along)과 옆 방향(side) 거리로 나눈다
-  const double c = std::cos(yawOf(sensor.rotation));
-  const double s = std::sin(yawOf(sensor.rotation));
-  double nearest = std::numeric_limits<double>::infinity();
-  for (std::size_t i = 0; i < scan_->ranges.size(); ++i) {
-    const float r = scan_->ranges[i];
-    if (!std::isfinite(r) || r < scan_->range_min || r > scan_->range_max) {
-      continue;
-    }
-    const double a = scan_->angle_min + static_cast<double>(i) * scan_->angle_increment;
-    const double lx = r * std::cos(a);
-    const double ly = r * std::sin(a);
-    const double px = sensor.translation.x + c * lx - s * ly - rx;
-    const double py = sensor.translation.y + s * lx + c * ly - ry;
-    const double along = px * ux + py * uy;
-    const double side = std::abs(py * ux - px * uy);
-    if (along > 0.0 && along <= reach && side <= half_width) {
-      nearest = std::min(nearest, along);
-    }
-  }
-  if (std::isinf(nearest)) {
-    return {};
-  }
-  char text[48];
-  std::snprintf(text, sizeof(text), "obstacle %.2f m ahead", nearest);
-  return {true, text};
-}
-
-void StopAndGo::report(const std::string & text, bool warn)
-{
-  std::string task_id;
-  getInput("task_id", task_id);
-  std_msgs::msg::String status;
-  status.data = (task_id.empty() ? "" : task_id + " ") + text;
-  if (warn) {
-    RCLCPP_WARN(node_->get_logger(), "[stop&go] %s", status.data.c_str());
-  } else {
-    RCLCPP_INFO(node_->get_logger(), "[stop&go] %s", status.data.c_str());
-  }
-  status_pub_->publish(status);
-}
-
-// ---------------------------------------------------------------------------------------------
-
 void registerNodes(BT::BehaviorTreeFactory & factory)
 {
   factory.registerNodeType<DoWork>("DoWork");
   factory.registerNodeType<ScanWhileMoving>("ScanWhileMoving");
   factory.registerNodeType<ForEachWaypoint>("ForEachWaypoint");
-  factory.registerNodeType<ObstacleMode>("ObstacleMode");
-  factory.registerNodeType<StopAndGo>("StopAndGo");
 }
 
 }  // namespace bt_mission

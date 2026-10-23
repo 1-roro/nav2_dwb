@@ -29,7 +29,7 @@ DECORATOR = {
     'KeepRunningUntilFailure', 'RateController', 'DistanceController', 'SpeedController',
     'GoalUpdater', 'SingleTrigger', 'Delay', 'SubTree',
 }
-MY_DECORATOR = {'ForEachWaypoint', 'StopAndGo'}     # 이 패키지에서 만든 데코레이터
+MY_DECORATOR = {'ForEachWaypoint'}     # 이 패키지에서 만든 데코레이터
 NAV2 = {
     'NavigateToPose', 'NavigateThroughPoses', 'ComputePathToPose', 'ComputePathThroughPoses',
     'FollowPath', 'SmoothPath', 'Spin', 'Wait', 'BackUp', 'DriveOnHeading', 'ClearEntireCostmap',
@@ -141,10 +141,7 @@ class Drawer:
                    f'<tr><td><font color="{INK2}" point-size="11">번호: 자식을 왼쪽부터 tick 하는 순서.'
                    f'  Parallel 의 자식은 동시에, Fallback 의 뒤 자식(점선)은 앞 자식이 실패할 때만,'
                    f' Switch 는 값이 맞는 자식 하나만 실행.'
-                   f'</font></td></tr>'
-                   f'<tr><td><font color="{INK2}" point-size="11">'
-                   f'ForEachWaypoint 는 점마다 자식을 한 번씩 다시 실행.'
-                   f'  StopAndGo 는 길에 장애물이 있으면 자식을 멈췄다가, 길이 비면 다시 실행'
+                   f'  ForEachWaypoint 는 점마다 자식을 한 번씩 다시 실행'
                    f'</font></td></tr></table>')
         self.subtree(root)
         head = [

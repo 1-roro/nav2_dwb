@@ -63,9 +63,7 @@ std::string writeTask(
   blackboard->set("task_id", task_id);
   blackboard->set("action", task.action);
   blackboard->set("duration", task.duration);
-  blackboard->set("obstacle", task.obstacle);
   blackboard->set("waypoints_reached", 0);
-  blackboard->set("blocked", false);
   return task_id;
 }
 
@@ -76,17 +74,9 @@ int waypointsReached(const BT::Blackboard::Ptr & blackboard)
   return reached;
 }
 
-bool isBlocked(const BT::Blackboard::Ptr & blackboard)
+std::string failureMessage(const std::string & failed_node, int reached, int total)
 {
-  bool blocked = false;
-  blackboard->get("blocked", blocked);
-  return blocked;
-}
-
-std::string failureMessage(const std::string & failed_node, int reached, int total, bool blocked)
-{
-  std::string message = blocked ? std::string("blocked by an obstacle") :
-    (failed_node.empty() ? std::string("task") : failed_node) + " failed";
+  std::string message = (failed_node.empty() ? std::string("task") : failed_node) + " failed";
   if (reached < total) {
     message += " at waypoint " + std::to_string(reached + 1) + "/" + std::to_string(total);
   }

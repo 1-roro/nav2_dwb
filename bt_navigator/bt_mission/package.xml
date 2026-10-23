@@ -19,7 +19,6 @@
   <depend>tf2_ros</depend>
   <depend>ament_index_cpp</depend>
   <depend>std_msgs</depend>
-  <depend>sensor_msgs</depend>
   <depend>bt_mission_msgs</depend>
   <depend>nav2_util</depend>
   <depend>rclcpp_lifecycle</depend>

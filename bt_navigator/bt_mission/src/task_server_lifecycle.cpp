@@ -125,10 +125,7 @@ void TaskServerLifecycle::onLoop()
   }
   const auto running = logger_->running();
   const int reached = waypointsReached(bt_server_->getBlackboard());
-  const bool blocked = isBlocked(bt_server_->getBlackboard());
-  if (running == last_running_ && reached == last_reached_ && blocked == last_blocked_ &&
-    now - last_feedback_ < 500ms)
-  {
+  if (running == last_running_ && reached == last_reached_ && now - last_feedback_ < 500ms) {
     return;
   }
   auto feedback = std::make_shared<ExecuteTask::Feedback>();
@@ -137,12 +134,10 @@ void TaskServerLifecycle::onLoop()
   feedback->running = running;
   feedback->waypoints_reached = reached;
   feedback->waypoints_total = total_;
-  feedback->blocked = blocked;
   feedback->elapsed = static_cast<float>(elapsed());
   bt_server_->publishFeedback(feedback);
   last_running_ = running;
   last_reached_ = reached;
-  last_blocked_ = blocked;
   last_feedback_ = now;
 }
 
@@ -183,9 +178,8 @@ void TaskServerLifecycle::onCompletion(ExecuteTask::Result::SharedPtr result, Bt
     result->message = deactivating_ ? "task server deactivated" : "canceled";
     state = deactivating_ ? "stopped" : "canceled";
   } else {
-    const auto blackboard = bt_server_->getBlackboard();
     result->message = failureMessage(
-      logger_->lastFailed(), waypointsReached(blackboard), total_, isBlocked(blackboard));
+      logger_->lastFailed(), waypointsReached(bt_server_->getBlackboard()), total_);
   }
   RCLCPP_INFO(
     get_logger(), "[task] %s %s in %.1f s: %s", task_id_.c_str(), state, elapsed(),
@@ -199,7 +193,6 @@ void TaskServerLifecycle::startTask(const ExecuteTask::Goal & goal)
   logger_->clear();
   last_running_.clear();
   last_reached_ = 0;
-  last_blocked_ = false;
   started_ = std::chrono::steady_clock::now();
   last_feedback_ = started_;
   RCLCPP_INFO(

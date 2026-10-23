@@ -7,18 +7,16 @@ task_server 에 작업을 액션(execute_task, bt_mission_msgs/action/ExecuteTas
   task> inspect 0,-1 1.5,-1,90       작업 추가. 하고 있는 작업이 있으면 끝난 뒤에 보낸다
   task> !go -2,-1,0                  지금 작업을 멈추고(선점) 바로 보낸다
   task> cancel                       지금 작업을 취소하고, 기다리는 작업도 비운다
-  task> go avoid 1,1                 장애물이 있으면 돌아서 간다 (기본 stop: 멈췄다가 비면 간다)
 
   # 작업 하나만 보내고, 끝날 때까지 기다렸다가 종료 (종료 코드 0 = SUCCEEDED)
   ros2 run bt_mission task_client.py inspect 0,-1 1.5,-1,90
 
-작업 한 줄의 형식: <action>[:duration] [stop|avoid|none] x,y[,yaw_deg] [x,y[,yaw_deg] ...]
+작업 한 줄의 형식: <action>[:duration] x,y[,yaw_deg] [x,y[,yaw_deg] ...]
   - 좌표는 map frame. 로봇은 점마다 멈춰서 위치와 방향을 맞추고(도착) 다음 점으로 간다.
     작업(inspect 의 점검, look_around 의 회전)은 마지막 점에서 한다
   - yaw 는 그 점에 도착했을 때 볼 방향 [deg]. 생략하면 중간 점은 다음 점 쪽,
     마지막 점은 직전 점에서 온 방향으로 채운다.
     작업의 첫 점은 직전 작업의 마지막 점(첫 작업이면 로봇 현재 위치)에서 온 것으로 본다
-  - stop | avoid | none: 길에 장애물이 있을 때. 생략하면 stop (멈춰서 기다렸다가 길이 비면 다시 간다)
 
 Ctrl-C 를 누르면 지금 작업을 취소하고 끝낸다.
 """
@@ -42,13 +40,11 @@ from bt_mission_msgs.msg import Task
 import tf2_ros
 
 ACTIONS = (Task.ACTION_GO, Task.ACTION_INSPECT, Task.ACTION_SCAN, Task.ACTION_LOOK_AROUND)
-OBSTACLE_MODES = (Task.OBSTACLE_STOP, Task.OBSTACLE_AVOID, Task.OBSTACLE_NONE)
 DEFAULT_DURATION = 3.0
 
-HELP = '''작업: <action>[:duration] [stop|avoid|none] x,y[,yaw_deg] [x,y[,yaw_deg] ...]   (map frame)
+HELP = '''작업: <action>[:duration] x,y[,yaw_deg] [x,y[,yaw_deg] ...]   (map frame)
   action: go | inspect | scan | look_around. 점마다 멈춰서 도착을 알리고 다음 점으로, 작업은 마지막 점에서
-  장애물: stop (기본, 멈췄다가 비면 다시 간다) | avoid (돌아서 간다) | none (보지 않는다)
-  예) inspect 0,-1 1.5,-1,90    scan 1.5,1.5 -1,1.5,180    look_around -1,1.5,180    go avoid -2,-1,0
+  예) inspect 0,-1 1.5,-1,90    scan 1.5,1.5 -1,1.5,180    look_around -1,1.5,180    go -2,-1,0
   !<작업>: 지금 작업을 멈추고 바로 보냄    cancel: 지금 작업 취소 + 대기 비우기
   help: 이 도움말, quit 또는 Ctrl-D: 끝내기 (남은 작업이 끝날 때까지 기다림), Ctrl-C: 취소하고 끝내기'''
 
@@ -66,10 +62,7 @@ def on_sigint(*_):
 
 
 def parse_line(text):
-    """'inspect:5 avoid 0,-1 1.5,-1,90' -> ('inspect', 5.0, [(0, -1, None), (1.5, -1, 90)], 'avoid')
-
-    장애물 모드(stop | avoid | none)는 action 뒤 어디에 적어도 된다. 없으면 빈 값 (= stop).
-    """
+    """'inspect:5 0,-1 1.5,-1,90' -> ('inspect', 5.0, [(0, -1, None), (1.5, -1, 90)])"""
     tokens = text.split()
     if len(tokens) < 2:
         raise ValueError('need an action and at least one point')
@@ -81,22 +74,15 @@ def parse_line(text):
     except ValueError:
         raise ValueError(f"duration '{duration}' is not a number (e.g. inspect:5)") from None
     points = []
-    obstacle = ''
     for token in tokens[1:]:
-        if token in OBSTACLE_MODES:
-            obstacle = token
-            continue
         try:
             values = [float(v) for v in token.split(',')]
         except ValueError:
             values = []
         if len(values) not in (2, 3):
-            raise ValueError(f"'{token}' is not x,y or x,y,yaw_deg "
-                             f"(or an obstacle mode: {', '.join(OBSTACLE_MODES)})")
+            raise ValueError(f"'{token}' is not x,y or x,y,yaw_deg")
         points.append((values[0], values[1], values[2] if len(values) == 3 else None))
-    if not points:
-        raise ValueError('need at least one point')
-    return action, duration, points, obstacle
+    return action, duration, points
 
 
 def fill_yaws(start_xy, points):
@@ -127,7 +113,6 @@ class TaskClient(Node):
         self.handles = {}           # 작업 id → goal handle
         self.last_xy = None         # 직전 작업의 마지막 점 (yaw 채우기용, 처음엔 로봇 위치)
         self.last_running = {}
-        self.last_blocked = {}
         self.last_reached = {}      # 작업 id → 도착을 출력한 점 수
         self.sent = {}              # 작업 id → 보낸 Task (도착한 점 좌표 출력용)
         self.results = {}           # 작업 id → (상태, 메시지)
@@ -178,9 +163,9 @@ class TaskClient(Node):
 
     # ---- 작업 보내기 ---------------------------------------------------------------------------
 
-    def make_task(self, action, duration, points, obstacle=''):
+    def make_task(self, action, duration, points):
         self.count += 1
-        task = Task(id=f't{self.count}', action=action, duration=duration, obstacle=obstacle)
+        task = Task(id=f't{self.count}', action=action, duration=duration)
         start = self.last_xy or (points[0][0], points[0][1])
         stamp = self.get_clock().now().to_msg()
         for x, y, yaw in fill_yaws(start, points):
@@ -206,8 +191,7 @@ class TaskClient(Node):
     def send(self, task):
         route = ' -> '.join(f'({p.pose.position.x:g},{p.pose.position.y:g})'
                             for p in task.waypoints)
-        print(f'  -> {task.id}: {task.action} {route}' +
-              (f', obstacle {task.obstacle}' if task.obstacle else ''), flush=True)
+        print(f'  -> {task.id}: {task.action} {route}', flush=True)
         self.active = task.id
         self.sent[task.id] = task
         future = self.client.send_goal_async(
@@ -251,10 +235,6 @@ class TaskClient(Node):
     def on_feedback(self, feedback):
         task_id = feedback.task_id
         self.print_arrivals(task_id, feedback.waypoints_reached, f' ({feedback.elapsed:.1f} s)')
-        if feedback.blocked != self.last_blocked.get(task_id, False):
-            state = 'blocked by an obstacle, waiting' if feedback.blocked else 'path clear, going again'
-            print(f'  .. {task_id}: {state} ({feedback.elapsed:.1f} s)', flush=True)
-        self.last_blocked[task_id] = feedback.blocked
         if feedback.running and feedback.running != self.last_running.get(task_id):
             # bt_status: 트리(루트)의 상태 (실행 중이므로 RUNNING), running: 지금 RUNNING 인 액션 노드
             print(f'  .. {task_id}: {feedback.bt_status} {feedback.running} '
@@ -300,11 +280,11 @@ def interactive(node):
             continue
         now = line.startswith('!')
         try:
-            action, duration, points, obstacle = parse_line(line.lstrip('!'))
+            action, duration, points = parse_line(line.lstrip('!'))
         except ValueError as e:
             print(f'  ! {e}')
             continue
-        node.add(node.make_task(action, duration, points, obstacle), now=now)
+        node.add(node.make_task(action, duration, points), now=now)
     if node.active is not None or node.queue:
         print(f'waiting for {len(node.queue) + 1} task(s) to finish (Ctrl-C to cancel)')
         node.wait_until_idle()
@@ -312,8 +292,8 @@ def interactive(node):
 
 
 def once(node, args):
-    action, duration, points, obstacle = parse_line(' '.join(args))
-    task = node.make_task(action, duration, points, obstacle)
+    action, duration, points = parse_line(' '.join(args))
+    task = node.make_task(action, duration, points)
     node.add(task)
     node.wait_until_idle()
     return 0 if node.results.get(task.id, ('',))[0] == 'SUCCEEDED' else 1

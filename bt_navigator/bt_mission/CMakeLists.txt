@@ -22,7 +22,6 @@ find_package(std_msgs REQUIRED)
 find_package(bt_mission_msgs REQUIRED)
 find_package(nav2_util REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
-find_package(sensor_msgs REQUIRED)
 
 set(dependencies
   rclcpp
@@ -35,7 +34,6 @@ set(dependencies
   tf2_ros
   ament_index_cpp
   std_msgs
-  sensor_msgs
   bt_mission_msgs
 )
 
@@ -88,11 +86,7 @@ if(BUILD_TESTING)
   # 가짜 Nav2 노드. 테스트가 링크하고, test_task_server_lifecycle 에서는 플러그인으로도 불러온다
   add_library(test_fake_nav2 SHARED test/test_fakes.cpp)
   target_compile_definitions(test_fake_nav2 PRIVATE BT_PLUGIN_EXPORT)
-  ament_target_dependencies(test_fake_nav2 behaviortree_cpp_v3 geometry_msgs sensor_msgs)
-
-  ament_add_gtest(test_stop_and_go test/test_stop_and_go.cpp TIMEOUT 120)
-  target_link_libraries(test_stop_and_go ${PROJECT_NAME}_bt test_fake_nav2)
-  ament_target_dependencies(test_stop_and_go ${dependencies})
+  ament_target_dependencies(test_fake_nav2 behaviortree_cpp_v3 geometry_msgs)
 
   ament_add_gtest(test_task_server test/test_task_server.cpp TIMEOUT 120)
   target_link_libraries(test_task_server ${PROJECT_NAME}_bt test_fake_nav2)

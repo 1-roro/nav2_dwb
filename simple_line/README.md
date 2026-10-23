@@ -1,12 +1,13 @@
 # simple_line: 직선 경로 planner + controller (ROS 2 Humble, C++)
 
 장애물을 고려하지 않는 가장 단순한 형태의 Nav2 플러그인 두 개와 실행 설정이다.
+길에 장애물이 있으면 Nav2 의 collision_monitor 가 로봇을 세웠다가, 치우면 다시 보낸다 (아래 "장애물 앞에서 멈췄다 가기").
 
 ```
 simple_line/
 ├── simple_line_planner/      nav2_core::GlobalPlanner  — start → goal 직선 경로
 ├── simple_line_controller/   nav2_core::Controller     — pure pursuit + 제자리 회전
-└── simple_line_bringup/      launch, 파라미터, 빈 방 월드(6m x 6m), 여러 goal 경유 스크립트
+└── simple_line_bringup/      launch, 파라미터, 빈 방 월드(6m x 6m), 여러 goal 경유 스크립트, 장애물 도구
 ```
 
 ## Planner — `simple_line_planner::SimpleLinePlanner`
@@ -118,10 +119,6 @@ ros2 launch simple_line_bringup simple_line.launch.py
 `params/simple_line_params.yaml` 을 덮어써서 `tb3_simulation_launch.py` 에 넘긴다.
 플러그인 이름을 기본 BT 가 부르는 `GridBased` / `FollowPath` 그대로 두었기 때문에 BT 는 바꾸지 않는다.
 
-같은 파일에 장애물을 피해 가는 planner `Avoid`(NavFn)와 controller `FollowPathAvoid`(Regulated Pure Pursuit)도
-등록되어 있다. 기본 BT 는 이 둘을 부르지 않는다. bt_navigator 미션에서 작업을 `avoid` 로 보낼 때만
-`navigate_avoid.xml` 트리를 통해 쓰인다 ([bt_navigator 6-3](../bt_navigator/README.md#6-3-돌아가게-하려면-avoid)).
-
 goal 에 도착했다고 보는 범위(goal checker)도 줄였다. Humble 기본값(xy 0.25m / yaw 0.25rad)이면 로봇이 goal
 20cm 남짓 앞에서 멈춘다.
 
@@ -131,6 +128,29 @@ goal 에 도착했다고 보는 범위(goal checker)도 줄였다. Humble 기본
 | `yaw_goal_tolerance` | 0.25 | 0.05 | goal 방향과 이 각도 안이면 도착 [rad] (약 3°) |
 
 더 정확히 서야 하면 더 줄인다. 다만 위치 추정(AMCL) 오차보다 작게 하면 도착 판정이 늦어지거나 안 날 수 있다.
+
+### 장애물 앞에서 멈췄다 가기 (collision_monitor)
+
+planner 와 controller 는 장애물을 보지 않는다. 대신 launch 가 Nav2 의 `collision_monitor` 를 Nav2 와 로봇 사이에 둔다.
+
+```
+Nav2 (velocity_smoother, behavior_server) ──/cmd_vel──▶ collision_monitor ──/cmd_vel_safe──▶ 로봇
+```
+
+- 로봇 앞 0.5 m × 폭 0.5 m 사각형(StopZone, RViz 에 빨간 사각형)에 레이저 점이 들어오면 0 속도를 보낸다. 비면 Nav2 의 속도를 그대로 넘긴다.
+- Nav2 goal 은 취소되지 않는다. 치우면 같은 경로로 다시 간다.
+- launch 는 로봇이 `/cmd_vel_safe` 를 듣도록 `waffle.model` 을 고친 사본으로 스폰한다.
+- 서 있는 시간도 progress checker 에 들어가므로 `movement_time_allowance` 를 30초로 늘렸다 (Humble 기본 10초).
+
+장애물은 `obstacle.py` 로 놓고 치운다 (Gazebo 의 `/spawn_entity`, `/delete_entity` 서비스).
+
+```bash
+ros2 run simple_line_bringup obstacle.py put 0,-1     # (0,-1) 에 원기둥 (반지름 0.15 m)
+ros2 run simple_line_bringup obstacle.py remove       # 놓은 것 모두 치우기
+ros2 run simple_line_bringup obstacle.py click        # RViz 의 Publish Point 로 찍으면 놓고, 다시 찍으면 치운다
+```
+
+설정 값, 오래 막혔을 때의 동작, 확인한 결과는 [bt_navigator 6장](../bt_navigator/README.md#6-장애물-멈췄다-가기-stop--go) 에 있다.
 
 ## 확인한 것
 

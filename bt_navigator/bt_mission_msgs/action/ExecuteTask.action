@@ -5,13 +5,12 @@
 # 작업 중에 새 goal 이 오면 지금 작업을 멈추고(ABORTED) 새 작업을 시작한다.
 
 # ---- goal ----
-Task task                     # 작업 내용 (Task.msg: id, waypoints, action, duration, obstacle)
+Task task                     # 작업 내용 (Task.msg: id, waypoints, action, duration)
 ---
 # ---- result ----
 bool success
 string message                # "done", 또는 실패/중단 이유
-                              # ("go_inspect failed at waypoint 2/3", "preempted by t2", "canceled",
-                              #  "blocked by an obstacle at waypoint 1/2")
+                              # ("go_inspect failed at waypoint 2/3", "preempted by t2", "canceled")
 string bt_status              # 트리(task.xml 의 루트)가 마지막으로 돌려준 상태. 아래 중 하나
 string BT_SUCCESS = "SUCCESS" #   작업을 끝냈다 (goal 상태 SUCCEEDED)
 string BT_FAILURE = "FAILURE" #   실패했다 (ABORTED)
@@ -24,5 +23,4 @@ string bt_status              # 트리(루트)의 상태. feedback 은 실행 �
 string running                # 지금 RUNNING 인 액션 노드 (예: "go_scan, scanning")
 uint32 waypoints_reached      # 지금까지 도착한 점 수 (0 ~ waypoints_total)
 uint32 waypoints_total        # 이 작업의 점 수
-bool blocked                  # 장애물 때문에 멈춰서 기다리는 중 (obstacle 이 stop 일 때)
 float32 elapsed               # 작업 시작 후 지난 시간 [s]

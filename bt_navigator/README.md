@@ -7,7 +7,7 @@
 - **작업 하나** = 들를 점들 + 할 일 (`go`, `inspect`, `scan`, `look_around`)
 - 로봇은 **점마다 멈춰서** 위치와 방향을 맞추고, 도착을 알린 뒤 다음 점으로 간다.
 - 작업은 **액션**(`execute_task`)으로 받는다. 결과, 진행 상황(BT 상태 포함), 취소, 선점이 있다.
-- 길에 장애물이 있으면 **멈춰서 기다렸다가** 길이 비면 다시 간다 (stop & go, 기본). 작업마다 **돌아가기**(avoid)로 바꿀 수 있다 (6장).
+- 길에 장애물이 있으면 **멈춰서 기다렸다가** 치우면 다시 간다 (stop & go). Nav2 goal 은 그대로 두고 속도만 막는다. Nav2 의 collision_monitor 가 한다 (6장).
 
 ```
 bt_navigator/
@@ -19,7 +19,7 @@ bt_navigator/
 |---|---|---|
 | 점과 작업을 실행 중에 액션으로 맡기기 (결과, 진행 상황, 취소, 선점) | `task_server` (`task.xml`)<br>+ `task_client.py` | 4 |
 | 위와 같되, 서버를 Nav2 의 `BtActionServer` 와 lifecycle 노드로 | `task_server_lifecycle.launch.py`<br>+ `task_client.py` | 5 |
-| 장애물이 있으면 멈췄다가 가기(기본), 또는 돌아가기 | 작업 한 줄에 `avoid` / `none` 을 붙인다 | 6 |
+| 장애물이 있으면 멈췄다가 치우면 가기. 시뮬레이션에서 장애물을 놓고 치워 보기 | `simple_line.launch.py` 에 들어 있다<br>+ `obstacle.py click` | 6 |
 
 - **명령 내리는 법**(입력 형식과 예시)은 [4-5](#4-5-명령-내리기-입력-형식과-예시) 에 모아 두었다.
 - 아래층(planner, controller, 시뮬레이션 launch)은 [`simple_line/`](../simple_line/README.md) 것을 그대로 쓴다.
@@ -33,7 +33,7 @@ bt_navigator/
 - [3. 코드로 구현하기 (C++)](#3-코드로-구현하기-c)
 - [4. 액션으로 작업 맡기 (task_server, task.xml)](#4-액션으로-작업-맡기-task_server-taskxml)
 - [5. Nav2 의 BtActionServer 로 만들기 (task_server_lifecycle)](#5-nav2-의-btactionserver-로-만들기-task_server_lifecycle)
-- [6. 장애물: 멈춰서 기다리기(stop & go)와 돌아가기(avoid)](#6-장애물-멈춰서-기다리기stop--go와-돌아가기avoid)
+- [6. 장애물: 멈췄다 가기 (stop & go)](#6-장애물-멈췄다-가기-stop--go)
 - [7. 확인한 것](#7-확인한-것)
 - [8. 어떤 방법을 쓸까](#8-어떤-방법을-쓸까)
 - [9. 주의할 점 (Humble)](#9-주의할-점-humble)
@@ -46,7 +46,7 @@ bt_navigator/
 ```bash
 cd ~/nav2_ws/src/nav2_dwb && git pull
 cd ~/nav2_ws
-rosdep install --from-paths src --ignore-src -y      # nav2_simple_commander 등
+rosdep install --from-paths src --ignore-src -y      # nav2_collision_monitor, nav2_simple_commander 등
 colcon build --symlink-install --packages-select \
   simple_line_planner simple_line_controller simple_line_bringup \
   bt_mission_msgs bt_mission
@@ -77,7 +77,7 @@ ros2 run bt_mission task_server
 ros2 run bt_mission task_client.py go 0,-1 0,1 -2,-1,0
 ```
 
-입력 형식과 예시는 [4-5](#4-5-명령-내리기-입력-형식과-예시) 에 있다. 로봇은 레이저(`/scan`)로 앞길을 보고, 장애물이 있으면 멈춰서 기다린다 (6장).
+입력 형식과 예시는 [4-5](#4-5-명령-내리기-입력-형식과-예시) 에 있다. 길에 장애물이 있으면 로봇이 멈춰서 기다린다. 장애물을 직접 놓고 치워 보는 법은 6-1 에 있다.
 
 ---
 
@@ -90,7 +90,8 @@ ros2 run bt_mission task_client.py go 0,-1 0,1 -2,-1,0
 | **입력** (4장) | 어디로 가서 무엇을 할지 보냄 | `task_client.py` → `execute_task` 액션 |
 | **상위 작업 계층** | 무엇을, 어떤 순서로, 실패하면 어떻게 | `task_server` 또는 `task_server_lifecycle` (`task.xml`) |
 | **bt_navigator** | goal 까지 **어떻게 갈지** (재계획, recovery) | Nav2 기본 BT 그대로 ([MULTI_GOAL.md 1-1](../simple_line/MULTI_GOAL.md#1-1-재계획-주기0333hz와-지난-goal-반경07m은-어디에-있나)) |
-| **서버** | 실제 경로 계산, 경로 추종, 제자리 동작 | planner_server (SimpleLinePlanner, avoid 일 때 NavFn), controller_server (SimpleLineController, avoid 일 때 Regulated Pure Pursuit), behavior_server (Spin) |
+| **서버** | 실제 경로 계산, 경로 추종, 제자리 동작 | planner_server (SimpleLinePlanner), controller_server (SimpleLineController), behavior_server (Spin) |
+| **속도 관문** (6장) | 앞이 막히면 로봇에 가는 속도를 0 으로 | collision_monitor (`/cmd_vel` → `/cmd_vel_safe`) |
 
 BT 가 두 개다.
 
@@ -99,7 +100,7 @@ BT 가 두 개다.
 
 미션 BT 의 `NavigateToPose` 노드가 bt_navigator 에 액션을 보내면, bt_navigator 가 navigation BT 를 돌린다. 작업 로직을 navigation BT 에 섞지 않으니, 이동 실패 처리(재계획, recovery)와 작업 실패 처리(보고, 다음 작업)가 서로 엉키지 않는다.
 
-장애물도 두 층으로 나뉜다 (6장). 멈춰서 기다리는 stop & go 는 미션 BT 의 `StopAndGo` 가 레이저를 직접 보고 Nav2 goal 을 멈췄다 다시 보낸다. 돌아가는 avoid 는 미션 BT 가 navigation BT 만 바꿔 주고, 피하는 일은 Nav2 의 planner 와 controller 가 한다.
+장애물은 미션 BT 도 navigation BT 도 아닌 맨 아래, 로봇에 가는 속도에서 다룬다 (6장). 로봇 앞이 막히면 collision_monitor 가 속도를 0 으로 바꾸고, 위의 두 BT 는 goal 을 그대로 둔 채 계속 실행 중이다.
 
 ---
 
@@ -130,9 +131,8 @@ BT 는 루트부터 **tick** 을 한다. 실행 노드가 tick 을 주기적으�
 | 제어 | **Parallel** (⇉) | 자식을 매 tick 모두 실행. `success_threshold` 개가 SUCCESS 면 SUCCESS. 나머지 RUNNING 자식은 **halt** (중단) |
 | 제어 | **Switch3** (⇢) | `variable` 값이 `case_1..3` 중 맞는 자식 하나만 실행. 맞는 것이 없으면 마지막 자식 (4-3) |
 | 데코레이터 | **ForEachWaypoint** (직접 만듦) | 점 목록의 점마다 자식을 한 번씩 다시 실행 (4-2) |
-| 데코레이터 | **StopAndGo** (직접 만듦) | 길에 장애물이 있으면 자식을 멈췄다가, 길이 비면 다시 실행 (6-2) |
 | 액션 | **Nav2 BT 노드** | `NavigateToPose`, `Spin`. Nav2 서버에 액션을 보내고, 끝날 때까지 RUNNING |
-| 액션 | **직접 만든 노드** | `ObstacleMode`, `DoWork`, `ScanWhileMoving` (3장, 6-1) |
+| 액션 | **직접 만든 노드** | `DoWork`, `ScanWhileMoving` (3장) |
 
 ### blackboard 와 포트
 
@@ -164,8 +164,8 @@ BT 를 코드로 쓰는 일은 세 가지다.
 ROS 노드 /task_server   (실행 파일 task_server. task_server_lifecycle 도 같다)
  └ 미션 BT
     ├ Sequence, Parallel, Switch3                  흐름만 정함. 밖으로 아무것도 안 보냄
-    ├ ForEachWaypoint, StopAndGo                   흐름 (점마다 다시 실행, 막히면 멈춤) + 보고
-    ├ ObstacleMode, DoWork, ScanWhileMoving        이 ROS 노드 안에서 직접 처리
+    ├ ForEachWaypoint                              흐름 (점마다 다시 실행) + 보고
+    ├ DoWork, ScanWhileMoving                      이 ROS 노드 안에서 직접 처리
     └ NavigateToPose, Spin                         다른 ROS 노드에 액션 goal 을 보내고 결과를 기다림
               │ 액션                         │ 액션 (spin)
               ▼                              ▼
@@ -182,39 +182,31 @@ ROS 노드 /planner_server           ROS 노드 /controller_server
 
 아래 코드는 발췌다 (선언과 정의를 한곳에 모으고 일부 줄을 뺐다).
 
-**한 번에 끝나는 노드** (`BT::SyncActionNode`): `tick()` 이 SUCCESS / FAILURE 를 바로 돌려준다.
+**한 번에 끝나는 노드** (`BT::SyncActionNode`): `tick()` 이 SUCCESS / FAILURE 를 바로 돌려준다. 이 패키지에는 지금 이 종류가 없어서, 예로 하나 든다.
 
 ```cpp
-class ObstacleMode : public BT::SyncActionNode           // 작업의 obstacle 값을 두 blackboard 값으로
+class BatteryOk : public BT::SyncActionNode              // 예: 배터리가 충분한지 (이 패키지에는 없다)
 {
 public:
-  ObstacleMode(const std::string & name, const BT::NodeConfiguration & config);
+  BatteryOk(const std::string & name, const BT::NodeConfiguration & config)
+  : BT::SyncActionNode(name, config) {}
 
   static BT::PortsList providedPorts()                     // XML 에서 쓸 수 있는 속성
   {
     return {
-      BT::InputPort<std::string>("mode"),                  // 읽는 값
-      BT::OutputPort<bool>("stop_and_go"),                 // 쓰는 값
-      BT::OutputPort<std::string>("nav_bt"),
+      BT::InputPort<double>("level"),                      // 읽는 값
+      BT::InputPort<double>("min", 0.2, "lowest level to go on"),
+      BT::OutputPort<double>("margin"),                    // 쓰는 값
     };
   }
 
   BT::NodeStatus tick() override
   {
-    std::string mode;
-    getInput("mode", mode);                                // XML 의 mode="{obstacle}" 을 읽는다
-    if (mode.empty() || mode == "stop") {
-      setOutput("stop_and_go", true);                      // blackboard 의 {stop_and_go} 에 쓴다
-      setOutput("nav_bt", std::string());
-    } else if (mode == "avoid") {
-      setOutput("stop_and_go", false);
-      setOutput("nav_bt", avoid_bt_path);                  // (경로를 찾는 부분은 뺐다)
-    } else if (mode == "none") {
-      ...
-    } else {
-      return BT::NodeStatus::FAILURE;                      // 모르는 값
-    }
-    return BT::NodeStatus::SUCCESS;
+    double level = 0.0, min = 0.2;
+    getInput("level", level);                              // XML 의 level="{battery}" 를 읽는다
+    getInput("min", min);
+    setOutput("margin", level - min);                      // blackboard 의 {margin} 에 쓴다
+    return level >= min ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
   }
 };
 ```
@@ -270,8 +262,6 @@ void registerNodes(BT::BehaviorTreeFactory & factory)
   factory.registerNodeType<DoWork>("DoWork");
   factory.registerNodeType<ScanWhileMoving>("ScanWhileMoving");
   factory.registerNodeType<ForEachWaypoint>("ForEachWaypoint");  // 4-2
-  factory.registerNodeType<ObstacleMode>("ObstacleMode");        // 6-1
-  factory.registerNodeType<StopAndGo>("StopAndGo");              // 6-2
 }
 ```
 
@@ -354,7 +344,7 @@ server.stop("task_server shutting down");                                  // �
 task_client.py ──goal: ExecuteTask (Task)────▶ task_server (액션 서버 + BT 실행기)
    ◀── 수락 / 거절                               goal 마다 blackboard 를 채우고 task.xml 을 처음부터 tick
    ◀── feedback: BT 상태, 실행 중인 노드,         cancel  → haltTree → Nav2 goal 취소 → CANCELED
-                 도착한 점 수, 장애물로 멈춤      새 goal → 지금 작업 ABORTED("preempted by …") → 새 작업
+                 도착한 점 수                     새 goal → 지금 작업 ABORTED("preempted by …") → 새 작업
    ◀── result: success, message, BT 상태          트리 끝 → SUCCEEDED / ABORTED("<노드> failed at waypoint i/n")
    ── cancel ──▶                                    │ 점마다 NavigateToPose, Spin
                                                     ▼
@@ -363,7 +353,7 @@ task_client.py ──goal: ExecuteTask (Task)────▶ task_server (액션
 
 | 누가 | 무엇을 정하나 |
 |---|---|
-| 보내는 쪽 (`task_client.py`, 관제 서버) | **데이터**: 어디로(waypoints), 무엇을(action), 장애물이 있으면 어떻게(obstacle). 여러 작업의 순서 |
+| 보내는 쪽 (`task_client.py`, 관제 서버) | **데이터**: 어디로(waypoints), 무엇을(action). 여러 작업의 순서 |
 | 미션 BT (`task.xml`) | **정책**: action 별로 어떻게 움직이고 무엇을 할지, 실패하면 어떻게 할지 |
 | 서버 (`task_server`) | 작업을 받아 트리를 돌리고, 진행 상황과 결과를 돌려준다. 취소, 선점 |
 | 아래층 (bt_navigator, planner, controller) | 그대로. `NavigateToPose`, `Spin` 으로 부른다 |
@@ -371,7 +361,7 @@ task_client.py ──goal: ExecuteTask (Task)────▶ task_server (액션
 | 액션이 주는 것 | 이 예제에서 |
 |---|---|
 | 받았는지 | goal 수락 / 거절 응답 (점이 없는 작업은 거절) |
-| 진행 상황 | feedback (`task_id`, `bt_status`, `running`, `waypoints_reached`, `waypoints_total`, `blocked`, `elapsed`) |
+| 진행 상황 | feedback (`task_id`, `bt_status`, `running`, `waypoints_reached`, `waypoints_total`, `elapsed`) |
 | 결과 | goal 상태 SUCCEEDED / ABORTED / CANCELED + result (`success`, `message`, `bt_status`) |
 | 취소 | cancel → BT halt → Nav2 goal 취소 |
 | 실행 중에 새 작업 | **선점**: 지금 작업을 멈추고 새 작업. 차례대로 하려면 보내는 쪽이 하나 끝나면 다음을 보낸다 (`task_client.py` 가 그렇게 한다) |
@@ -386,7 +376,6 @@ string id                                 # 작업 이름 (로그와 mission/sta
 geometry_msgs/PoseStamped[] waypoints     # 들를 점들. 1개 이상. orientation 은 그 점에 도착했을 때 볼 방향
 string action                             # go | inspect | scan | look_around. 그 외 값이면 이동만
 float64 duration                          # inspect 의 작업 시간 [s]
-string obstacle                           # stop | avoid | none. 빈 값이면 stop (6장)
 ```
 
 ROS 2 에서는 새 메시지 형식을 별도 패키지에 정의하는 것이 관례라서, 메시지만 담은 `bt_mission_msgs` 패키지를 따로 두었다.
@@ -395,13 +384,12 @@ ROS 2 에서는 새 메시지 형식을 별도 패키지에 정의하는 것이 
 
 ```
 # ---- goal ----
-Task task                     # 작업 내용 (Task.msg: id, waypoints, action, duration, obstacle)
+Task task                     # 작업 내용 (Task.msg: id, waypoints, action, duration)
 ---
 # ---- result ----
 bool success
 string message                # "done", 또는 실패/중단 이유
-                              # ("go_inspect failed at waypoint 2/3", "preempted by t2", "canceled",
-                              #  "blocked by an obstacle at waypoint 1/2")
+                              # ("go_inspect failed at waypoint 2/3", "preempted by t2", "canceled")
 string bt_status              # 트리(task.xml 의 루트)가 마지막으로 돌려준 상태
                               #   SUCCESS | FAILURE | RUNNING (끝나기 전에 멈춤) | IDLE (tick 안 함)
 ---
@@ -411,7 +399,6 @@ string bt_status              # 트리(루트)의 상태. 실행 중이므로 RU
 string running                # 지금 RUNNING 인 액션 노드 (이름 순, 예: "go_scan, scanning")
 uint32 waypoints_reached      # 지금까지 도착한 점 수 (0 ~ waypoints_total)
 uint32 waypoints_total        # 이 작업의 점 수
-bool blocked                  # 장애물 때문에 멈춰서 기다리는 중 (obstacle 이 stop 일 때)
 float32 elapsed               # 작업 시작 후 지난 시간 [s]
 ```
 
@@ -426,19 +413,18 @@ float32 elapsed               # 작업 시작 후 지난 시간 [s]
 
 작업 하나를 실행하는 트리다. 작업을 기다리고, 결과를 보고하고, 다음 작업을 받는 일은 서버가 맡는다. 그래서 트리에는 "작업 하나를 어떻게 하나" 만 남는다.
 
-1. **`ObstacleMode`**: 작업의 `obstacle` 값으로 장애물을 어떻게 다룰지 정한다 (6장).
-2. **`Switch3`**: `{action}` 값으로 가지 하나를 고른다.
+**`Switch3`** 가 `{action}` 값으로 가지 하나를 고른다.
 
-   | action | 가지 |
-   |---|---|
-   | `inspect` | 점을 차례로 들른 뒤 → `DoWork` (duration 초) |
-   | `scan` | `Parallel` (점을 차례로 들르기, `ScanWhileMoving`) |
-   | `look_around` | 점을 차례로 들른 뒤 → `Spin` 한 바퀴 |
-   | 그 외 (`go` 등) | 점을 차례로 들르기만 |
+| action | 가지 |
+|---|---|
+| `inspect` | 점을 차례로 들른 뒤 → `DoWork` (duration 초) |
+| `scan` | `Parallel` (점을 차례로 들르기, `ScanWhileMoving`) |
+| `look_around` | 점을 차례로 들른 뒤 → `Spin` 한 바퀴 |
+| 그 외 (`go` 등) | 점을 차례로 들르기만 |
 
 **점마다 멈추기: `ForEachWaypoint`**
 
-"점을 차례로 들르기" 는 직접 만든 데코레이터 `ForEachWaypoint` 가 한다. 점마다 자식 `NavigateToPose` 를 한 번씩 실행한다. 아래 XML 은 `StopAndGo`(6장)를 뺀 모양이다.
+"점을 차례로 들르기" 는 직접 만든 데코레이터 `ForEachWaypoint` 가 한다. 점마다 자식 `NavigateToPose` 를 한 번씩 실행한다.
 
 ```xml
 <ForEachWaypoint name="go_points" poses="{waypoints}" pose="{waypoint}" task_id="{task_id}">
@@ -482,11 +468,11 @@ BT::NodeStatus ForEachWaypoint::tick()       // src/mission_nodes.cpp, 발췌
   |---|---|---|
   | 실행 중 (feedback) | - | RUNNING |
   | 트리가 SUCCESS | SUCCEEDED | SUCCESS |
-  | 트리가 FAILURE (이동 실패, 장애물로 포기, 모르는 obstacle 값 등) | ABORTED | FAILURE |
+  | 트리가 FAILURE (이동 실패 등) | ABORTED | FAILURE |
   | 끝나기 전에 취소 | CANCELED | RUNNING |
   | 끝나기 전에 선점, 서버 종료 | ABORTED | RUNNING (`task_server_lifecycle` 의 선점은 빈 값, 5-3) |
-- **blackboard**: `{waypoints}` `{task_id}` `{action}` `{duration}` `{obstacle}` 은 서버가 goal 을 받을 때 채운다. `{waypoint}` (지금 가는 점) 와 `{waypoints_reached}` 는 `ForEachWaypoint` 가, `{blocked}` 는 `StopAndGo` 가, `{stop_and_go}` 와 `{nav_bt}` 는 `ObstacleMode` 가 쓴다.
-- **장애물**: 맨 앞의 `ObstacleMode` 가 작업의 `obstacle` 값을 보고 `StopAndGo` 를 켜거나, `NavigateToPose` 가 쓸 navigation BT 를 바꾼다 (6장).
+- **blackboard**: `{waypoints}` `{task_id}` `{action}` `{duration}` 은 서버가 goal 을 받을 때 채운다. `{waypoint}` (지금 가는 점) 와 `{waypoints_reached}` 는 `ForEachWaypoint` 가 쓴다.
+- **장애물**: 트리는 장애물을 다루지 않는다. 길이 막히면 Nav2 아래의 collision_monitor 가 로봇을 세우고, `NavigateToPose` 는 그동안 RUNNING 으로 기다린다 (6장).
 
 ### 4-3. 명령마다 BT 가 다르게 움직이는 이유
 
@@ -511,7 +497,6 @@ goal 도착 ─▶ 서버가 blackboard 에 쓴다  (TaskServer::start → write
 | `go 0,-1 0,1.5` | action=`go`, waypoints=2개 | Switch3 → (그 외 가지) ForEachWaypoint → NavigateToPose (0,-1) → 도착 → NavigateToPose (0,1.5) → 도착 |
 | `inspect:5 1,0,0` | action=`inspect`, waypoints=1개, duration=5 | Switch3 → inspect 가지 → ForEachWaypoint → NavigateToPose (1,0) → 도착 → DoWork 5초 |
 | `look_around -1,1.5` | action=`look_around`, waypoints=1개 | Switch3 → look_around 가지 → ForEachWaypoint → NavigateToPose (-1,1.5) → 도착 → Spin |
-| `go avoid 1,-1` | action=`go`, obstacle=`avoid` | ObstacleMode 가 nav_bt=`navigate_avoid.xml`, stop_and_go=false 를 씀 → Switch3 → ForEachWaypoint → StopAndGo(꺼짐) → NavigateToPose 가 goal 에 `navigate_avoid.xml` 을 실어 보냄 → bt_navigator 가 장애물을 피하는 트리로 감 |
 
 이렇게 되는 이유는 세 가지다.
 
@@ -591,7 +576,7 @@ void TaskServer::finish(Outcome outcome, const std::string & message)
 #### 4-5-1. 한 줄 형식
 
 ```
-<action>[:<duration>]  [stop|avoid|none]  <점>  [<점> ...]
+<action>[:<duration>]  <점>  [<점> ...]
 
 점 = x,y          방향은 자동으로 채운다
      x,y,yaw      yaw: 그 점에 도착했을 때 볼 방향 [도]
@@ -601,7 +586,6 @@ void TaskServer::finish(Outcome outcome, const std::string & message)
 |---|---|---|
 | `action` | `go`, `inspect`, `scan`, `look_around` 중 하나. 꼭 적는다 | `inspect` |
 | `:duration` | `inspect` 의 작업 시간 [초]. 생략하면 3초. 다른 action 에서는 쓰이지 않는다 | `inspect:5` |
-| `stop` / `avoid` / `none` | 길에 장애물이 있을 때 (6장). 생략하면 `stop`: 멈췄다가 길이 비면 다시 간다. `avoid`: 돌아서 간다. `none`: 보지 않는다. action 뒤 어디에 적어도 된다 | `go avoid 1,1` |
 | 점 | `x,y` 또는 `x,y,yaw`. map 좌표 [m], yaw 는 **도(°)** | `1.5,-1`  `1.5,-1,90` |
 | 띄어쓰기 | action 과 점, 점과 점 사이는 공백. **점 안에는 공백 없이** 쉼표만 | `go 0,-1 1,1` |
 | 주석 | `#` 뒤는 무시 | `go 1,1  # 창고 앞` |
@@ -627,6 +611,7 @@ void TaskServer::finish(Outcome outcome, const std::string & message)
     -3 ───┼──────────────┘                  -90
          -3              3  x
    출발 위치: (-2, -1), yaw 0°.  벽은 ±3m, 로봇 반지름을 생각해 ±2.5m 안을 쓴다
+   (벽을 보고 서는 점은 벽에서 0.6m 넘게. 더 가까우면 StopZone 에 벽이 들어온다, 9장)
 ```
 
 **yaw 를 생략하면** 이렇게 채운다.
@@ -647,8 +632,6 @@ void TaskServer::finish(Outcome outcome, const std::string & message)
 | `inspect:10 0,-1 1.5,-1,90` | (0,-1) 에 들렀다가 (1.5,-1) 에서 90° 를 보고 10초 점검 |
 | `scan 1.5,1.5 -1,1.5,180` | 두 점을 들르는 동안 0.5m 마다 스캔 |
 | `look_around -1,1.5` | (-1,1.5) 에 가서 제자리 한 바퀴 |
-| `go avoid 1,-1,0` | 길에 장애물이 있으면 돌아서 (1,-1) 로 간다 |
-| `inspect none 1.5,-1,90` | 장애물을 보지 않고 간다 (레이저가 없는 시뮬레이션) |
 
 #### 4-5-3. 대화형 (`task_client.py`)
 
@@ -682,8 +665,6 @@ task> go 0,-1 0,1.5 -2,1.5 -2,-1,0
 | `.. t2 queued (1 waiting)` | 앞 작업이 끝나기를 기다리는 중 |
 | `.. t1: RUNNING go_only (0.0 s)` | 트리 상태와 지금 실행 중인 BT 노드 (feedback 의 `bt_status`, `running`) |
 | `.. t1: arrived 2/4 (0,1.5) (27.7 s)` | 4개 중 2번째 점에 도착 |
-| `.. t1: blocked by an obstacle, waiting (5.4 s)` | 길이 막혀서 멈췄다 (feedback 의 `blocked`) |
-| `.. t1: path clear, going again (18.8 s)` | 길이 비어서 다시 출발 |
 | `<- t1 SUCCEEDED: done [BT SUCCESS]` | 결과: goal 상태, message, 트리 상태 (result 의 `bt_status`) |
 | `<- t1 CANCELED: canceled [BT RUNNING]` | 끝나기 전에 취소됨. 트리는 RUNNING 이었다 |
 
@@ -691,10 +672,8 @@ task> go 0,-1 0,1.5 -2,1.5 -2,-1,0
 
 | 입력 | 메시지 | 고칠 점 |
 |---|---|---|
-| `go 1, -1` | `'1,' is not x,y or x,y,yaw_deg (or an obstacle mode: stop, avoid, none)` | 점 안에는 공백 없이: `go 1,-1` |
-| `go 1,-1 2` | `'2' is not x,y or x,y,yaw_deg (or an obstacle mode: ...)` | 점마다 x 와 y 를 다 적는다 |
-| `go avod 1,1` | `'avod' is not x,y or x,y,yaw_deg (or an obstacle mode: ...)` | 장애물 모드 철자 확인 |
-| `go avoid` | `need at least one point` | 점을 하나 이상 |
+| `go 1, -1` | `'1,' is not x,y or x,y,yaw_deg` | 점 안에는 공백 없이: `go 1,-1` |
+| `go 1,-1 2` | `'2' is not x,y or x,y,yaw_deg` | 점마다 x 와 y 를 다 적는다 |
 | `move 1,1` | `unknown action 'move' (one of go, inspect, scan, look_around)` | action 이름 확인 |
 | `go` | `need an action and at least one point` | 점을 하나 이상 |
 | `inspect:abc 1,1` | `duration 'abc' is not a number (e.g. inspect:5)` | 작업 시간은 숫자 [초] |
@@ -720,7 +699,6 @@ task:
   id: b1                                   # 작업 이름 (아무 문자열)
   action: inspect                          # go | inspect | scan | look_around
   duration: 2.0                            # inspect 의 작업 시간 [s]
-  obstacle: stop                           # stop | avoid | none (생략하면 stop)
   waypoints:                               # 들를 점, 차례대로
   - header: {frame_id: map}
     pose:
@@ -765,7 +743,6 @@ bt_status: RUNNING
 running: go_only
 waypoints_reached: 0
 waypoints_total: 2
-blocked: false
 elapsed: 0.0006170350243337452
 ...
 Feedback:
@@ -774,7 +751,6 @@ bt_status: RUNNING
 running: go_only
 waypoints_reached: 1
 waypoints_total: 2
-blocked: false
 elapsed: 6.731001377105713
 ...
 Result:
@@ -787,11 +763,10 @@ Goal finished with status: SUCCEEDED
 
 ### 4-6. 클라이언트가 하는 일 (`scripts/task_client.py`)
 
-- **한 줄 해석**: `parse_line()` 이 한 줄을 action, 점, 장애물 모드로 나누고, `fill_yaws()` 가 적지 않은 yaw 를 채운다.
+- **한 줄 해석**: `parse_line()` 이 한 줄을 action 과 점으로 나누고, `fill_yaws()` 가 적지 않은 yaw 를 채운다.
 - **차례대로 실행**: 서버는 새 goal 이 오면 선점하므로, 기다리는 작업은 클라이언트가 큐에 들고 있다가 앞 작업의 result 를 받으면 다음 goal 을 보낸다.
 - **도착 출력**: feedback 의 `waypoints_reached` 가 늘면 그 점을 "arrived" 로 출력한다. 마지막 점에 도착하면서 끝나는 작업(`go`, `scan`)은 그 도착을 담은 feedback 없이 결과가 오므로, SUCCEEDED 를 받으면 남은 도착을 출력한다.
 - **BT 상태**: 실행 중인 노드 앞에 feedback 의 `bt_status`(RUNNING)를, 결과 뒤에 result 의 `bt_status` 를 `[BT SUCCESS]` 처럼 붙인다.
-- **장애물**: feedback 의 `blocked` 가 바뀌면 `blocked by an obstacle, waiting` / `path clear, going again` 을 출력한다.
 - **Ctrl-C**: 지금 작업에 cancel 을 보내고, CANCELED 를 받은 뒤 끝낸다.
   - rclpy 기본 Ctrl-C 처리는 ROS 를 먼저 종료해서 cancel 을 보낼 수 없다.
   - 그래서 Ctrl-C 를 플래그로만 받고, 기다리는 루프에서 확인한다. 콜백 도중에 `KeyboardInterrupt` 가 나서 rclpy 내부가 꼬이는 일도 막는다.
@@ -988,181 +963,150 @@ void TaskServerLifecycle::onPreempt(ExecuteTask::Goal::ConstSharedPtr goal)
 
 ---
 
-## 6. 장애물: 멈춰서 기다리기(stop & go)와 돌아가기(avoid)
+## 6. 장애물: 멈췄다 가기 (stop & go)
 
-작업마다 길에 장애물이 있을 때 어떻게 할지 고른다. Task 의 `obstacle` 필드다. 기본은 stop & go 다.
+길에 장애물이 있으면 로봇은 그 앞에 서서 기다리고, 장애물을 치우면 같은 길로 다시 간다. **Nav2 goal 은 취소하지 않는다.** goal 은 그대로 실행 중(pending)이고, 로봇에 가는 속도만 0 이 된다.
 
-| `obstacle` | 길에 장애물이 있으면 | 누가 처리하나 | 필요한 것 |
-|---|---|---|---|
-| `stop` (기본, 생략 가능) | 멈춰서 기다렸다가, 길이 비면 같은 점으로 다시 간다. 경로는 그대로 직선 | 미션 BT 의 `StopAndGo` | 레이저 `/scan` |
-| `avoid` | 장애물을 피하는 경로를 새로 만들어 돌아간다 | Nav2: bt_navigator 가 `navigate_avoid.xml` 로, planner `Avoid`(NavFn), controller `FollowPathAvoid`(Regulated Pure Pursuit) | 레이저가 채운 costmap (Nav2 기본 설정에 있다) |
-| `none` | 보지 않는다 | - | 없음. 레이저가 없는 시뮬레이션용이고, 장애물에 부딪힐 수 있다 |
+이 일은 미션 BT 가 아니라 Nav2 의 **collision_monitor** 가 한다. Nav2 가 내는 속도와 로봇 사이에 끼어 있는 노드다.
 
 ```
-task> go 1,-1,0                  # stop (기본)
-task> go avoid 1,-1,0            # 돌아서 간다
-task> inspect:5 none 1.5,-1,90   # 장애물을 보지 않는다
+controller_server ─▶ velocity_smoother ─┐
+                                        ├─ /cmd_vel ─▶ collision_monitor ─ /cmd_vel_safe ─▶ 로봇
+behavior_server (spin, backup) ─────────┘                    ▲
+                                                   /scan ────┘  로봇 앞 StopZone 에 레이저 점이 있으면 0
 ```
 
-`ros2 action send_goal` 로 보낼 때는 `task:` 아래에 `obstacle: avoid` 를 더한다 (4-5-5).
+- 로봇 앞 사각형(StopZone, 앞 0.5 m × 폭 0.5 m)에 레이저 점이 4개 이상 들어오면 0 속도를 보낸다. 로그: `Robot to stop due to StopZone polygon`
+- 구역이 비면 Nav2 의 속도를 그대로 넘긴다. 로그: `Robot to continue normal operation`
+- 그동안 Nav2 와 미션 BT 는 하던 일을 계속한다. controller 는 계속 속도를 내고, `NavigateToPose` 는 RUNNING, 작업도 RUNNING 이다.
+- 미션 BT(`task.xml`)에는 장애물 코드가 없다. RViz 의 Nav2 Goal, `ros2 action send_goal`, waypoint_follower, Nav2 의 recovery 동작까지 모든 이동에 똑같이 적용된다.
 
-![obstacle](bt_mission/doc/obstacle.png)
+![stop and go](bt_mission/doc/stop_and_go.png)
 
-같은 작업(`go 1,-1,0`)을 (0,-1) 에 반지름 0.15 m 장애물을 두고 실행한 결과다 (가짜 로봇과 가짜 레이저, 7-3).
+Gazebo 에서 `go 1,-1,0` 작업을 보내고, 가는 중에 (0,-1) 에 장애물(반지름 0.15 m)을 놓았다가 16초 뒤에 치웠다 (7-3).
 
-- **왼쪽, stop**: 장애물이 앞 0.57 m 에 들어오자 0.09초 만에 섰다. 13초를 기다렸고, 장애물을 치우자 1.3초 뒤 같은 직선으로 다시 갔다.
-- **오른쪽, avoid**: 처음부터 장애물을 돌아가는 경로로 갔다. 장애물 중심에서 0.69 m 떨어져 지나갔다.
+- **왼쪽**: 장애물이 StopZone 에 들어오자 로봇에 가는 속도가 0 이 되고, 0.27초 만에 섰다. 그동안에도 Nav2(controller)는 goal 을 향해 작은 속도를 계속 냈다. 치우자 바로 그 속도가 로봇으로 가서 다시 출발했다.
+- **오른쪽**: 로봇 앞면에서 장애물 표면까지 0.38 m 를 두고 섰다. 경로는 처음 직선 그대로다.
 
-### 6-1. 트리에서 고르는 법 (`ObstacleMode`)
+### 6-1. 직접 해 보기 (Gazebo)
 
-```xml
-<Sequence name="task">
-  <ObstacleMode name="obstacle_mode" mode="{obstacle}" avoid_bt="navigate_avoid.xml"
-                stop_and_go="{stop_and_go}" nav_bt="{nav_bt}"/>
-  <Switch3 name="by_action" ...>
-    ...
-      <ForEachWaypoint name="go_points" poses="{waypoints}" pose="{waypoint}" ...>
-        <StopAndGo name="stop_go" enabled="{stop_and_go}" goal="{waypoint}"
-                   blocked="{blocked}" task_id="{task_id}">
-          <NavigateToPose name="go_only" goal="{waypoint}" behavior_tree="{nav_bt}"/>
-        </StopAndGo>
-      </ForEachWaypoint>
+```bash
+# 터미널 1: Gazebo + Nav2 + RViz. collision_monitor 도 같이 뜬다
+ros2 launch simple_line_bringup simple_line.launch.py
+# 터미널 2
+ros2 run bt_mission task_server
+# 터미널 3: 장애물 도구. RViz 에서 찍은 곳에 장애물을 놓고, 놓은 장애물을 다시 찍으면 치운다
+ros2 run simple_line_bringup obstacle.py click
+# 터미널 4
+ros2 run bt_mission task_client.py
+task> go 1,-1,0
 ```
 
-작업이 시작되면 `ObstacleMode` 가 `{obstacle}` 을 두 blackboard 값으로 바꾼다.
+1. 작업을 보내 로봇이 출발하면, RViz 위쪽 툴바의 **Publish Point** 를 누르고 로봇 앞 길 위(예: (0,-1) 근처)를 찍는다. Gazebo 에 빨간 원기둥이 생긴다. Publish Point 는 한 번 찍으면 풀리므로, 찍을 때마다 다시 누른다.
+2. 원기둥이 RViz 의 빨간 사각형(StopZone)에 들어오면 로봇이 선다. 터미널 1 에 `Robot to stop due to StopZone polygon` 이 나온다.
+3. 원하는 만큼 기다린 뒤, Publish Point 로 그 원기둥을 다시 찍는다. 원기둥이 사라지고 `Robot to continue normal operation` 이 나온 뒤 로봇이 다시 간다.
+4. 작업은 끝까지 가서 `SUCCEEDED` 로 끝난다. 30초 넘게 막혀 있으면 Nav2 가 재시도를 시작한다 (6-3).
 
-| `obstacle` | `{stop_and_go}` | `{nav_bt}` | 결과 |
-|---|---|---|---|
-| `stop`, 빈 값 | true | 빈 값 | `StopAndGo` 가 레이저를 본다. bt_navigator 는 기본 트리(SimpleLinePlanner + SimpleLineController)로 간다 |
-| `avoid` | false | `.../behavior_trees/navigate_avoid.xml` | `StopAndGo` 는 자식만 실행한다. bt_navigator 가 이 트리로 간다 |
-| `none` | false | 빈 값 | 아무것도 보지 않는다 |
+장애물은 다른 방법으로도 놓고 치울 수 있다.
 
-- 트리 모양은 그대로이고, blackboard 값만 바뀐다 (4-3 과 같은 원리).
-- `NavigateToPose` 의 `behavior_tree` 포트는 Nav2 액션 goal 의 `behavior_tree` 필드로 그대로 간다. bt_navigator 는 그 goal 만 그 트리로 실행한다. 빈 값이면 기본 트리(`default_nav_to_pose_bt_xml`)를 쓴다.
-- 모르는 값이면 `ObstacleMode` 가 FAILURE 다. 클라이언트는 보내기 전에 걸러 낸다.
-
-### 6-2. stop & go (`StopAndGo`, `src/mission_nodes.cpp`)
-
-**길 검사**: 레이저의 점을 goal 의 frame(map)으로 옮긴 뒤, 로봇에서 goal 쪽으로 난 직선을 기준으로 본다.
-
-```
-                 half_width (0.25 m)
-       ┌──────────────────────────────┐ ↑
-  로봇 ●───────────────────────────────┼──────────▶ ● goal
-       └──────────────────────────────┘ ↓
-       ←──── stop_distance (0.6 m) ────→      goal 이 더 가까우면 goal 까지만
-```
-
-- 띠 안에 레이저 점이 하나라도 있으면 막힌 것이다.
-- 이 띠는 SimpleLinePlanner 가 긋는 경로와 같다. 그래서 점에 도착해 다음 점 쪽으로 돌기 전에도, 앞으로 갈 방향을 본다.
-- goal 너머의 물체(벽 등)는 보지 않는다.
-
-**동작**: 매 tick 길을 보고 둘 중 한 상태에 있다.
-
-| 상태 | 하는 일 | 바뀌는 때 |
+| 방법 | 놓기 | 치우기 |
 |---|---|---|
-| 가는 중 | 자식(`NavigateToPose`)을 tick 한다 | 막히면 자식을 halt 한다 (= Nav2 goal 취소, 로봇 정지). `blocked` = true, `"t1 blocked: obstacle 0.57 m ahead"` |
-| 기다리는 중 | 자식을 tick 하지 않고 RUNNING 을 돌려준다 | 길이 `resume_delay` 동안 계속 비면 `"t1 resumed after 13.4 s"`, `blocked` = false, 같은 goal 을 다시 보낸다. `max_wait` 를 넘으면 FAILURE |
+| 명령줄 | `ros2 run simple_line_bringup obstacle.py put 0,-1` (`--radius 0.2` 로 크기) | `ros2 run simple_line_bringup obstacle.py remove` (이 도구로 놓은 것 모두) |
+| Gazebo 창 | 위쪽 툴바의 원기둥 / 상자를 누르고 바닥을 찍는다 | 물체를 고르고 Delete 키. 또는 이동 도구(T)로 끌어서 길 밖으로 |
+| RViz (위와 같음) | `obstacle.py click` + Publish Point | 같은 물체를 다시 찍는다 |
 
-```cpp
-BT::NodeStatus StopAndGo::tick()             // 발췌
-{
-  ...
-  executor_.spin_some();                     // 도착한 scan 을 받는다
-  const auto check = checkPath(goal);
-  if (state_ != State::kWaiting) {
-    if (!check.blocked) return startChild(); // 길이 비었으면 자식(NavigateToPose) tick
-    haltChild();                             // 막혔다: Nav2 goal 취소 → 로봇 정지
-    state_ = State::kWaiting;
-    setOutput("blocked", true);
-    report("blocked: " + check.reason, true);
-    return BT::NodeStatus::RUNNING;
-  }
-  if (check.blocked) { ... max_wait 를 넘으면 FAILURE ... return RUNNING; }
-  if (resume_delay 동안 비어 있지 않았으면) return BT::NodeStatus::RUNNING;
-  report("resumed after ...", false);
-  setOutput("blocked", false);
-  return startChild();                       // 같은 goal 을 다시 보낸다. 경로는 지금 위치에서 다시 계산
-}
-```
+- `obstacle.py` 는 gazebo_ros 의 `/spawn_entity`, `/delete_entity`, `/get_model_list` 서비스를 쓴다. 장애물 이름은 `obstacle_<놓은 시각>` 이다.
+- 지운 모델과 같은 이름으로 다시 놓으면 gzserver 가 죽는 경우가 있었다 (Gazebo 11, 이 저장소의 확인 환경). 그래서 `obstacle.py` 는 이름을 다시 쓰지 않는다.
+- 레이저 높이(약 0.17 m)에 걸리는 물체만 보인다. Gazebo 창에서 놓는 기본 상자(높이 1 m)와 원기둥은 보인다.
+- 미션 없이 RViz 의 **Nav2 Goal** 로 goal 을 줘도 똑같이 멈췄다 간다.
 
-**로봇만 세우지 않고 goal 을 취소하는 이유**
+### 6-2. 설정 (`simple_line_bringup`)
 
-- simple_line 의 planner 와 controller 는 장애물을 보지 않는다. Nav2 에 맡겨서는 멈추지 않는다.
-- goal 을 그대로 둔 채 로봇만 세우면(예: cmd_vel 을 0 으로 막기), controller_server 의 progress checker 가 10초 안에 0.5 m 를 못 갔다며 `Failed to make progress` 를 낸다. 그러면 bt_navigator 가 recovery 를 시작한다: 90° 제자리 회전, 5초 대기, 30 cm 후진. 장애물 앞에서 원하는 동작이 아니다.
-- goal 을 취소하면 Nav2 는 아무것도 하지 않고 기다린다. 얼마나 기다릴지는 미션 BT 가 정한다(`max_wait`). 실측으로 13초를 기다리는 동안 Nav2 실패와 recovery 는 0번이었다.
-- 다시 갈 때 경로를 지금 위치에서 새로 계산하므로, 직선을 그대로 따라간다. 실측으로 직선에서 벗어난 거리는 0.0 cm 였다.
-
-**레이저가 없거나 끊기면**: scan 이 `scan_timeout`(1초) 넘게 안 오면 막힌 것으로 본다. 그래서 레이저가 없으면 출발하지 않고 `"t1 blocked: no scan on scan"` 을 알린다. 레이저가 없는 환경에서는 `none` 을 쓴다.
-
-**알림**
-
-| 어디로 | 내용 |
+| 파일 | 하는 일 |
 |---|---|
-| `mission/status` 토픽 (`std_msgs/String`) | `t1 blocked: obstacle 0.57 m ahead`, `t1 resumed after 13.4 s`, `t1 gave up: blocked for 30.0 s` |
-| 액션 feedback | `blocked` (true / false). `task_client.py` 는 `t1: blocked by an obstacle, waiting`, `t1: path clear, going again` 으로 출력한다 |
-| 액션 result (`max_wait` 를 넘었을 때) | ABORTED, `blocked by an obstacle at waypoint 1/2` |
-
-**설정**: `task.xml` 의 `StopAndGo` 속성으로 바꾼다. `--symlink-install` 로 빌드했다면 다시 빌드하지 않고 서버만 다시 띄우면 된다.
-
-| 속성 | 기본값 | 뜻 |
-|---|---|---|
-| `stop_distance` | 0.6 | 길 방향으로 로봇 중심에서 이 거리 안에 장애물이 있으면 멈춘다 [m]. 로봇 반지름(0.22)과 여유를 포함한다. 실측 정지 거리는 1.5 cm |
-| `half_width` | 0.25 | 길의 반폭 [m]. 로봇 반지름 + 여유 |
-| `resume_delay` | 1.0 | 길이 이만큼 계속 비어 있어야 다시 간다 [s]. 잠깐 비었다가 다시 막히는 경우를 걸러 낸다 |
-| `max_wait` | 0 | 이보다 오래 막혀 있으면 작업 실패 [s]. 0 이면 계속 기다린다 (취소는 클라이언트가) |
-| `scan_topic` | `scan` | `sensor_msgs/LaserScan` |
-| `scan_timeout` | 1.0 | scan 이 이만큼 안 오면 막힌 것으로 본다 [s] |
-| `robot_frame` | `base_link` | 로봇 위치를 읽을 TF frame |
-
-### 6-3. 돌아가게 하려면 (`avoid`)
-
-장애물을 피해 가려면 Nav2 쪽에 다섯 가지가 있어야 한다. 1 은 Nav2 기본 설정에 이미 있고, 2~5 를 이 저장소에 더했다.
-
-1. **장애물을 costmap 에 올린다.** global costmap 의 `obstacle_layer` 와 local costmap 의 `voxel_layer` 가 `/scan` 을 받아 장애물 칸을 표시하고, 비면 지운다. Nav2 Humble 기본 `nav2_params.yaml` 그대로다 (`simple_line_params.yaml` 은 이 부분을 바꾸지 않았다).
-2. **costmap 을 보는 planner.** SimpleLinePlanner 는 costmap 을 보지 않고 직선만 긋는다. 그래서 planner_server 에 NavFn 을 `Avoid` 라는 이름으로 하나 더 등록했다.
-3. **costmap 을 보는 controller.** Regulated Pure Pursuit(RPP)를 `FollowPathAvoid` 로 등록했다. 앞길이 local costmap 에서 막혀 있으면 멈추고 새 경로를 기다린다 (`use_collision_detection`).
-4. **둘을 부르는 navigation BT.** `behavior_trees/navigate_avoid.xml` 은 Nav2 기본 트리에서 `planner_id="Avoid"`, `controller_id="FollowPathAvoid"` 만 바꾼 것이다. 1초마다 경로를 다시 계산하므로, 움직이는 장애물이 costmap 에 들어오면 경로가 그때그때 바뀐다.
-5. **작업마다 고르기.** `ObstacleMode` 가 `{nav_bt}` 에 이 파일 경로를 쓰고, `NavigateToPose` 가 goal 에 실어 보낸다 (6-1).
+| `launch/simple_line.launch.py` | ① nav2_bringup 의 `waffle.model` 을 고친 사본으로 로봇을 스폰한다. diff drive 플러그인이 `/cmd_vel` 대신 `/cmd_vel_safe` 를 듣는다 ② `collision_monitor` 와 그것만 맡는 `lifecycle_manager_collision_monitor` 를 띄운다 ③ Nav2 기본 RViz 설정에 `StopZone` 표시(`/polygon_stop`)를 더한다 |
+| `params/simple_line_params.yaml` | `collision_monitor` 항목, `controller_server` 의 `progress_checker` |
 
 ```yaml
-# simple_line_params.yaml (발췌)
-planner_server:
+collision_monitor:
   ros__parameters:
-    planner_plugins: ["GridBased", "Avoid"]       # GridBased 는 그대로 SimpleLinePlanner
-    Avoid:
-      plugin: "nav2_navfn_planner/NavfnPlanner"
-      tolerance: 0.5
+    cmd_vel_in_topic: "cmd_vel"            # Nav2 가 내는 속도
+    cmd_vel_out_topic: "cmd_vel_safe"      # 로봇이 듣는 속도
+    polygons: ["StopZone"]
+    StopZone:
+      type: "polygon"
+      points: [0.5, 0.25, 0.5, -0.25, 0.0, -0.25, 0.0, 0.25]   # base_footprint 기준 [m]
+      action_type: "stop"
+      max_points: 3                        # 구역 안의 점이 이보다 많으면 세운다
+    observation_sources: ["scan"]
+    scan: {type: "scan", topic: "scan"}
+
 controller_server:
   ros__parameters:
-    controller_plugins: ["FollowPath", "FollowPathAvoid"]   # FollowPath 는 그대로 SimpleLineController
-    FollowPathAvoid:
-      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      desired_linear_vel: 0.25
-      use_collision_detection: true
-      rotate_to_heading_angular_vel: 0.5
-      ...
+    progress_checker:
+      movement_time_allowance: 30.0        # 막혀서 서 있을 수 있는 시간 (Humble 기본 10) [s]
 ```
 
-- **`rotate_to_heading_angular_vel` 를 0.5 로 낮췄다.** RPP 는 목표 방향에 들어올 때까지 이 속도로 돌다가 바로 명령을 끊는다. 그 뒤 velocity_smoother 가 3.2 rad/s² 로 줄이는 동안 더 돈다. 1.0 rad/s 일 때는 goal 에서 7.8° 를 지나쳤고, 0.5 에서는 0.6° 안에 섰다.
-- **`stop` 과 `avoid` 의 차이**: stop 은 직선을 지키고 시간을 쓴다. avoid 는 길을 바꾸고 시간을 아낀다. 같은 장애물에서 stop 은 30.2 s(13초 대기 포함), avoid 는 20.5 s 였다 (7-3).
-- **avoid 에서도 완전히 막히면**: planner 가 경로를 못 찾거나 controller 가 계속 막히면 Nav2 의 recovery(회전, 대기, 후진)를 거친 뒤 실패한다. 작업은 ABORTED(`go_only failed at waypoint i/n`)가 된다.
+| 값 | 기본 | 바꾸면 |
+|---|---|---|
+| `StopZone.points` | 앞 0.5 m, 좌우 0.25 m | 멈추는 거리와 폭. waffle 의 앞면은 base_footprint 에서 0.07 m, 폭은 0.31 m 다. 속도가 빠르면 앞으로 늘린다 |
+| `StopZone.max_points` | 3 | 레이저 잡음에 섰다 가면 늘리고, 가는 물체를 놓치면 줄인다 |
+| `progress_checker.movement_time_allowance` | 30 s | 서 있는 동안 Nav2 가 기다려 주는 시간 (6-3) |
+| `source_timeout` | 5 s | scan 이 이보다 오래되면 버린다. Humble 은 그때 막힌 곳이 없는 것으로 본다 (9장) |
 
-**다른 선택지** (이 검증 환경에서는 돌려 보지 못했다)
+- `--symlink-install` 로 빌드했다면 yaml 을 고친 뒤 launch 만 다시 하면 된다.
+- 실제 로봇에서는 로봇 드라이버가 collision_monitor 의 출력(`cmd_vel_safe`)을 듣게 한다.
+- 이 Humble 버전(1.1.18)의 collision_monitor 는 멈춤 상태를 토픽으로 내지 않는다 (로그만 남긴다). 그래서 작업 feedback 에는 "장애물 때문에 기다리는 중" 이 따로 없다.
 
-- **controller 를 DWB 로.** Nav2 Humble 의 기본 `FollowPath` 가 `dwb_core::DWBLocalPlanner` 다. 속도 후보 궤적을 여러 개 굴려 보고 장애물에 가까운 궤적을 피한다 (`BaseObstacle` critic). 그래서 global 경로가 바뀌기 전에도 국소적으로 비켜 간다. `FollowPathAvoid` 의 `plugin` 을 바꾸고, 값은 Nav2 기본 `nav2_params.yaml` 의 `FollowPath` 항목을 옮기면 된다. apt 로 설치한 Humble 에는 들어 있다.
-- **planner 를 Smac 으로.** `nav2_smac_planner/SmacPlanner2D` 로 바꿔도 된다.
-- **Collision Monitor** (`nav2_collision_monitor`, Humble 부터). controller 와 로봇 사이에서 `cmd_vel` 을 막거나 줄이는 안전 층이다. 어느 모드든 마지막 안전장치로 둘 수 있다. 다만 로봇만 세우고 goal 은 그대로라서, 오래 막히면 위의 progress checker 문제가 생긴다.
-- **기본을 avoid 로 바꾸려면**: 클라이언트가 항상 `avoid` 를 넣거나, `ObstacleMode` 에서 빈 값을 avoid 로 보게 고친다.
+### 6-3. 오래 막혀 있으면 (progress checker)
+
+collision_monitor 가 로봇을 세워 둔 시간도 controller_server 의 progress checker 는 "진행이 없다" 로 본다. `movement_time_allowance`(30초) 동안 0.5 m 를 못 가면 `Failed to make progress` 로 FollowPath 가 실패하고, bt_navigator 의 navigation BT 가 재시도와 recovery 를 시작한다. Gazebo 에서 장애물을 143초 동안 두었을 때 실제로 이렇게 됐다.
+
+| 막힌 뒤 | 일어난 일 |
+|---|---|
+| 0 s | collision_monitor 가 0 속도. 로봇 정지 |
+| 30 s | `Failed to make progress`. local costmap 을 비우고 FollowPath 를 다시 보낸다 |
+| 60 s | 다시 실패. recovery 로 costmap 을 비우고 경로부터 다시 |
+| 90 s | 다시 실패. FollowPath 재시도 |
+| 120 s | 다시 실패. recovery 로 제자리 회전(spin)을 보냈지만, collision_monitor 가 막아서 돌지 않았다 (10초 뒤 spin 실패 → 5초 대기 → 다시 FollowPath) |
+| 143 s | 장애물을 치움. 바로 출발해서 SUCCEEDED |
+
+- 143초 동안 로봇은 한 번도 움직이지 않았다 (위치 변화 1 mm 미만). recovery 동작도 collision_monitor 를 거치기 때문이다.
+- 작업은 그동안 RUNNING 이었다. 계속 막혀 있으면 Nav2 기본 트리의 재시도(6번)를 다 쓴 뒤 NavigateToPose 가 실패하고, 작업은 `go_only failed at waypoint 1/1` 로 ABORTED 된다. 계산으로는 약 7분 뒤다.
+- recovery 동작 중에 치우면 그 동작을 마저 한다 (제자리 90° 회전, 0.3 m 후진). 짧게 막히는 곳에서는 `movement_time_allowance` 를 넉넉히 둔다.
+
+### 6-4. 왜 goal 을 취소하지 않고 속도를 막나
+
+**Nav2 에는 goal 을 잠시 멈추는(pause) 기능이 없다.** `NavigateToPose` 는 보내거나 취소하는 것만 된다. 그래서 "goal 은 그대로 두고 기다리기" 는 goal 아래에서 속도를 막는 것으로 한다.
+
+**AMR 들도 장애물에는 보통 이렇게 한다.**
+
+- 안전 레이저 스캐너에 보호 구역(protective field)을 정해 두고, 구역에 무엇이 들어오면 모터를 세운다. 구역이 비면 다시 간다 (자동 재시작으로 설정했을 때). 주행 명령은 취소되지 않는다. collision_monitor 는 이것을 소프트웨어로 한 것이다.
+- 정해 둔 시간보다 오래 막히면 경로를 다시 짜서 돌아가거나, 관제에 "길이 막힘" 을 알린다.
+- 명령을 취소하고 다시 주는 방식은 관제(fleet) 쪽에서 쓴다. 교통 정리(다른 로봇에게 길 양보), 작업을 다른 로봇에 넘길 때, 사람이 일시정지를 누를 때다.
+
+**이전 구현과 비교**: 이 저장소는 한동안 미션 BT 의 `StopAndGo` 노드가 레이저를 직접 보고, 막히면 Nav2 goal 을 취소했다가 길이 비면 같은 점으로 다시 보냈다.
+
+| | collision_monitor (지금) | 미션 BT 에서 취소 후 다시 보내기 (이전) |
+|---|---|---|
+| Nav2 goal | 그대로 (pending) | 취소 → 같은 점으로 새 goal |
+| 멈추는 곳 | 로봇에 가는 속도 | Nav2 위 (미션 BT) |
+| 적용 범위 | 모든 이동 (RViz goal, recovery 회전, teleop 포함) | 미션 BT 가 보낸 `NavigateToPose` 만 |
+| 멈추는 거리 | 로봇에 붙은 사각형 (방향과 상관없이 앞) | goal 까지의 직선 위 |
+| 미션이 아는가 | 모른다 (작업은 RUNNING) | feedback `blocked` 로 알렸다 |
+| 오래 막히면 | progress checker 가 30초마다 재시도, 약 7분 뒤 실패 | `max_wait` 로 정했다 |
+| 코드 | 설정만 (Nav2 노드) | BT 노드 2개, 약 350줄 |
+
+**회피(돌아가기)를 나중에 더하려면**: 장애물을 보는 planner 와 controller 가 필요하다. Nav2 기본 costmap 은 이미 `/scan` 으로 장애물을 표시하므로, planner 를 NavFn 이나 Smac 으로, controller 를 Regulated Pure Pursuit 나 DWB 처럼 costmap 을 보는 것으로 바꾸면 된다. 그때도 collision_monitor 는 마지막 안전장치로 둔다.
 
 ---
 
 ## 7. 확인한 것
 
-모두 같은 환경에서 확인했다.
+7-1, 7-2 는 같은 환경에서 확인했다. 7-3 은 Gazebo 에서 확인했다.
 
 - **서버**: 실제 Nav2 Humble 서버(map_server, planner_server, controller_server, behavior_server, bt_navigator, velocity_smoother, waypoint_follower). Nav2 기본 BT, 빈 방 맵.
-- **로봇**: Gazebo 대신 `cmd_vel` 을 적분하는 가짜 로봇. AMCL 은 쓰지 않았다. 7-3 에서는 가짜 레이저도 붙였다.
+- **로봇**: Gazebo 대신 `cmd_vel` 을 적분하는 가짜 로봇. AMCL 은 쓰지 않았다.
 - **출발점**: 모두 (-2.0, -1.0, 0°).
 - **작업 4개**: 여러 곳에서 같은 작업 4개를 한 번에 넣었다. 정지 작업, 주행 중 작업, 회전, 복귀가 다 들어 있다.
 
@@ -1173,11 +1117,9 @@ controller_server:
   go -2,-1,0
   ```
 
-Gazebo 자체(월드, 스폰, AMCL)에서는 돌려 보지 못했다.
-
 ### 7-1. 액션으로 맡긴 작업 (`task_server`, `task_client.py`)
 
-**단위 테스트** (`test/test_task_server.cpp`, gtest 9개 통과. 장애물 테스트 2개는 7-3. 그 전의 7개는 30번 반복해서 210/210): 실제 `task.xml` 과 `TaskServer` 에 액션 클라이언트로 goal 을 보낸다. Nav2 노드만 가짜다.
+**단위 테스트** (`test/test_task_server.cpp`, gtest 7개 통과. 30번 반복해서 210/210): 실제 `task.xml` 과 `TaskServer` 에 액션 클라이언트로 goal 을 보낸다. Nav2 노드만 가짜다.
 
 | 테스트 | 확인 내용 |
 |---|---|
@@ -1242,49 +1184,22 @@ Gazebo 자체(월드, 스폰, AMCL)에서는 돌려 보지 못했다.
 | `ros2 action send_goal --feedback` | feedback `go_inspect` → `work`, SUCCEEDED |
 | 작업 중 서버 Ctrl-C | 클라이언트에 ABORTED("task server deactivated"), Nav2 goal 취소, 로봇 정지. 4초 뒤 lifecycle_manager 가 서버가 죽은 것을 알림 |
 
-### 7-3. 장애물 (`StopAndGo`, avoid)
+### 7-3. 장애물 (collision_monitor, Gazebo)
 
-**단위 테스트** (`test/test_stop_and_go.cpp` 9개, `test/test_task_server.cpp` 에 2개, 모두 통과. 전체 테스트를 3번 돌려 3번 모두 통과): 레이저 scan 은 테스트가 만들어 보내고, 로봇 위치는 TF 버퍼에 직접 넣는다. `NavigateToPose` 만 가짜다.
+7-1, 7-2 와 달리 **Gazebo** 에서 확인했다. `simple_line.launch.py` 를 그대로 띄웠다 (Gazebo 11, TurtleBot3 waffle 과 그 레이저, AMCL, Nav2 Humble 1.1.18, 화면 없이). 장애물은 `obstacle.py` 로 놓고 치웠다. 반지름 0.15 m, 높이 0.5 m 원기둥이다.
 
-| 테스트 | 확인 내용 |
+| 경우 | 결과 |
 |---|---|
-| `ClearPathJustRunsTheChild` | 길이 비어 있으면 자식을 그대로 실행. 막힘 보고 없음 |
-| `StopsForAnObstacleAndGoesAgainWhenClear` | 앞 0.4 m 에 물체 → 자식 halt, `blocked` = true, `"t1 blocked: obstacle 0.40 m ahead"`. 비어도 `resume_delay` 전에는 기다리고, 지나면 같은 goal 을 다시 보내고 `"t1 resumed after ..."` |
-| `IgnoresWhatIsNotOnThePath` | `stop_distance` 밖의 물체, 길 옆(`half_width` 밖)의 물체는 무시 |
-| `IgnoresWhatIsBeyondTheGoal` | goal 너머의 물체는 무시 |
-| `NoScanCountsAsBlocked` | scan 이 없으면 출발하지 않고 `"t1 blocked: no scan on scan"`. scan 이 오면 출발 |
-| `GivesUpAfterMaxWait` | `max_wait` 를 넘으면 FAILURE, `"t1 gave up: blocked for 0.3 s"`, `blocked` 는 true 로 남는다 |
-| `AvoidAndNoneDoNotWatchTheScan` | avoid / none 은 scan 없이도 간다. avoid 면 `NavigateToPose` 의 `behavior_tree` 가 avoid 트리 경로, none 이면 빈 값 |
-| `UnknownModeFails` | 모르는 `obstacle` 값이면 FAILURE, 출발하지 않음 |
-| `FailureMessage.*` | 막혀서 포기한 작업의 result message 가 `blocked by an obstacle at waypoint 2/3` |
-| `TaskServerTest.StopAndGoWaitsForTheObstacleAndReportsIt` | 실제 `task.xml` 과 `TaskServer`: 막히면 feedback `blocked` = true, 이동 노드 halt, 기다리는 동안 `running` 이 빈 값. 비면 같은 점으로 다시 가서 SUCCEEDED |
-| `TaskServerTest.WithoutAScanTheRobotDoesNotStart` | 레이저가 없으면 feedback `blocked` = true 로 출발하지 않음. 취소하면 CANCELED |
+| `task_client.py go 1,-1,0`. 로봇이 x = -1.6 을 지날 때 (0,-1) 에 장애물, 선 뒤 12초가 지나면 치움 (6장 그림) | SUCCEEDED [BT SUCCESS]. 정지 명령 뒤 0.27초, 2.7 cm 더 가서 섰다 (로봇 중심 x = -0.60, 앞면에서 장애물 표면까지 0.38 m). 16초 대기. 치우자 바로 출발해서 1.1초 만에 0.2 m/s. 직선에서 최대 0.9 cm, 도착 오차 0.4 cm. 전체 33.9 s |
+| `task_client.py inspect 1,-1 1,1,90`. 같은 장애물 | 15초 대기 뒤 계속. 두 점에 도착하고 작업까지 SUCCEEDED |
+| `ros2 action send_goal /navigate_to_pose` (미션 없이 Nav2 goal 만), 장애물을 먼저 놓고 출발 | 18초 대기, SUCCEEDED. `Failed to make progress` 없음 |
+| 위와 같고 143초 동안 둠 | 30초마다 `Failed to make progress` 와 재시도, 120초에 spin recovery (collision_monitor 가 막아 돌지 않음). 그동안 로봇 위치 변화 1 mm 미만. 치운 뒤 SUCCEEDED (6-3) |
+| 작업 4개 (7장 처음의 목록), 장애물 없음 | 모두 SUCCEEDED. collision_monitor 가 세운 일 0번, `Failed to make progress` 0번. 클라이언트 실행부터 끝까지 89 s |
+| `obstacle.py click` 에 `/clicked_point` 를 세 번 보냄 (두 곳, 그리고 첫 장애물 근처) | 두 개를 놓고, 세 번째에 첫 장애물을 치웠다 |
+| `obstacle.py remove` | 남은 `obstacle_*` 를 모두 치웠다. 남은 것이 없으면 `no obstacles to remove` |
 
-기존 테스트(7-1, 7-2)는 레이저가 없으므로 작업을 `obstacle: none` 으로 보낸다.
-
-**Nav2 서버로 실행**: 가짜 로봇에 5Hz 360° 레이저를 붙였다. 방의 벽(±3 m)과, 토픽으로 놓고 치우는 원기둥 장애물을 본다. 장애물은 반지름 0.15 m 로 (0,-1) 에 두고, 작업은 (-2,-1) 에서 `go 1,-1,0` 이다 (그 직선 위에 장애물이 있다).
-
-- **stop**: 로봇이 x = -1.3 을 지나면 장애물을 놓고, 로봇이 선 뒤 12초가 지나면 치웠다.
-- **avoid (처음부터)**: 장애물을 놓고 출발했다.
-- **avoid (가는 중에)**: stop 과 같은 때 장애물을 놓았다.
-
-| 항목 | stop<br>(`task_server`) | stop<br>(`task_server_lifecycle`) | avoid<br>(처음부터) | avoid<br>(가는 중에) |
-|---|---|---|---|---|
-| 결과 | SUCCEEDED | SUCCEEDED | SUCCEEDED | SUCCEEDED |
-| 막힘을 알린 거리 (길 방향) | 0.57 m | 0.56 m | - | - |
-| 알린 뒤 설 때까지 | 0.09 s | 0.07 s | - | - |
-| 선 곳: 로봇 중심 → 장애물 표면 | 0.55 m | 0.55 m | - | - |
-| 기다린 시간 | 13.4 s | 13.2 s | - | - |
-| 치운 뒤 다시 움직일 때까지 | 1.28 s | 1.14 s | - | - |
-| 직선에서 벗어난 최대 거리 | 0.0 cm | 0.0 cm | 68.7 cm | 71.1 cm |
-| 장애물 중심과 가장 가까웠던 거리 | - | - | 0.69 m | 0.71 m |
-| 도착: 위치 / 방향 오차 | 4.6 cm / 0.0° | 4.7 cm / 0.0° | 4.9 cm / 0.6° | 4.8 cm / 0.4° |
-| 전체 시간 | 30.2 s | 29.8 s | 20.5 s | 21.7 s |
-| Nav2 실패, recovery | 0 | 0 | 0 | 0 |
-
-- stop 은 progress checker 의 10초보다 오래 기다렸는데도 Nav2 쪽 실패가 없었다. goal 을 취소하고 기다리기 때문이다 (6-2).
-- avoid 의 방향 오차는 RPP 의 `rotate_to_heading_angular_vel` 을 0.5 로 낮춘 뒤 값이다. 1.0 일 때는 7.8° 와 10.4° 였다 (6-3).
-- Gazebo 의 실제 TurtleBot3 레이저로는 돌려 보지 못했다. 가짜 레이저는 잡음이 없고, 원기둥 하나만 있다.
+- RViz 는 화면 없이(Xvfb) 띄워서, 고친 설정이 열리고 `StopZone` 표시가 로봇 앞 사각형으로 그려지는 것까지 확인했다.
+- Gazebo 창(GUI)에서 물체를 놓고 지우는 방법은 확인하지 못했다.
 
 ---
 
@@ -1296,8 +1211,8 @@ Gazebo 자체(월드, 스폰, AMCL)에서는 돌려 보지 못했다.
 | 지점마다 멈춰서 같은 작업을 하고, 순서가 고정이다 | `waypoint_follower` ([MULTI_GOAL.md 5장](../simple_line/MULTI_GOAL.md#5-멈춰-가며-경유하기-waypoint_follower)). 작업은 task executor 플러그인으로 |
 | 어디로 가서 무엇을 할지는 실행 중에 사람이나 서버가 정한다 | **`task_server` + ExecuteTask 액션 (4장)**. 점마다 멈춰서 도착을 알리고, 결과, 취소, 선점이 표준으로 있다 |
 | 위와 같고, 서버를 Nav2 처럼 lifecycle_manager 로 관리한다 | `task_server_lifecycle` (5장). 비교와 고르는 기준은 5-4, 5-5 |
-| 길에 장애물이 있으면 멈췄다가, 비면 같은 길로 간다 | 작업의 `obstacle` 을 `stop` (기본). `StopAndGo` (6-2) |
-| 장애물을 돌아서 간다 | `obstacle: avoid`. NavFn + Regulated Pure Pursuit (6-3). controller 를 DWB 로 바꿀 수도 있다 |
+| 길에 장애물이 있으면 멈췄다가, 치우면 같은 길로 간다 | Nav2 의 collision_monitor (6장). goal 은 그대로, 속도만 막는다 |
+| 장애물을 돌아서 간다 | 지금은 없다. costmap 을 보는 planner / controller 로 바꾼다 (6-4 끝) |
 
 ---
 
@@ -1308,11 +1223,11 @@ Gazebo 자체(월드, 스폰, AMCL)에서는 돌려 보지 못했다.
 - **점에 얼마나 정확히 서나**: goal checker 의 `xy_goal_tolerance` / `yaw_goal_tolerance` 가 정한다. `simple_line_params.yaml` 에서 0.05m / 0.05rad 로 줄였다 (Humble 기본 0.25 / 0.25). 실측으로 점에서 3~5cm 안에 섰다.
 - **`ros2 action send_goal` 로 보낼 때 방향**: `orientation` 을 안 적으면 0° 다. 점마다 0° 로 돌았다가 다음 점으로 가므로, 방향을 적거나 `task_client.py` 를 쓴다 (4-5-5).
 - **`task_server` 와 `task_server_lifecycle` 은 같이 띄우지 않는다.** 둘 다 `/execute_task` 액션을 연다.
-- **stop 모드에서는 벽도 장애물이다.** goal 까지의 직선이 벽에 막히면 벽 앞에서 계속 기다린다 (`max_wait` 기본 0). 맵 밖이나 벽 너머의 점을 보내지 않거나, `max_wait` 를 정해 둔다.
-- **stop 모드는 레이저가 있어야 움직인다.** `/scan` 이 1초 넘게 안 오면 막힌 것으로 보고 서 있는다. 레이저가 없는 시뮬레이션이나 테스트에서는 `none` 을 쓴다 (6-2).
-- **레이저 높이의 물체만 본다.** 2D 레이저 평면보다 낮거나 높은 물체(낮은 상자, 테이블 상판)는 stop 도 avoid 도 보지 못한다. 필요하면 depth 카메라 같은 센서를 더한다.
-- **stop 모드의 길 검사는 직선이다.** SimpleLinePlanner 가 긋는 경로와 같아서 지금은 맞다. 휘는 경로를 만드는 planner 를 기본으로 쓰게 되면, `{path}` 를 따라 검사하도록 바꿔야 한다.
-- **avoid 는 길이 바뀐다.** 직선에서 최대 0.7 m 벗어났다 (7-3). 정해진 길로만 다녀야 하는 곳에서는 stop 을 쓴다.
+- **벽도 장애물이다.** goal 에서 로봇 앞 0.5 m 안에 벽이 있으면 그 앞에서 서서 기다린다. 벽 쪽을 보고 서는 점은 벽에서 0.6 m 넘게 떨어뜨린다.
+- **제자리 회전도 막는다.** StopZone 에 점이 있으면 회전 속도도 0 이다. 점에서 방향을 맞추다가 옆의 물체가 앞으로 들어오면 거기서 선다.
+- **레이저가 끊기면 멈추지 않는다 (Humble).** scan 이 `source_timeout`(5초)보다 오래되면 collision_monitor 는 그 데이터를 버리고 막힌 곳이 없는 것으로 본다. 레이저가 죽었는지는 따로 감시한다.
+- **레이저 높이의 물체만 본다.** 2D 레이저 평면보다 낮거나 높은 물체(낮은 상자, 테이블 상판)는 보지 못한다. 필요하면 collision_monitor 의 `observation_sources` 에 depth 카메라 점구름(`pointcloud`)을 더한다.
+- **오래 막히면 Nav2 가 재시도와 recovery 를 한다.** 30초마다 재시도하고, 그 사이에 치우면 recovery 동작(회전, 후진)을 마저 한 뒤 간다 (6-3).
 
 ---
 
@@ -1321,20 +1236,19 @@ Gazebo 자체(월드, 스폰, AMCL)에서는 돌려 보지 못했다.
 ```
 bt_navigator/
 ├── bt_mission_msgs/                         4장
-│   ├── msg/Task.msg                         작업 하나 (id, waypoints, action, duration, obstacle)
+│   ├── msg/Task.msg                         작업 하나 (id, waypoints, action, duration)
 │   └── action/ExecuteTask.action            goal: Task, result: success/message/bt_status,
-│                                            feedback: bt_status/running/도착한 점 수/blocked/elapsed
+│                                            feedback: bt_status/running/도착한 점 수/elapsed
 └── bt_mission/
     ├── behavior_trees/
-    │   ├── task.xml                         작업 하나를 실행, 점마다 NavigateToPose (4장)
-    │   └── navigate_avoid.xml               avoid 모드의 navigation BT (bt_navigator 가 실행, 6-3)
+    │   └── task.xml                         작업 하나를 실행, 점마다 NavigateToPose (4장)
     ├── include/bt_mission/
     │   ├── mission_nodes.hpp                직접 만든 BT 노드 선언 (포트 포함)
     │   ├── bt_common.hpp                    노드 등록, blackboard, bt_navigator 대기, 상태 로거
     │   ├── task_server.hpp                  ExecuteTask 액션 서버 + BT 실행 (4장)
     │   └── task_server_lifecycle.hpp        같은 일을 BtActionServer + lifecycle 노드로 (5장)
     ├── src/
-    │   ├── mission_nodes.cpp                DoWork, ScanWhileMoving, ForEachWaypoint, ObstacleMode, StopAndGo
+    │   ├── mission_nodes.cpp                DoWork, ScanWhileMoving, ForEachWaypoint
     │   ├── bt_common.cpp                    서버들이 같이 쓰는 준비 코드 (노드 등록, 작업 → blackboard)
     │   ├── task_server.cpp                  goal 수락, 선점, 취소, feedback, result
     │   ├── task_server_main.cpp             task_server 실행 노드 (3-2)
@@ -1346,13 +1260,12 @@ bt_navigator/
     ├── test/
     │   ├── test_task_server.cpp             gtest: ExecuteTask 액션 → task.xml (선점, 취소, feedback, BT 상태)
     │   ├── test_task_server_lifecycle.cpp   gtest: 같은 경우를 task_server_lifecycle 로
-    │   ├── test_stop_and_go.cpp             gtest: StopAndGo, ObstacleMode (가짜 scan, 6장)
     │   └── test_fakes.hpp / .cpp            테스트가 같이 쓰는 가짜 Nav2 노드 (플러그인 test_fake_nav2)
     ├── tools/draw_bt.py                     XML → 그림 (graphviz)
     └── doc/
         ├── task.png                         BT 그림 (draw_bt.py 로 생성)
-        ├── obstacle.png                     stop 과 avoid 의 실행 기록 (6장)
+        ├── stop_and_go.png                  Gazebo 에서 장애물을 놓고 치운 기록 (6장)
         └── layers.dot / layers.png          계층 구조 그림
 ```
 
-avoid 모드의 planner `Avoid` 와 controller `FollowPathAvoid` 는 `simple_line/simple_line_bringup/params/simple_line_params.yaml` 에 등록되어 있다 (6-3).
+장애물 처리(collision_monitor)와 장애물 도구 `obstacle.py` 는 `simple_line/simple_line_bringup` 에 있다 (6-2).
