@@ -12,7 +12,7 @@
 #include "tf2_ros/buffer.h"
 #include "bt_mission_msgs/msg/task.hpp"
 
-// mission_bt_runner, task_server, task_server_lifecycle 이 같이 쓰는 BT 준비 코드
+// task_server, task_server_lifecycle 이 같이 쓰는 BT 준비 코드
 namespace bt_mission
 {
 

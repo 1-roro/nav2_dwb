@@ -16,6 +16,9 @@
     inspect      점을 차례로 들른 뒤, 마지막 점에서 정지 상태로 duration 초 작업
     scan         점을 차례로 들르는 동안 0.5m 마다 스캔
     look_around  점을 차례로 들른 뒤, 마지막 점에서 제자리 한 바퀴
+
+  장애물은 이 트리가 다루지 않는다. 길이 막히면 Nav2 아래의 collision_monitor 가 로봇을 세우고,
+  NavigateToPose 는 goal 을 그대로 둔 채 RUNNING 으로 기다린다 (README 6장).
 -->
 <root main_tree_to_execute="Task">
   <BehaviorTree ID="Task">

@@ -153,6 +153,7 @@ TEST_F(TaskServerLifecycleTest, RunsATaskAndReportsFeedback)
   EXPECT_EQ(result.code, ResultCode::SUCCEEDED);
   EXPECT_TRUE(result.result->success);
   EXPECT_EQ(result.result->message, "done");
+  EXPECT_EQ(result.result->bt_status, "SUCCESS");
 
   EXPECT_EQ(countFakeEvent("go_inspect:SUCCESS"), 2);  // 점마다 NavigateToPose 한 번
   const auto goals = fakeGoals("go_inspect");
@@ -165,6 +166,9 @@ TEST_F(TaskServerLifecycleTest, RunsATaskAndReportsFeedback)
   EXPECT_TRUE(sawFeedback("go_inspect", 0));
   EXPECT_TRUE(sawFeedback("go_inspect", 1));
   EXPECT_TRUE(sawFeedback("work", 2));
+  for (const auto & f : feedback_) {
+    EXPECT_EQ(f.bt_status, "RUNNING");
+  }
 }
 
 TEST_F(TaskServerLifecycleTest, RunsTasksOneAfterAnother)
@@ -194,6 +198,7 @@ TEST_F(TaskServerLifecycleTest, NewGoalPreemptsTheRunningOne)
   const auto result_a = waitResult(a);
   EXPECT_EQ(result_a.code, ResultCode::ABORTED);
   EXPECT_EQ(result_a.result->message, "");        // TaskServer 는 "preempted by b". BtActionServer 는 빈 result
+  EXPECT_EQ(result_a.result->bt_status, "");      // 같은 이유로 빈 값 (TaskServer 는 "RUNNING")
   EXPECT_EQ(waitResult(b).code, ResultCode::SUCCEEDED);
   EXPECT_EQ(countFakeEvent("go_only:HALTED"), 1); // a 의 이동을 멈춤 (실제로는 Nav2 goal 취소)
   const auto goals = fakeGoals("go_only");
@@ -212,6 +217,7 @@ TEST_F(TaskServerLifecycleTest, CancelHaltsTheTask)
   const auto result = waitResult(handle);
   EXPECT_EQ(result.code, ResultCode::CANCELED);
   EXPECT_EQ(result.result->message, "canceled");
+  EXPECT_EQ(result.result->bt_status, "RUNNING");
   EXPECT_EQ(countFakeEvent("go_scan:HALTED"), 1);
 }
 
@@ -227,6 +233,7 @@ TEST_F(TaskServerLifecycleTest, FailedNavigationAbortsWithTheNodeName)
   EXPECT_EQ(result.code, ResultCode::ABORTED);
   EXPECT_FALSE(result.result->success);
   EXPECT_EQ(result.result->message, "go_look failed at waypoint 1/1");
+  EXPECT_EQ(result.result->bt_status, "FAILURE");
   EXPECT_EQ(countFakeEvent("spin:RUNNING"), 0);   // 이동이 실패하면 회전은 하지 않는다
 }
 
@@ -269,6 +276,7 @@ TEST_F(TaskServerLifecycleTest, DeactivateStopsTheRunningTask)
   const auto result = result_future.get();
   EXPECT_EQ(result.code, ResultCode::ABORTED);
   EXPECT_EQ(result.result->message, "task server deactivated");
+  EXPECT_EQ(result.result->bt_status, "RUNNING");
   EXPECT_EQ(countFakeEvent("go_only:HALTED"), 1);
 
   // inactive 상태에서는 goal 을 거절한다

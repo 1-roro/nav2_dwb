@@ -75,9 +75,11 @@ void TaskServer::step()
   try {
     status = tree_.tickRoot();
   } catch (const std::exception & e) {   // 포트 타입 불일치 등 노드가 던진 예외
+    bt_status_ = BT::NodeStatus::FAILURE;
     finish(Outcome::Aborted, std::string("BT error: ") + e.what());
     return;
   }
+  bt_status_ = status;
   if (status == BT::NodeStatus::RUNNING) {
     publishFeedback();
   } else if (status == BT::NodeStatus::SUCCESS) {
@@ -94,6 +96,7 @@ void TaskServer::stop(const std::string & reason)
   if (next_) {
     auto result = std::make_shared<ExecuteTask::Result>();
     result->message = reason;
+    result->bt_status = BT::toStr(BT::NodeStatus::IDLE);   // 시작하지 않은 작업
     next_->abort(result);
     next_.reset();
   }
@@ -110,6 +113,7 @@ void TaskServer::start(const std::shared_ptr<GoalHandle> & goal)
   total_ = static_cast<int>(task.waypoints.size());
 
   logger_.clear();
+  bt_status_ = BT::NodeStatus::IDLE;
   last_running_.clear();
   last_reached_ = 0;
   started_ = std::chrono::steady_clock::now();
@@ -126,6 +130,8 @@ void TaskServer::finish(Outcome outcome, const std::string & message)
   auto result = std::make_shared<ExecuteTask::Result>();
   result->success = outcome == Outcome::Succeeded;
   result->message = message;
+  // 끝까지 돈 작업은 SUCCESS / FAILURE, 취소나 선점으로 멈춘 작업은 멈추기 전의 RUNNING
+  result->bt_status = BT::toStr(bt_status_);
   const char * state = "aborted";
   if (outcome == Outcome::Succeeded) {
     active_->succeed(result);
@@ -154,6 +160,7 @@ void TaskServer::publishFeedback()
   }
   auto feedback = std::make_shared<ExecuteTask::Feedback>();
   feedback->task_id = task_id_;
+  feedback->bt_status = BT::toStr(bt_status_);
   feedback->running = running;
   feedback->waypoints_reached = reached;
   feedback->waypoints_total = total_;

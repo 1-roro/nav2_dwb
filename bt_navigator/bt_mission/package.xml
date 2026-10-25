@@ -3,7 +3,7 @@
 <package format="3">
   <name>bt_mission</name>
   <version>0.1.0</version>
-  <description>Mission BTs on Nav2 Humble that take tasks at run time: a BT runner (tasks from a topic), ExecuteTask action servers (plain and nav2_behavior_tree::BtActionServer versions), BT nodes, and task senders.</description>
+  <description>Mission BT on Nav2 Humble that takes tasks at run time through the ExecuteTask action: action servers (plain and nav2_behavior_tree::BtActionServer versions), BT nodes (per-waypoint navigation, stop and go), and a task client.</description>
   <maintainer email="user@example.com">nav2_dwb</maintainer>
   <license>Apache-2.0</license>
 

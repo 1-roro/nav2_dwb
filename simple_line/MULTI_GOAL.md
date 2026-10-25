@@ -8,8 +8,7 @@
 | goal 마다 멈추고 방향까지 맞추며 차례로 | `FollowWaypoints` (waypoint_follower) | `follow_waypoints.py` | 5 |
 
 경유, 정지 작업, 주행 중 작업, 실패 처리가 섞인 미션은 이 명령들을 상위 작업 계층(BT)에서 조합한다.
-그 내용은 [`bt_navigator/`](../bt_navigator/README.md) 에 따로 정리했다. 작업을 실행 중에 받아 점마다 멈추는 BT 가 본문이고,
-좌표를 XML 에 적어 두고 경유점은 `NavigateThroughPoses` 로 지나가는 미션은 [`bt_navigator/bt_fixed_mission/`](../bt_navigator/bt_fixed_mission/README.md) 이다.
+그 내용은 [`bt_navigator/`](../bt_navigator/README.md) 에 따로 정리했다. 작업을 실행 중에 받아 점마다 멈추는 BT 다.
 
 목차
 
@@ -67,7 +66,7 @@ controller_server ── FollowPath(SimpleLineController) 가 꺾은선 경로�
 
 | 단계 | 담당 | 이 저장소에서 |
 |---|---|---|
-| goal 여러 개를 한 번에 보내기 | `send_waypoints.py` (2장) 또는 미션의 한 단계 ([bt_fixed_mission](../bt_navigator/bt_fixed_mission/README.md)) | 새로 작성 |
+| goal 여러 개를 한 번에 보내기 | `send_waypoints.py` (2장) | 새로 작성 |
 | 지나간 goal 지우기, 주기적 재계획 | Nav2 기본 BT (1-1) | 그대로 사용 |
 | 구간별 직선 → 하나의 꺾은선 | planner_server + `SimpleLinePlanner` (1-2) | 그대로 사용 (코드 변경 없음) |
 | 꺾은선 따라가기 | `SimpleLineController` | 두 가지 동작을 넣었다 (3장) |
@@ -247,7 +246,7 @@ for (size_t i = 1; i < plan_.size(); ++i) goal_dist += 거리(plan_[i-1], plan_[
 - carrot 방향이 45°(`rotate_to_heading_min_angle`) 이하 → 호를 그리며 모서리를 돈다
 - 45° 초과 (예: 90° 모서리) → 모서리 근처에서 멈추고, 다음 구간 쪽으로 **방향이 다 맞을 때까지** 제자리 회전한 뒤
   출발한다. 경유 goal 이라서 멈추는 것이 아니라 컨트롤러 동작이다
-  ([bt_fixed_mission 미션의 실행 기록](../bt_navigator/bt_fixed_mission/README.md#7-확인한-것)에서 1.2초)
+  (실측 1.2초)
 
 ### 경유 goal 을 정확히 밟지는 않는다
 
@@ -274,7 +273,7 @@ controller_server 의 도착 판정(`SimpleGoalChecker`)은 남은 경로와 상
 `send_waypoints.py` 는 위치가 겹치기만 해도 미리 거부한다 (방향은 실행 중에 정해지므로). 피하는 방법은 셋이다.
 
 - 최종 goal 을 조금 옮긴다.
-- 경로를 두 번에 나눠 보낸다. [bt_fixed_mission](../bt_navigator/bt_fixed_mission/README.md) 의 미션이 이 방식이다.
+- 경로를 두 번에 나눠 보낸다.
 - 위험을 알고 `--force` 로 보낸다.
 
 각 goal 에서 멈추고 방향까지 맞춘 뒤 다음 goal 로 가는 방식(5장)은 goal 마다 따로 판정하므로 이 문제가 없다.

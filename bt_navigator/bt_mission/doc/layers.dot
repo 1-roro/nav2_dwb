@@ -10,17 +10,18 @@ digraph layers {
 
   // 왼쪽 열: 계층 이름
   node [shape=plaintext, style="", fontsize=12, fontcolor="#52514e", margin=0];
-  L0 [label=<<b>입력</b> (4, 5장)<br/>어디로, 무엇을>];
+  L0 [label=<<b>입력</b> (4장)<br/>어디로, 무엇을>];
   L1 [label=<<b>상위 작업 계층</b><br/>무엇을, 어떤 순서로,<br/>실패하면 어떻게>];
   L2 [label=<<b>bt_navigator</b><br/>goal 까지 어떻게 갈지<br/>(내부 BT: 재계획, recovery)>];
   L3 [label=<<b>서버</b><br/>경로 계산, 경로 추종,<br/>제자리 동작>];
-  L4 [label=""];
-  L0 -> L1 -> L2 -> L3 -> L4 [style=invis];
+  L4 [label=<<b>속도 관문</b> (6장)<br/>앞이 막히면 0 속도>];
+  L5 [label=""];
+  L0 -> L1 -> L2 -> L3 -> L4 -> L5 [style=invis];
 
   node [shape=box, style="rounded,filled", fontsize=12, fontcolor="#0b0b0b", margin="0.15,0.08"];
-  ts [label=<<b>task_client.py</b> (액션)<br/><b>task_sender.py</b> (토픽)<br/><font point-size="10">또는 관제 서버, ros2 action / topic 명령</font>>,
+  ts [label=<<b>task_client.py</b><br/><font point-size="10">또는 관제 서버, ros2 action send_goal</font>>,
       fillcolor="#fbdccf", color="#eb6834"];
-  bt [label=<<b>task_server</b>, <b>task_server_lifecycle</b>  (task.xml)<br/><b>mission_bt_runner</b>  (task_loop.xml)<br/><font point-size="10">BehaviorTree.CPP v3</font>>,
+  bt [label=<<b>task_server</b> 또는 <b>task_server_lifecycle</b><br/>task.xml<br/><font point-size="10">BehaviorTree.CPP v3</font>>,
       fillcolor="#fbdccf", color="#eb6834"];
   nt [label=<<b>navigate_to_pose</b><br/><font point-size="10">한 점까지 가서 정지</font>>,
       fillcolor="#cde2fb", color="#2a78d6"];
@@ -30,25 +31,32 @@ digraph layers {
               fillcolor="#cde2fb", color="#2a78d6"];
   behavior [label=<<b>behavior_server</b><br/><font point-size="10">spin, wait, backup ...</font>>,
             fillcolor="#cde2fb", color="#2a78d6"];
-  robot [label=<<b>로봇</b><br/><font point-size="10">/cmd_vel 을 받아 움직인다</font>>,
+  cm [label=<<b>collision_monitor</b><br/><font point-size="10">StopZone 에 레이저 점이 있으면 0 을 보낸다<br/>(설정: simple_line_params.yaml)</font>>,
+      fillcolor="#cde2fb", color="#2a78d6"];
+  robot [label=<<b>로봇</b><br/><font point-size="10">/cmd_vel_safe 를 받아 움직인다</font>>,
+         fillcolor="#f0efec", color="#52514e"];
+  laser [label=<<b>레이저</b><br/><font point-size="10">/scan</font>>,
          fillcolor="#f0efec", color="#52514e"];
 
   {rank=same; L0; ts}
   {rank=same; L1; bt}
   {rank=same; L2; nt}
   {rank=same; L3; planner; controller; behavior}
-  {rank=same; L4; robot}
+  {rank=same; L4; cm; laser}
+  {rank=same; L5; robot}
   L0 -> ts [style=invis];
   L1 -> bt [style=invis];
   L2 -> nt [style=invis];
   L3 -> planner -> controller -> behavior [style=invis];
 
-  ts -> bt [label=" execute_task (액션: goal, cancel)\l mission/task (토픽)\l"];
-  bt -> ts [style=dashed, label=" feedback, result\l mission/status\l"];
+  ts -> bt [label=" execute_task 액션\l (goal, cancel)\l"];
+  bt -> ts [style=dashed, label=" feedback, result\l"];
   bt -> nt [label=" NavigateToPose\l (점마다 한 번)\l"];
   bt -> behavior [label=" Spin"];
   nt -> planner [label=" ComputePath\l ToPose\l"];
   nt -> controller [label=" FollowPath"];
-  controller -> robot [label=" /cmd_vel_nav → velocity_smoother\l → /cmd_vel\l"];
-  behavior -> robot [label=" /cmd_vel (바로)"];
+  controller -> cm [label=" /cmd_vel_nav → velocity_smoother\l → /cmd_vel\l"];
+  behavior -> cm [label=" /cmd_vel"];
+  laser -> cm [label=" /scan"];
+  cm -> robot [label=" /cmd_vel_safe"];
 }

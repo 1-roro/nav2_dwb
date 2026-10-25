@@ -1,4 +1,4 @@
-# 미션 BT 에 보내는 작업 하나. 토픽 mission/task (task_loop.xml), 또는 ExecuteTask 액션의 goal (task.xml)
+# 미션 BT 에 보내는 작업 하나. ExecuteTask 액션의 goal 에 담겨 task_server 로 간다 (task.xml)
 #
 # 로봇은 waypoints 의 점마다 멈춰서 위치와 방향을 맞춘 뒤(도착) 다음 점으로 간다.
 # 마지막 점에 도착하면 action 에 따라 작업한다. BT 가 action 을 보고 동작을 고른다.

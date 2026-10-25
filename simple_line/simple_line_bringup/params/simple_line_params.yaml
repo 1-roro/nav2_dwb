@@ -13,7 +13,7 @@ amcl:
 
 planner_server:
   ros__parameters:
-    # 기본 BT 가 planner_id="GridBased" 로 부르므로 이름은 그대로 둔다
+    # 장애물을 보지 않고 직선을 긋는다. 길에 장애물이 있으면 collision_monitor 가 로봇을 세운다 (아래)
     GridBased:
       plugin: "simple_line_planner::SimpleLinePlanner"
       interpolation_resolution: 0.1        # [m]
@@ -25,7 +25,11 @@ controller_server:
     general_goal_checker:
       xy_goal_tolerance: 0.05              # [m]
       yaw_goal_tolerance: 0.05             # [rad] (약 3°)
-    # 기본 BT 가 controller_id="FollowPath" 로 부르므로 이름은 그대로 둔다
+    # 진행 확인: movement_time_allowance 동안 0.5m 를 못 가면 "Failed to make progress" 로 FollowPath 를 실패시킨다.
+    # collision_monitor 가 로봇을 세워 둔 시간도 여기에 들어가므로, 장애물을 기다려 줄 시간으로 정한다 (Humble 기본 10초)
+    progress_checker:
+      movement_time_allowance: 30.0        # [s]
+    # 장애물을 보지 않는다. 길에 장애물이 있으면 collision_monitor 가 로봇을 세운다 (아래)
     FollowPath:
       plugin: "simple_line_controller::SimpleLineController"
       desired_linear_vel: 0.25             # [m/s]  (velocity_smoother 상한 0.26)
@@ -52,3 +56,32 @@ waypoint_follower:
       plugin: "nav2_waypoint_follower::WaitAtWaypoint"
       enabled: true
       waypoint_pause_duration: 200         # 각 goal 에 도착한 뒤 기다리는 시간 [ms]
+
+# stop & go: 로봇 앞 정지 구역에 레이저 점이 들어오면 로봇을 세우고, 비면 다시 보낸다 (Nav2 collision_monitor, Humble).
+#   Nav2 (velocity_smoother, behavior_server) --cmd_vel--> collision_monitor --cmd_vel_safe--> 로봇
+# Nav2 goal 은 취소되지 않는다. 그동안 controller 는 계속 cmd_vel 을 내고, collision_monitor 가 0 으로 바꿔 보낸다.
+# simple_line.launch.py 가 이 노드를 띄우고, 로봇(Gazebo diff drive)이 cmd_vel_safe 를 듣게 한다.
+collision_monitor:
+  ros__parameters:
+    use_sim_time: true
+    base_frame_id: "base_footprint"
+    odom_frame_id: "odom"
+    cmd_vel_in_topic: "cmd_vel"
+    cmd_vel_out_topic: "cmd_vel_safe"
+    transform_tolerance: 0.5               # [s]
+    source_timeout: 5.0                    # scan 이 이보다 오래되면 버린다. 그러면 막힌 곳이 없는 것으로 본다 (Humble 동작) [s]
+    base_shift_correction: true            # scan 이후 로봇이 움직인 만큼 점을 옮겨서 판단한다
+    stop_pub_timeout: 2.0                  # 세운 뒤 0 속도를 이 시간 동안 보내고 멈춘다 [s]
+    polygons: ["StopZone"]
+    StopZone:
+      type: "polygon"
+      # base_footprint 기준 사각형 [x1, y1, x2, y2, ...] [m]. 앞 0.5m, 좌우 0.25m (waffle 폭 0.31m, 앞면 x=0.07m)
+      points: [0.5, 0.25, 0.5, -0.25, 0.0, -0.25, 0.0, 0.25]
+      action_type: "stop"
+      max_points: 3                        # 구역 안의 점이 이보다 많으면 세운다
+      visualize: true
+      polygon_pub_topic: "polygon_stop"    # RViz 의 StopZone 표시
+    observation_sources: ["scan"]
+    scan:
+      type: "scan"
+      topic: "scan"
