@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <memory>
 #include <string>
 
 #include "nav2_core/exceptions.hpp"
+#include "nav2_costmap_2d/cost_values.hpp"
 #include "nav2_util/node_utils.hpp"
 
 namespace simple_line_planner
@@ -39,6 +41,7 @@ void SimpleLinePlanner::configure(
     throw std::runtime_error("SimpleLinePlanner: unable to lock parent node");
   }
   name_ = name;
+  costmap_ros_ = costmap_ros;
   global_frame_ = costmap_ros->getGlobalFrameID();
   clock_ = node->get_clock();
   logger_ = node->get_logger();
@@ -49,10 +52,16 @@ void SimpleLinePlanner::configure(
   if (interpolation_resolution_ <= 0.0) {
     throw std::runtime_error("SimpleLinePlanner: interpolation_resolution must be positive");
   }
+  nav2_util::declare_parameter_if_not_declared(
+    node, name_ + ".fail_on_obstacle", rclcpp::ParameterValue(true));
+  node->get_parameter(name_ + ".fail_on_obstacle", fail_on_obstacle_);
+  nav2_util::declare_parameter_if_not_declared(
+    node, name_ + ".allow_unknown", rclcpp::ParameterValue(true));
+  node->get_parameter(name_ + ".allow_unknown", allow_unknown_);
 
   RCLCPP_INFO(
-    logger_, "Configured %s (SimpleLinePlanner), resolution %.2f m",
-    name_.c_str(), interpolation_resolution_);
+    logger_, "Configured %s (SimpleLinePlanner), resolution %.2f m, fail_on_obstacle %s",
+    name_.c_str(), interpolation_resolution_, fail_on_obstacle_ ? "true" : "false");
 }
 
 void SimpleLinePlanner::cleanup()
@@ -110,7 +119,40 @@ nav_msgs::msg::Path SimpleLinePlanner::createPlan(
   goal_pose.header = path.header;
   path.poses.push_back(goal_pose);
 
+  if (fail_on_obstacle_) {
+    checkPath(path);
+  }
   return path;
+}
+
+void SimpleLinePlanner::checkPath(const nav_msgs::msg::Path & path) const
+{
+  auto * costmap = costmap_ros_->getCostmap();
+  std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*costmap->getMutex());
+  bool leaving_start = true;    // 출발점 쪽에서 이어지는 막힌 칸은 빼고 본다
+  for (const auto & pose : path.poses) {
+    unsigned int mx = 0;
+    unsigned int my = 0;
+    if (!costmap->worldToMap(pose.pose.position.x, pose.pose.position.y, mx, my)) {
+      if (allow_unknown_) {
+        continue;               // 지도 밖 = 모르는 곳
+      }
+      throw nav2_core::PlannerException("SimpleLinePlanner: the line leaves the map");
+    }
+    const unsigned char cost = costmap->getCost(mx, my);
+    const bool unknown = cost == nav2_costmap_2d::NO_INFORMATION;
+    const bool blocked = unknown ? !allow_unknown_ :
+      cost >= nav2_costmap_2d::INSCRIBED_INFLATED_OBSTACLE;
+    if (!blocked) {
+      leaving_start = false;
+    } else if (!leaving_start) {
+      char where[96];
+      std::snprintf(
+        where, sizeof(where), " at (%.2f, %.2f)", pose.pose.position.x, pose.pose.position.y);
+      throw nav2_core::PlannerException(
+              std::string("SimpleLinePlanner: the line crosses an obstacle in the map") + where);
+    }
+  }
 }
 
 }  // namespace simple_line_planner

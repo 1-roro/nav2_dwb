@@ -1,155 +1,100 @@
 """
-Gazebo + TurtleBot3 waffle + Nav2 + RViz 를 띄우고, 전역 planner 와 controller 를
-simple_line_planner / simple_line_controller 로 바꿔 끼운다.
+시뮬레이션: Gazebo + TurtleBot3 waffle + 내비게이션(navigation.launch.py) + RViz.
 
-nav2_bringup 의 tb3_simulation_launch.py 를 그대로 쓴다. 설치된 Humble 기본
-nav2_params.yaml 위에 params/simple_line_params.yaml 을 덮어써서 params_file 로 넘긴다.
+  ros2 launch simple_line_bringup simple_line.launch.py                          # 빈 방, 저장된 지도로 주행
+  ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse slam:=True   # 창고 지도 만들기
+  ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse         # 창고 지도로 주행
 
-장애물 앞에서 멈췄다 가기(stop & go)는 Nav2 의 collision_monitor 가 맡는다.
+실제 로봇이면 이 파일 대신 로봇 드라이버(속도 명령, odom, 레이저, robot_state_publisher)를 띄우고
+navigation.launch.py 를 띄운다. 이 파일에서 시뮬레이션만의 부분은 아래 '로봇' 묶음뿐이다.
 
-  Nav2 --cmd_vel--> collision_monitor --cmd_vel_safe--> 로봇 (Gazebo diff drive)
-
-로봇 앞 정지 구역(params 의 StopZone)에 레이저 점이 들어오면 0 속도를 보내고, 비면 다시
-Nav2 의 속도를 넘긴다. Nav2 goal 은 취소되지 않는다. 로봇이 cmd_vel_safe 를 듣도록
-waffle.model 을 고친 사본으로 스폰하고, RViz 에 정지 구역(/polygon_stop)을 더한다.
-
-  ros2 launch simple_line_bringup simple_line.launch.py
+world 에 이름만 주면 worlds/<이름>.world 를 쓰고, map 을 비우면 maps/<이름>.yaml 을 쓴다.
+스폰 위치를 비우면 월드마다 정해 둔 곳에 놓고, AMCL 초기 위치도 같은 값으로 준다.
 """
 
 import os
-import tempfile
-import xml.etree.ElementTree as ET
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+from launch.actions import (DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription,
+                            OpaqueFunction)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-import yaml
 
-
-def merge(base, over):
-    """over 를 base 에 덮어쓴다. 'plugin' 키가 있는 dict 는 통째로 교체한다."""
-    for key, value in over.items():
-        if isinstance(value, dict) and 'plugin' in value:
-            base[key] = value
-        elif isinstance(value, dict) and isinstance(base.get(key), dict):
-            merge(base[key], value)
-        else:
-            base[key] = value
-    return base
-
-
-def temp_file(prefix, suffix):
-    return tempfile.NamedTemporaryFile(mode='w', prefix=prefix, suffix=suffix, delete=False)
-
-
-def robot_sdf_listening_to(nav2_bringup, topic):
-    """waffle.model 의 diff drive 플러그인이 cmd_vel 대신 topic 을 듣게 고친 사본."""
-    tree = ET.parse(os.path.join(nav2_bringup, 'worlds', 'waffle.model'))
-    drives = [p for p in tree.iter('plugin') if p.get('filename') == 'libgazebo_ros_diff_drive.so']
-    if len(drives) != 1:
-        raise RuntimeError('waffle.model 에서 diff drive 플러그인을 찾지 못했다')
-    ros = drives[0].find('ros')
-    if ros is None:
-        ros = ET.SubElement(drives[0], 'ros')
-    ET.SubElement(ros, 'remapping').text = f'cmd_vel:={topic}'
-    out = temp_file('simple_line_waffle_', '.model')
-    out.write(ET.tostring(tree.getroot(), encoding='unicode'))
-    out.close()
-    return out.name
-
-
-def rviz_config_with_stop_zone(nav2_bringup):
-    """Nav2 기본 RViz 설정에 collision_monitor 의 정지 구역 표시를 더한 사본."""
-    with open(os.path.join(nav2_bringup, 'rviz', 'nav2_default_view.rviz')) as f:
-        config = yaml.safe_load(f)
-    config['Visualization Manager']['Displays'].append({
-        'Class': 'rviz_default_plugins/Polygon',
-        'Name': 'StopZone',
-        'Enabled': True,
-        'Value': True,
-        'Alpha': 1,
-        'Color': '255; 0; 0',
-        'Topic': {
-            'Value': '/polygon_stop',
-            'Depth': 5,
-            'Durability Policy': 'Volatile',
-            'History Policy': 'Keep Last',
-            'Reliability Policy': 'Reliable',
-        },
-    })
-    out = temp_file('simple_line_', '.rviz')
-    yaml.safe_dump(config, out, sort_keys=False)
-    out.close()
-    return out.name
+# 월드마다 로봇을 놓는 곳 (x [m], y [m], yaw [rad])
+SPAWN = {'empty_room': (-2.0, -1.0, 0.0), 'warehouse': (-4.0, -2.5, 0.0)}
 
 
 def launch_setup(context):
-    nav2_bringup = get_package_share_directory('nav2_bringup')
+    def arg(name):
+        return LaunchConfiguration(name).perform(context)
+
     here = get_package_share_directory('simple_line_bringup')
+    nav2_bringup = get_package_share_directory('nav2_bringup')
 
-    with open(os.path.join(nav2_bringup, 'params', 'nav2_params.yaml')) as f:
-        params = yaml.safe_load(f)
-    with open(os.path.join(here, 'params', 'simple_line_params.yaml')) as f:
-        merge(params, yaml.safe_load(f))
+    world = arg('world')
+    name = os.path.splitext(os.path.basename(world))[0]
+    if '/' not in world:
+        world = os.path.join(here, 'worlds', world + '.world')
+    map_yaml = arg('map') or os.path.join(here, 'maps', name + '.yaml')
+    slam = arg('slam').lower() == 'true'
+    if not slam and not os.path.exists(os.path.expanduser(map_yaml)):
+        raise RuntimeError(f'지도 {map_yaml} 가 없다. 먼저 slam:=True 로 지도를 만들거나 map:= 을 준다')
+    x, y, yaw = SPAWN.get(name, (0.0, 0.0, 0.0))
+    x = float(arg('x_pose') or x)
+    y = float(arg('y_pose') or y)
+    yaw = float(arg('yaw') or yaw)
 
-    # AMCL 초기 자세 = 스폰 위치
-    initial_pose = params['amcl']['ros__parameters']['initial_pose']
-    for key, arg in (('x', 'x_pose'), ('y', 'y_pose'), ('yaw', 'yaw')):
-        initial_pose[key] = float(LaunchConfiguration(arg).perform(context))
+    with open(os.path.join(nav2_bringup, 'urdf', 'turtlebot3_waffle.urdf')) as f:
+        robot_description = f.read()
 
-    out = temp_file('simple_line_', '.yaml')
-    yaml.safe_dump(params, out, sort_keys=False)
-    out.close()
-
-    return [
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(nav2_bringup, 'launch', 'tb3_simulation_launch.py')),
-            launch_arguments={
-                'params_file': out.name,
-                'world': LaunchConfiguration('world'),
-                'map': LaunchConfiguration('map'),
-                'x_pose': LaunchConfiguration('x_pose'),
-                'y_pose': LaunchConfiguration('y_pose'),
-                'yaw': LaunchConfiguration('yaw'),
-                'headless': LaunchConfiguration('headless'),
-                'use_rviz': LaunchConfiguration('use_rviz'),
-                'robot_sdf': robot_sdf_listening_to(nav2_bringup, 'cmd_vel_safe'),
-                'rviz_config_file': rviz_config_with_stop_zone(nav2_bringup),
-            }.items()),
-        # stop & go. 설정은 params 의 collision_monitor 항목
-        Node(
-            package='nav2_collision_monitor',
-            executable='collision_monitor',
-            name='collision_monitor',
-            output='screen',
-            parameters=[out.name]),
-        Node(
-            package='nav2_lifecycle_manager',
-            executable='lifecycle_manager',
-            name='lifecycle_manager_collision_monitor',
-            output='screen',
-            parameters=[{'use_sim_time': True,
-                         'autostart': True,
-                         'node_names': ['collision_monitor']}]),
+    # ---- 로봇 (시뮬레이션). 실제 로봇에서는 로봇 드라이버가 이 자리에 온다
+    robot = [
+        ExecuteProcess(cmd=['gzserver', '-s', 'libgazebo_ros_init.so',
+                            '-s', 'libgazebo_ros_factory.so', world], output='screen'),
+        Node(package='robot_state_publisher', executable='robot_state_publisher', output='screen',
+             parameters=[{'use_sim_time': True, 'robot_description': robot_description}]),
+        Node(package='gazebo_ros', executable='spawn_entity.py', output='screen',
+             arguments=['-entity', 'turtlebot3_waffle',
+                        '-file', os.path.join(nav2_bringup, 'worlds', 'waffle.model'),
+                        '-x', str(x), '-y', str(y), '-z', '0.01', '-Y', str(yaw)]),
     ]
+    if arg('headless').lower() != 'true':
+        robot.append(ExecuteProcess(cmd=['gzclient'], output='screen'))
+
+    # ---- 내비게이션 (실제 로봇과 같은 파일)
+    navigation = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(here, 'launch', 'navigation.launch.py')),
+        launch_arguments={
+            'slam': str(slam),
+            'map': '' if slam else map_yaml,
+            'use_sim_time': 'True',
+            'initial_pose_x': str(x),
+            'initial_pose_y': str(y),
+            'initial_pose_yaw': str(yaw),
+        }.items())
+    actions = robot + [navigation]
+    if arg('use_rviz').lower() == 'true':
+        actions.append(IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(os.path.join(here, 'launch', 'rviz.launch.py')),
+            launch_arguments={'use_sim_time': 'True'}.items()))
+    return actions
 
 
 def generate_launch_description():
-    here = get_package_share_directory('simple_line_bringup')
     return LaunchDescription([
-        DeclareLaunchArgument(
-            'world', default_value=os.path.join(here, 'worlds', 'empty_room.world')),
-        DeclareLaunchArgument(
-            'map', default_value=os.path.join(here, 'maps', 'empty_room.yaml')),
-        DeclareLaunchArgument('x_pose', default_value='-2.0', description='spawn x (map frame)'),
-        DeclareLaunchArgument('y_pose', default_value='-1.0', description='spawn y (map frame)'),
-        DeclareLaunchArgument('yaw', default_value='0.0', description='spawn yaw [rad]'),
+        DeclareLaunchArgument('world', default_value='empty_room',
+                              description='empty_room | warehouse | .world 파일 경로'),
+        DeclareLaunchArgument('map', default_value='',
+                              description='지도 yaml. 비우면 maps/<world 이름>.yaml'),
+        DeclareLaunchArgument('slam', default_value='False',
+                              description='True: 지도를 만든다 (slam_toolbox)'),
+        DeclareLaunchArgument('x_pose', default_value='', description='스폰 x [m] (map frame)'),
+        DeclareLaunchArgument('y_pose', default_value='', description='스폰 y [m] (map frame)'),
+        DeclareLaunchArgument('yaw', default_value='', description='스폰 yaw [rad]'),
         DeclareLaunchArgument('headless', default_value='False',
-                              description='True: do not start the Gazebo GUI'),
+                              description='True: Gazebo 창을 띄우지 않는다'),
         DeclareLaunchArgument('use_rviz', default_value='True'),
         OpaqueFunction(function=launch_setup),
     ])

@@ -70,8 +70,9 @@ void SimpleLineController::configure(
   param("rotate_to_heading_tolerance", rotate_to_heading_tolerance_);
   param("rotate_settled_angular_vel", rotate_settled_angular_vel_);
   param("max_linear_accel", max_linear_accel_);
+  param("max_linear_decel", max_linear_decel_);
+  param("max_linear_jerk", max_linear_jerk_);
   param("max_angular_accel", max_angular_accel_);
-  param("approach_dist", approach_dist_);
   param("min_approach_linear_vel", min_approach_linear_vel_);
   param("transform_tolerance", transform_tolerance_);
   param("max_robot_pose_search_dist", max_robot_pose_search_dist_);
@@ -79,6 +80,7 @@ void SimpleLineController::configure(
   double controller_frequency = 20.0;
   node->get_parameter("controller_frequency", controller_frequency);
   control_duration_ = 1.0 / controller_frequency;
+  clock_ = node->get_clock();
 
   local_plan_pub_ = node->create_publisher<nav_msgs::msg::Path>("simple_line/local_plan", 1);
   carrot_pub_ = node->create_publisher<geometry_msgs::msg::PointStamped>("simple_line/carrot", 1);
@@ -220,10 +222,16 @@ geometry_msgs::msg::TwistStamped SimpleLineController::computeVelocityCommands(
   const double carrot_angle = std::atan2(carrot.y, carrot.x);
 
   const double dt = control_duration_;
+  // 가감속은 바로 전 주기에 낸 명령에서 이어 간다. 명령이 끊겼다가 다시 시작하면(새 goal)
+  // 로봇의 실제 속도에서 시작한다
+  const rclcpp::Time now = clock_->now();
+  const bool continuing = has_last_cmd_ && (now - last_cmd_time_).seconds() < 3.0 * dt;
+  Motion m = continuing ? motion_ : Motion{velocity.linear.x, 0.0};
+  const double w0 = continuing ? last_w_ : velocity.angular.z;
+  const MotionLimits lin{max_linear_accel_, max_linear_decel_, max_linear_jerk_};
+
   auto limit_w = [&](double w) {
-      return std::clamp(
-        w, velocity.angular.z - max_angular_accel_ * dt,
-        velocity.angular.z + max_angular_accel_ * dt);
+      return std::clamp(w, w0 - max_angular_accel_ * dt, w0 + max_angular_accel_ * dt);
     };
   // 제자리 회전 속도. 남은 각도 err 에서 감속도 a 로 멈출 수 있는 속도 sqrt(2·a·|err|) 를 넘지 않게 해서,
   // 목표 방향을 지나치지 않고 감속하며 멈춘다. a 는 max_angular_accel 의 절반으로 잡는다. 명령이
@@ -252,37 +260,51 @@ geometry_msgs::msg::TwistStamped SimpleLineController::computeVelocityCommands(
     rotating_ = false;
   }
 
-  double v = 0.0;
   double w = 0.0;
   if (goal_dist <= goal_tolerance) {
-    // goal 의 xy 에 도착: 제자리에서 goal yaw 로 회전
+    // goal 의 xy 에 도착: 서서 goal yaw 로 회전
     rotating_ = false;
+    braking_ = false;
+    m = stepToward(m, 0.0, lin, dt);
     w = rotate_w(goal_yaw_err);
   } else if (rotating_) {
-    // 경로 쪽으로 제자리 회전. 방향이 맞았으면 회전이 멈출 때까지 0 을 낸다
-    w = std::fabs(carrot_angle) > rotate_to_heading_tolerance_ ? rotate_w(carrot_angle) : 0.0;
+    // 경로 쪽으로 제자리 회전. 달리던 중이면 먼저 곧게 서고, 방향이 맞았으면 회전이 멈출 때까지 0 을 낸다
+    m = stepToward(m, 0.0, lin, dt);
+    if (m.v <= 0.01) {
+      w = std::fabs(carrot_angle) > rotate_to_heading_tolerance_ ? rotate_w(carrot_angle) : 0.0;
+    }
   } else {
     // pure pursuit
     const double L2 = carrot.x * carrot.x + carrot.y * carrot.y;
     const double curvature = L2 > 1e-6 ? 2.0 * carrot.y / L2 : 0.0;
 
-    v = v_max;
-    if (goal_dist < approach_dist_) {
-      // goal 근처 감속
-      v = std::max(std::min(v, min_approach_linear_vel_), v * goal_dist / approach_dist_);
+    // goal 앞 감속: 지금 브레이크를 걸면 min_approach_linear_vel 까지 줄이는 데 가는 거리가
+    // 도착 범위까지 남은 거리에 닿으면 감속을 시작한다. 그 뒤 도착 범위까지 그 속도로 다가간다.
+    // (경로가 바뀌어 남은 거리가 넉넉해지면 다시 가속)
+    const double v_end = std::min(min_approach_linear_vel_, v_max);
+    const double to_stop = goal_dist - goal_tolerance - m.v * dt;
+    const double need = brakingDistance(m, v_end, lin, dt);
+    if (braking_ && to_stop > need + 0.1) {
+      braking_ = false;
     }
-    // 선가속도 제한
-    v = std::clamp(
-      v, velocity.linear.x - max_linear_accel_ * dt, velocity.linear.x + max_linear_accel_ * dt);
-    v = std::max(v, 0.0);
+    if (need >= to_stop) {
+      braking_ = true;
+    }
+    m = stepToward(m, braking_ ? v_end : v_max, lin, dt);
+    m.v = std::max(m.v, 0.0);
 
-    w = v * curvature;
+    w = m.v * curvature;
     // 각속도 상한에 걸리면 v 도 같이 줄여 곡률을 유지
     if (std::fabs(w) > max_angular_vel_) {
-      v *= max_angular_vel_ / std::fabs(w);
+      m.v *= max_angular_vel_ / std::fabs(w);
       w = sign(w) * max_angular_vel_;
     }
   }
+  const double v = m.v;
+  motion_ = m;
+  last_w_ = w;
+  last_cmd_time_ = now;
+  has_last_cmd_ = true;
 
   if (carrot_pub_->get_subscription_count() > 0) {
     auto msg = std::make_unique<geometry_msgs::msg::PointStamped>();

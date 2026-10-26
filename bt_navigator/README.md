@@ -89,18 +89,18 @@ ros2 run bt_mission task_client.py go 0,-1 0,1 -2,-1,0
 |---|---|---|
 | **입력** (4장) | 어디로 가서 무엇을 할지 보냄 | `task_client.py` → `execute_task` 액션 |
 | **상위 작업 계층** | 무엇을, 어떤 순서로, 실패하면 어떻게 | `task_server` 또는 `task_server_lifecycle` (`task.xml`) |
-| **bt_navigator** | goal 까지 **어떻게 갈지** (재계획, recovery) | Nav2 기본 BT 그대로 ([MULTI_GOAL.md 1-1](../simple_line/MULTI_GOAL.md#1-1-재계획-주기0333hz와-지난-goal-반경07m은-어디에-있나)) |
+| **bt_navigator** | goal 까지 **어떻게 갈지** (재계획, recovery) | Nav2 기본 트리에서 회전, 후진 recovery 만 뺀 `navigate_to_pose_amr.xml` ([AMR.md 6장](../simple_line/AMR.md#6-막혔을-때-회전-후진-없이-기다리기)) |
 | **서버** | 실제 경로 계산, 경로 추종, 제자리 동작 | planner_server (SimpleLinePlanner), controller_server (SimpleLineController), behavior_server (Spin) |
-| **속도 관문** (6장) | 앞이 막히면 로봇에 가는 속도를 0 으로 | collision_monitor (`/cmd_vel` → `/cmd_vel_safe`) |
+| **속도 관문** (6장) | 앞이 막히면 속도를 줄이거나 0 으로, 가감속 제한 | collision_monitor (`/cmd_vel_nav` → `/cmd_vel_safe`), velocity_smoother (→ `/cmd_vel`) |
 
 BT 가 두 개다.
 
 - 이 예제의 **미션 BT** (`task.xml`): 받은 작업을 어떤 순서로, 어떻게 할지 정한다.
-- bt_navigator 안의 **navigation BT** (`navigate_to_pose_w_replanning_and_recovery.xml`): goal 하나까지 가는 방법을 정한다. 1초마다 경로를 다시 계산하고, 실패하면 recovery 를 한다. goal 이 올 때마다 새로 실행된다.
+- bt_navigator 안의 **navigation BT** (`navigate_to_pose_amr.xml`, Nav2 기본 `navigate_to_pose_w_replanning_and_recovery.xml` 에서 recovery 만 바꿈): goal 하나까지 가는 방법을 정한다. 1초마다 경로를 다시 계산하고, 실패하면 기다렸다가 다시 한다. goal 이 올 때마다 새로 실행된다.
 
 미션 BT 의 `NavigateToPose` 노드가 bt_navigator 에 액션을 보내면, bt_navigator 가 navigation BT 를 돌린다. 작업 로직을 navigation BT 에 섞지 않으니, 이동 실패 처리(재계획, recovery)와 작업 실패 처리(보고, 다음 작업)가 서로 엉키지 않는다.
 
-장애물은 미션 BT 도 navigation BT 도 아닌 맨 아래, 로봇에 가는 속도에서 다룬다 (6장). 로봇 앞이 막히면 collision_monitor 가 속도를 0 으로 바꾸고, 위의 두 BT 는 goal 을 그대로 둔 채 계속 실행 중이다.
+장애물은 미션 BT 도 navigation BT 도 아닌 맨 아래, 로봇에 가는 속도에서 다룬다 (6장). 로봇 앞이 막히면 collision_monitor 가 속도를 줄이거나 0 으로 바꾸고, 위의 두 BT 는 goal 을 그대로 둔 채 계속 실행 중이다.
 
 ---
 
@@ -965,28 +965,30 @@ void TaskServerLifecycle::onPreempt(ExecuteTask::Goal::ConstSharedPtr goal)
 
 ## 6. 장애물: 멈췄다 가기 (stop & go)
 
-길에 장애물이 있으면 로봇은 그 앞에 서서 기다리고, 장애물을 치우면 같은 길로 다시 간다. **Nav2 goal 은 취소하지 않는다.** goal 은 그대로 실행 중(pending)이고, 로봇에 가는 속도만 0 이 된다.
+길에 장애물이 있으면 로봇은 속도를 줄이며 다가가 그 앞에 서서 기다리고, 장애물을 치우면 같은 길로 다시 간다. **Nav2 goal 은 취소하지 않는다.** goal 은 그대로 실행 중(pending)이고, 로봇에 가는 속도만 줄거나 0 이 된다.
 
 이 일은 미션 BT 가 아니라 Nav2 의 **collision_monitor** 가 한다. Nav2 가 내는 속도와 로봇 사이에 끼어 있는 노드다.
 
 ```
-controller_server ─▶ velocity_smoother ─┐
-                                        ├─ /cmd_vel ─▶ collision_monitor ─ /cmd_vel_safe ─▶ 로봇
-behavior_server (spin, backup) ─────────┘                    ▲
-                                                   /scan ────┘  로봇 앞 StopZone 에 레이저 점이 있으면 0
+controller_server ─┐
+                   ├─ /cmd_vel_nav ─▶ collision_monitor ─ /cmd_vel_safe ─▶ velocity_smoother ─ /cmd_vel ─▶ 로봇
+behavior_server ───┘                       ▲                              가감속 제한
+                                 /scan ────┘  SlowZone 에 레이저 점: 0.3배, StopZone 에 레이저 점: 0
 ```
 
-- 로봇 앞 사각형(StopZone, 앞 0.5 m × 폭 0.5 m)에 레이저 점이 4개 이상 들어오면 0 속도를 보낸다. 로그: `Robot to stop due to StopZone polygon`
-- 구역이 비면 Nav2 의 속도를 그대로 넘긴다. 로그: `Robot to continue normal operation`
+- 로봇 앞 1.0 m x 폭 0.6 m(SlowZone)에 레이저 점이 4개 이상 들어오면 속도를 0.3 배로, 앞 0.5 m x 폭 0.5 m(StopZone)에 들어오면 0 으로 바꾼다. 로그: `Robot to slowdown ... due to SlowZone polygon`, `Robot to stop due to StopZone polygon`
+- 바뀐 속도는 velocity_smoother 의 감속도(0.6 m/s²)로 이어져서, 로봇에 가는 속도가 갑자기 0 이 되지 않는다.
+- 구역이 비면 Nav2 의 속도를 그대로 넘긴다 (velocity_smoother 의 가속도로 다시 오른다). 로그: `Robot to continue normal operation`
 - 그동안 Nav2 와 미션 BT 는 하던 일을 계속한다. controller 는 계속 속도를 내고, `NavigateToPose` 는 RUNNING, 작업도 RUNNING 이다.
 - 미션 BT(`task.xml`)에는 장애물 코드가 없다. RViz 의 Nav2 Goal, `ros2 action send_goal`, waypoint_follower, Nav2 의 recovery 동작까지 모든 이동에 똑같이 적용된다.
+- 속도 경로, 가감속, 구역 크기를 정하는 법은 [simple_line/AMR.md](../simple_line/AMR.md) 4, 5장에 있다.
 
 ![stop and go](bt_mission/doc/stop_and_go.png)
 
-Gazebo 에서 `go 1,-1,0` 작업을 보내고, 가는 중에 (0,-1) 에 장애물(반지름 0.15 m)을 놓았다가 16초 뒤에 치웠다 (7-3).
+Gazebo 에서 Nav2 goal (1,-1) 로 가는 중에 (0,-1) 에 장애물(반지름 0.15 m)을 놓았다가, 선 뒤 8초가 지나 치웠다 (7-3).
 
-- **왼쪽**: 장애물이 StopZone 에 들어오자 로봇에 가는 속도가 0 이 되고, 0.27초 만에 섰다. 그동안에도 Nav2(controller)는 goal 을 향해 작은 속도를 계속 냈다. 치우자 바로 그 속도가 로봇으로 가서 다시 출발했다.
-- **오른쪽**: 로봇 앞면에서 장애물 표면까지 0.38 m 를 두고 섰다. 경로는 처음 직선 그대로다.
+- **왼쪽**: 장애물이 SlowZone(앞 0.97 m)에 들어오자 0.075 m/s 로 줄이고, StopZone(앞 0.50 m)에서 0.17초 만에 섰다. 그동안에도 Nav2(controller)는 goal 을 향해 0.25 m/s 를 계속 냈다. 치우자 다시 가속해서 goal 까지 갔다.
+- **오른쪽**: 로봇 앞면에서 장애물 표면까지 0.42 m 를 두고 섰다. 경로는 처음 직선 그대로다.
 
 ### 6-1. 직접 해 보기 (Gazebo)
 
@@ -1003,7 +1005,7 @@ task> go 1,-1,0
 ```
 
 1. 작업을 보내 로봇이 출발하면, RViz 위쪽 툴바의 **Publish Point** 를 누르고 로봇 앞 길 위(예: (0,-1) 근처)를 찍는다. Gazebo 에 빨간 원기둥이 생긴다. Publish Point 는 한 번 찍으면 풀리므로, 찍을 때마다 다시 누른다.
-2. 원기둥이 RViz 의 빨간 사각형(StopZone)에 들어오면 로봇이 선다. 터미널 1 에 `Robot to stop due to StopZone polygon` 이 나온다.
+2. 원기둥이 RViz 의 주황 사각형(SlowZone)에 들어오면 로봇이 느려지고, 빨간 사각형(StopZone)에 들어오면 선다. 터미널 1 에 `Robot to slowdown ... SlowZone`, `Robot to stop due to StopZone polygon` 이 나온다.
 3. 원하는 만큼 기다린 뒤, Publish Point 로 그 원기둥을 다시 찍는다. 원기둥이 사라지고 `Robot to continue normal operation` 이 나온 뒤 로봇이 다시 간다.
 4. 작업은 끝까지 가서 `SUCCEEDED` 로 끝난다. 30초 넘게 막혀 있으면 Nav2 가 재시도를 시작한다 (6-3).
 
@@ -1024,22 +1026,34 @@ task> go 1,-1,0
 
 | 파일 | 하는 일 |
 |---|---|
-| `launch/simple_line.launch.py` | ① nav2_bringup 의 `waffle.model` 을 고친 사본으로 로봇을 스폰한다. diff drive 플러그인이 `/cmd_vel` 대신 `/cmd_vel_safe` 를 듣는다 ② `collision_monitor` 와 그것만 맡는 `lifecycle_manager_collision_monitor` 를 띄운다 ③ Nav2 기본 RViz 설정에 `StopZone` 표시(`/polygon_stop`)를 더한다 |
-| `params/simple_line_params.yaml` | `collision_monitor` 항목, `controller_server` 의 `progress_checker` |
+| `launch/navigation.launch.py` | collision_monitor 와 velocity_smoother 를 띄우고 속도 토픽을 위 그림처럼 잇는다. controller_server 와 behavior_server 의 출력은 `/cmd_vel_nav`, 로봇은 표준 `/cmd_vel` 을 듣는다 |
+| `launch/rviz.launch.py` | Nav2 기본 RViz 설정에 SlowZone(주황, `/polygon_slow`), StopZone(빨강, `/polygon_stop`) 표시를 더한다 |
+| `params/simple_line_params.yaml` | `collision_monitor`, `velocity_smoother` 항목, `controller_server` 의 `progress_checker` |
 
 ```yaml
 collision_monitor:
   ros__parameters:
-    cmd_vel_in_topic: "cmd_vel"            # Nav2 가 내는 속도
-    cmd_vel_out_topic: "cmd_vel_safe"      # 로봇이 듣는 속도
-    polygons: ["StopZone"]
+    cmd_vel_in_topic: "cmd_vel_nav"        # controller, behavior_server 가 내는 속도
+    cmd_vel_out_topic: "cmd_vel_safe"      # velocity_smoother 로
+    polygons: ["StopZone", "SlowZone"]
     StopZone:
       type: "polygon"
       points: [0.5, 0.25, 0.5, -0.25, 0.0, -0.25, 0.0, 0.25]   # base_footprint 기준 [m]
       action_type: "stop"
-      max_points: 3                        # 구역 안의 점이 이보다 많으면 세운다
+      max_points: 3                        # 구역 안의 점이 이보다 많으면 동작
+    SlowZone:
+      type: "polygon"
+      points: [1.0, 0.3, 1.0, -0.3, 0.0, -0.3, 0.0, 0.3]
+      action_type: "slowdown"
+      slowdown_ratio: 0.3
+      max_points: 3
     observation_sources: ["scan"]
     scan: {type: "scan", topic: "scan"}
+
+velocity_smoother:
+  ros__parameters:
+    max_accel: [0.6, 0.0, 3.2]             # 줄이거나 0 으로 바뀐 속도를 이 가감속으로 잇는다
+    max_decel: [-0.6, 0.0, -3.2]
 
 controller_server:
   ros__parameters:
@@ -1049,31 +1063,32 @@ controller_server:
 
 | 값 | 기본 | 바꾸면 |
 |---|---|---|
-| `StopZone.points` | 앞 0.5 m, 좌우 0.25 m | 멈추는 거리와 폭. waffle 의 앞면은 base_footprint 에서 0.07 m, 폭은 0.31 m 다. 속도가 빠르면 앞으로 늘린다 |
-| `StopZone.max_points` | 3 | 레이저 잡음에 섰다 가면 늘리고, 가는 물체를 놓치면 줄인다 |
+| `StopZone.points` | 앞 0.5 m, 좌우 0.25 m | 서는 거리와 폭. waffle 의 앞면은 base_footprint 에서 0.07 m, 폭은 0.31 m 다. 빠른 로봇은 서는 데 필요한 거리보다 길게 ([AMR.md 5장](../simple_line/AMR.md#5-장애물-앞에서-감속하고-서기)) |
+| `SlowZone.points`, `slowdown_ratio` | 앞 1.0 m, 0.3 배 | 미리 줄이는 거리와 비율 |
+| `max_points` | 3 | 레이저 잡음에 섰다 가면 늘리고, 가는 물체를 놓치면 줄인다 |
 | `progress_checker.movement_time_allowance` | 30 s | 서 있는 동안 Nav2 가 기다려 주는 시간 (6-3) |
 | `source_timeout` | 5 s | scan 이 이보다 오래되면 버린다. Humble 은 그때 막힌 곳이 없는 것으로 본다 (9장) |
 
 - `--symlink-install` 로 빌드했다면 yaml 을 고친 뒤 launch 만 다시 하면 된다.
-- 실제 로봇에서는 로봇 드라이버가 collision_monitor 의 출력(`cmd_vel_safe`)을 듣게 한다.
 - 이 Humble 버전(1.1.18)의 collision_monitor 는 멈춤 상태를 토픽으로 내지 않는다 (로그만 남긴다). 그래서 작업 feedback 에는 "장애물 때문에 기다리는 중" 이 따로 없다.
 
 ### 6-3. 오래 막혀 있으면 (progress checker)
 
-collision_monitor 가 로봇을 세워 둔 시간도 controller_server 의 progress checker 는 "진행이 없다" 로 본다. `movement_time_allowance`(30초) 동안 0.5 m 를 못 가면 `Failed to make progress` 로 FollowPath 가 실패하고, bt_navigator 의 navigation BT 가 재시도와 recovery 를 시작한다. Gazebo 에서 장애물을 143초 동안 두었을 때 실제로 이렇게 됐다.
+collision_monitor 가 로봇을 세워 둔 시간도 controller_server 의 progress checker 는 "진행이 없다" 로 본다. `movement_time_allowance`(30초) 동안 0.5 m 를 못 가면 `Failed to make progress` 로 FollowPath 가 실패하고, bt_navigator 의 navigation BT 가 재시도를 시작한다.
 
-| 막힌 뒤 | 일어난 일 |
+navigation BT 는 Nav2 기본 트리에서 제자리 회전, 후진 recovery 를 뺀 `simple_line_bringup/behavior_trees/navigate_to_pose_amr.xml` 이다. 실패하면 costmap 을 비우고 5초 기다린 뒤 다시 한다 ([AMR.md 6장](../simple_line/AMR.md#6-막혔을-때-회전-후진-없이-기다리기)). Gazebo 창고 월드에서 장애물을 치우지 않고 두었을 때 실제로 이렇게 됐다.
+
+| 선 뒤 | 일어난 일 |
 |---|---|
 | 0 s | collision_monitor 가 0 속도. 로봇 정지 |
-| 30 s | `Failed to make progress`. local costmap 을 비우고 FollowPath 를 다시 보낸다 |
-| 60 s | 다시 실패. recovery 로 costmap 을 비우고 경로부터 다시 |
-| 90 s | 다시 실패. FollowPath 재시도 |
-| 120 s | 다시 실패. recovery 로 제자리 회전(spin)을 보냈지만, collision_monitor 가 막아서 돌지 않았다 (10초 뒤 spin 실패 → 5초 대기 → 다시 FollowPath) |
-| 143 s | 장애물을 치움. 바로 출발해서 SUCCEEDED |
+| 25 s | `Failed to make progress` (서기 전에 SlowZone 에서 느리게 온 시간 포함). FollowPath 를 다시 보낸다 |
+| 56 s | 다시 실패. costmap 을 비우고 5초 대기, 경로부터 다시 |
+| 그 뒤 | 약 30초마다 실패, 두 번에 한 번 5초 대기 |
+| 454 s | 재시도(6번)를 다 써서 NavigateToPose 실패. 작업은 `go_only failed at waypoint 1/1` 로 ABORTED |
 
-- 143초 동안 로봇은 한 번도 움직이지 않았다 (위치 변화 1 mm 미만). recovery 동작도 collision_monitor 를 거치기 때문이다.
-- 작업은 그동안 RUNNING 이었다. 계속 막혀 있으면 Nav2 기본 트리의 재시도(6번)를 다 쓴 뒤 NavigateToPose 가 실패하고, 작업은 `go_only failed at waypoint 1/1` 로 ABORTED 된다. 계산으로는 약 7분 뒤다.
-- recovery 동작 중에 치우면 그 동작을 마저 한다 (제자리 90° 회전, 0.3 m 후진). 짧게 막히는 곳에서는 `movement_time_allowance` 를 넉넉히 둔다.
+- 454초(7.6분) 동안 로봇은 한 번도 움직이지 않았다 (속도 최대 0.0002 m/s).
+- 중간에 치우면 바로 다시 간다. 재시도 사이 5초 대기 중이면 대기가 끝난 뒤 간다.
+- 기다려 줄 시간은 `movement_time_allowance` 와 BT 의 `number_of_retries` 로 정한다.
 
 ### 6-4. 왜 goal 을 취소하지 않고 속도를 막나
 
@@ -1091,10 +1106,10 @@ collision_monitor 가 로봇을 세워 둔 시간도 controller_server 의 progr
 |---|---|---|
 | Nav2 goal | 그대로 (pending) | 취소 → 같은 점으로 새 goal |
 | 멈추는 곳 | 로봇에 가는 속도 | Nav2 위 (미션 BT) |
-| 적용 범위 | 모든 이동 (RViz goal, recovery 회전, teleop 포함) | 미션 BT 가 보낸 `NavigateToPose` 만 |
+| 적용 범위 | 모든 이동 (RViz goal, recovery 동작, `cmd_vel_nav` 로 보낸 teleop 포함) | 미션 BT 가 보낸 `NavigateToPose` 만 |
 | 멈추는 거리 | 로봇에 붙은 사각형 (방향과 상관없이 앞) | goal 까지의 직선 위 |
 | 미션이 아는가 | 모른다 (작업은 RUNNING) | feedback `blocked` 로 알렸다 |
-| 오래 막히면 | progress checker 가 30초마다 재시도, 약 7분 뒤 실패 | `max_wait` 로 정했다 |
+| 오래 막히면 | progress checker 가 30초마다 재시도, 7.6분 뒤 실패 (회전, 후진 없음) | `max_wait` 로 정했다 |
 | 코드 | 설정만 (Nav2 노드) | BT 노드 2개, 약 350줄 |
 
 **회피(돌아가기)를 나중에 더하려면**: 장애물을 보는 planner 와 controller 가 필요하다. Nav2 기본 costmap 은 이미 `/scan` 으로 장애물을 표시하므로, planner 를 NavFn 이나 Smac 으로, controller 를 Regulated Pure Pursuit 나 DWB 처럼 costmap 을 보는 것으로 바꾸면 된다. 그때도 collision_monitor 는 마지막 안전장치로 둔다.
@@ -1190,14 +1205,14 @@ collision_monitor 가 로봇을 세워 둔 시간도 controller_server 의 progr
 
 | 경우 | 결과 |
 |---|---|
-| `task_client.py go 1,-1,0`. 로봇이 x = -1.6 을 지날 때 (0,-1) 에 장애물, 선 뒤 12초가 지나면 치움 (6장 그림) | SUCCEEDED [BT SUCCESS]. 정지 명령 뒤 0.27초, 2.7 cm 더 가서 섰다 (로봇 중심 x = -0.60, 앞면에서 장애물 표면까지 0.38 m). 16초 대기. 치우자 바로 출발해서 1.1초 만에 0.2 m/s. 직선에서 최대 0.9 cm, 도착 오차 0.4 cm. 전체 33.9 s |
-| `task_client.py inspect 1,-1 1,1,90`. 같은 장애물 | 15초 대기 뒤 계속. 두 점에 도착하고 작업까지 SUCCEEDED |
-| `ros2 action send_goal /navigate_to_pose` (미션 없이 Nav2 goal 만), 장애물을 먼저 놓고 출발 | 18초 대기, SUCCEEDED. `Failed to make progress` 없음 |
-| 위와 같고 143초 동안 둠 | 30초마다 `Failed to make progress` 와 재시도, 120초에 spin recovery (collision_monitor 가 막아 돌지 않음). 그동안 로봇 위치 변화 1 mm 미만. 치운 뒤 SUCCEEDED (6-3) |
-| 작업 4개 (7장 처음의 목록), 장애물 없음 | 모두 SUCCEEDED. collision_monitor 가 세운 일 0번, `Failed to make progress` 0번. 클라이언트 실행부터 끝까지 89 s |
+| Nav2 goal (1,-1), 빈 방. 로봇이 x = -1.8 을 지날 때 (0,-1) 에 장애물, 선 뒤 8초가 지나면 치움 (6장 그림) | SUCCEEDED. 앞 0.97 m 에서 0.075 m/s 로 감속, 앞 0.50 m 에서 0.17초 / 0.6 cm 더 가서 정지 (앞면에서 장애물 표면까지 0.42 m). 치우자 다시 가속 |
+| 창고 월드, 장애물을 치우지 않음 | 454초 동안 움직이지 않고 30초마다 재시도, 그 뒤 ABORTED (6-3) |
+| 작업 4개 (7장 처음의 목록), 빈 방, 장애물 없음 | 모두 SUCCEEDED, 70 s |
 | `obstacle.py click` 에 `/clicked_point` 를 세 번 보냄 (두 곳, 그리고 첫 장애물 근처) | 두 개를 놓고, 세 번째에 첫 장애물을 치웠다 |
 | `obstacle.py remove` | 남은 `obstacle_*` 를 모두 치웠다. 남은 것이 없으면 `no obstacles to remove` |
 
+- SlowZone 을 넣기 전(collision_monitor 가 로봇 바로 앞 마지막 단계, StopZone 만)에는 `task_client.py go 1,-1,0` 과 `inspect 1,-1 1,1,90` 작업도 장애물 앞에서 15~16초 섰다가 SUCCEEDED 로 끝났다.
+- 창고 월드에서 지도 만들기, AMCL, 가감속을 확인한 결과는 [AMR.md 8장](../simple_line/AMR.md#8-확인한-것) 에 있다.
 - RViz 는 화면 없이(Xvfb) 띄워서, 고친 설정이 열리고 `StopZone` 표시가 로봇 앞 사각형으로 그려지는 것까지 확인했다.
 - Gazebo 창(GUI)에서 물체를 놓고 지우는 방법은 확인하지 못했다.
 
@@ -1227,7 +1242,7 @@ collision_monitor 가 로봇을 세워 둔 시간도 controller_server 의 progr
 - **제자리 회전도 막는다.** StopZone 에 점이 있으면 회전 속도도 0 이다. 점에서 방향을 맞추다가 옆의 물체가 앞으로 들어오면 거기서 선다.
 - **레이저가 끊기면 멈추지 않는다 (Humble).** scan 이 `source_timeout`(5초)보다 오래되면 collision_monitor 는 그 데이터를 버리고 막힌 곳이 없는 것으로 본다. 레이저가 죽었는지는 따로 감시한다.
 - **레이저 높이의 물체만 본다.** 2D 레이저 평면보다 낮거나 높은 물체(낮은 상자, 테이블 상판)는 보지 못한다. 필요하면 collision_monitor 의 `observation_sources` 에 depth 카메라 점구름(`pointcloud`)을 더한다.
-- **오래 막히면 Nav2 가 재시도와 recovery 를 한다.** 30초마다 재시도하고, 그 사이에 치우면 recovery 동작(회전, 후진)을 마저 한 뒤 간다 (6-3).
+- **오래 막히면 Nav2 가 재시도한다.** 30초마다 재시도하고 약 7.6분 뒤 실패한다. 회전, 후진 recovery 는 뺐다 (6-3).
 
 ---
 

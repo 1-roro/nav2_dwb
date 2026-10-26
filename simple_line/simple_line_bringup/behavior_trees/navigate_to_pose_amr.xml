@@ -1,0 +1,40 @@
+<!--
+  bt_navigator 가 NavigateToPose goal 마다 실행하는 navigation BT (navigation.launch.py 가 기본으로 지정).
+
+  Nav2 Humble 기본 트리(navigate_to_pose_w_replanning_and_recovery.xml)에서 recovery 만 바꿨다.
+    - 1초마다 경로를 다시 계산하고 FollowPath 로 따라가는 부분은 같다.
+    - 실패했을 때 제자리 회전(Spin)과 후진(BackUp)을 하지 않는다. costmap 을 비우고 5초 기다린 뒤 다시 한다.
+      사람과 물건이 있는 곳에서 로봇이 스스로 돌거나 뒤로 가지 않게 하려는 것이다.
+    - 7번(처음 + 다시 6번) 실패하면 goal 이 실패한다.
+
+  실패하는 경우
+    - planner: 직선이 지도의 장애물을 지나거나 goal 이 장애물 안 (SimpleLinePlanner 가 거절)
+    - controller: progress checker 시간(movement_time_allowance) 동안 진행이 없음
+      (collision_monitor 가 장애물 앞에 세워 둔 시간 포함)
+-->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+      <PipelineSequence name="NavigateWithReplanning">
+        <RateController hz="1.0">
+          <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+            <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+            <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+          </RecoveryNode>
+        </RateController>
+        <RecoveryNode number_of_retries="1" name="FollowPath">
+          <FollowPath path="{path}" controller_id="FollowPath"/>
+          <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_local_costmap"/>
+        </RecoveryNode>
+      </PipelineSequence>
+      <ReactiveFallback name="RecoveryFallback">
+        <GoalUpdated/>
+        <Sequence name="ClearAndWait">
+          <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
+          <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
+          <Wait wait_duration="5"/>
+        </Sequence>
+      </ReactiveFallback>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>

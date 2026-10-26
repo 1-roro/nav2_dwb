@@ -99,7 +99,7 @@ if (!node->has_parameter("default_nav_through_poses_bt_xml")) {
 cat /opt/ros/humble/share/nav2_bt_navigator/behavior_trees/navigate_through_poses_w_replanning_and_recovery.xml
 ```
 
-goal 하나짜리 `NavigateToPose` 는 `navigate_to_pose_w_replanning_and_recovery.xml` 을 쓴다. 그 안의 주기는 `<RateController hz="1.0">` (1초) 이다. 5장의 waypoint_follower 도 내부에서 `NavigateToPose` 를 쓴다.
+goal 하나짜리 `NavigateToPose` 는 Nav2 기본으로는 `navigate_to_pose_w_replanning_and_recovery.xml` 을 쓰는데, 이 저장소의 launch 는 그것에서 회전, 후진 recovery 만 뺀 `simple_line_bringup/behavior_trees/navigate_to_pose_amr.xml` 로 바꿔 둔다 ([AMR.md 6장](AMR.md#6-막혔을-때-회전-후진-없이-기다리기)). 둘 다 주기는 `<RateController hz="1.0">` (1초) 이다. 5장의 waypoint_follower 도 내부에서 `NavigateToPose` 를 쓴다.
 
 바꾸고 싶으면 이 XML 을 패키지로 복사해 수정한 뒤, `simple_line_params.yaml` 에 경로를 지정한다.
 
@@ -213,7 +213,7 @@ for (size_t i = 0; i < plan_.size(); ++i) {
 컨트롤러는 "goal 까지 거리" 를 두 곳에 쓴다.
 
 - 이 거리가 goal 허용오차(xy_goal_tolerance, 0.05m) 이하이면 → 도착한 것으로 보고 제자리에서 goal yaw 로 회전
-- 이 거리가 `approach_dist`(0.6m) 이하이면 → 감속
+- 이 거리로 감속을 시작한다 (지금 브레이크를 걸면 서는 거리가 남은 거리에 닿을 때, [AMR.md 4-1](AMR.md#4-1-s-커브와-goal-앞-감속-includesimple_line_controllermotion_profilehpp))
 
 **직선 거리로 잴 때의 문제**: 꺾은선에서는 최종 goal 이 **가까이 보여도 아직 돌아야 할 구간이 남아 있을 수 있다.**
 
@@ -330,7 +330,7 @@ final error: xy 0.04 m, yaw 0.7 deg
 ```
 follow_waypoints.py ──(FollowWaypoints: poses[4])──▶ waypoint_follower
    waypoint_follower 가 goal 을 하나씩 꺼내 순서대로
-   ──(NavigateToPose: pose[i])──▶ bt_navigator   (기본 BT: navigate_to_pose_w_replanning_and_recovery.xml, 1초마다 재계획)
+   ──(NavigateToPose: pose[i])──▶ bt_navigator   (navigate_to_pose_amr.xml, 1초마다 재계획)
         ├ ComputePathToPose ──▶ planner_server    → SimpleLinePlanner::createPlan(로봇, goal[i])  : 직선 한 개
         └ FollowPath        ──▶ controller_server → SimpleLineController::computeVelocityCommands : 20Hz 로 cmd_vel
    goal[i] 도착 (위치 0.05m + yaw 0.05rad) → WaitAtWaypoint 0.2초 → goal[i+1] 로

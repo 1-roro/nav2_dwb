@@ -1,13 +1,18 @@
 # simple_line: 직선 경로 planner + controller (ROS 2 Humble, C++)
 
-장애물을 고려하지 않는 가장 단순한 형태의 Nav2 플러그인 두 개와 실행 설정이다.
-길에 장애물이 있으면 Nav2 의 collision_monitor 가 로봇을 세웠다가, 치우면 다시 보낸다 (아래 "장애물 앞에서 멈췄다 가기").
+장애물을 돌아가지 않는 가장 단순한 형태의 Nav2 플러그인 두 개와 실행 설정이다.
+길에 장애물이 있으면 Nav2 의 collision_monitor 가 로봇을 줄이고 세웠다가, 치우면 다시 보낸다 (아래 "장애물 앞에서 멈췄다 가기").
+
+실제 AMR 로 옮기는 데 필요한 것(지도 만들기와 AMCL, 부드러운 가감속, 장애물 감속, 실제 로봇 개발 방식)은
+[AMR.md](AMR.md) 에 정리했다.
 
 ```
 simple_line/
-├── simple_line_planner/      nav2_core::GlobalPlanner  — start → goal 직선 경로
-├── simple_line_controller/   nav2_core::Controller     — pure pursuit + 제자리 회전
-└── simple_line_bringup/      launch, 파라미터, 빈 방 월드(6m x 6m), 여러 goal 경유 스크립트, 장애물 도구
+├── AMR.md                    실제 AMR 로 옮기기 (지도, AMCL, 가감속, 장애물 감속, 개발 방식)
+├── simple_line_planner/      nav2_core::GlobalPlanner  — start → goal 직선 경로 (지도의 장애물을 지나면 거절)
+├── simple_line_controller/   nav2_core::Controller     — pure pursuit + 제자리 회전 + S 커브 가감속
+└── simple_line_bringup/      launch(시뮬레이션 / 내비게이션 / RViz), 파라미터, 빈 방(6m x 6m)과 창고(10m x 8m) 월드와 지도,
+                              navigation BT, 여러 goal 경유 스크립트, 장애물 도구
 ```
 
 ## Planner — `simple_line_planner::SimpleLinePlanner`
@@ -18,10 +23,16 @@ simple_line/
    점 개수는 `ceil(거리 / resolution)` 이라 간격이 resolution 을 넘지 않는다.
 2. 중간 점의 orientation 은 모두 직선의 진행 방향 `atan2(dy, dx)` 이다.
 3. 마지막 점은 goal 그대로다 (goal 의 orientation 유지).
+4. `fail_on_obstacle` 이면 직선이 global costmap 에서 로봇이 닿는 칸(cost 253 이상, 로봇 반지름 안)을 지날 때
+   경로를 만들지 않는다 (`the line crosses an obstacle in the map at (x, y)`). 장애물을 돌아가지는 않는다.
+   로봇이 이미 그런 칸에 서 있으면 출발 쪽의 그 칸들은 빼고 본다. global costmap 은 지도 층만 쓰므로
+   지도에 없는 장애물(사람)은 여기서 보지 않는다 ([AMR.md 3장](AMR.md#3-지도-위에서-점-명령-주기)).
 
 | 파라미터 | 기본값 | 설명 |
 |---|---|---|
 | `interpolation_resolution` | 0.1 | 점 간격 [m] |
+| `fail_on_obstacle` | true | 직선이 지도의 장애물을 지나면 실패 |
+| `allow_unknown` | true | 지도에서 모르는 칸(회색)과 지도 밖은 지나가도 된다 |
 
 ## Controller — `simple_line_controller::SimpleLineController`
 
@@ -46,9 +57,16 @@ simple_line/
    호를 그리며 줄이므로 경로가 휜다. 그래서 다 돈 뒤에 출발해서 직선으로 간다.
    회전 속도는 남은 각도에서 감속해 멈출 수 있는 속도 `sqrt(a·|θ|)` 를 넘지 않는다 (`a` = `max_angular_accel`).
    감속도를 한계의 절반(`a/2`)으로 계획해서, velocity_smoother 를 거치며 생기는 지연에도 목표 방향을 지나치지 않는다.
-4. **제한**
-   - goal 까지 남은 경로 길이가 `approach_dist` 안이면 `v · 거리 / approach_dist` 로 감속 (하한 `min_approach_linear_vel`)
-   - 선가속도 `max_linear_accel`, 제자리 회전 시 각가속도 `max_angular_accel`
+4. **직선 속도 프로파일** (`include/simple_line_controller/motion_profile.hpp`, [AMR.md 4장](AMR.md#4-가감속))
+   - 가속 → 순항 → 감속. 가속도는 `max_linear_accel` / `max_linear_decel`, 가속도가 바뀌는 빠르기는
+     `max_linear_jerk` 로 제한한다 (S 커브).
+   - goal 앞 감속: 지금 브레이크를 걸면 `min_approach_linear_vel` 까지 줄이는 데 가는 거리가 도착 범위까지 남은
+     거리에 닿으면 감속을 시작한다. 그 속도로 도착 범위에 들어가 선다.
+   - 가감속은 바로 전 주기에 낸 명령에서 이어 간다 (odom 의 잡음을 타지 않는다). 새 goal 로 다시 시작할 때만
+     로봇의 실제 속도에서 시작한다.
+   - 달리다가 제자리 회전을 해야 하면(꺾인 경로) 먼저 곧게 감속해서 선 뒤 돈다.
+5. **제한**
+   - 제자리 회전 시 각가속도 `max_angular_accel`
    - `|w|` 가 `max_angular_vel` 을 넘으면 v 도 같은 비율로 줄여 곡률(지나가는 원호)을 유지
    - `setSpeedLimit()` (speed filter 등)이 건 속도 제한 반영
 
@@ -63,10 +81,11 @@ RViz 확인용 토픽: `/simple_line/local_plan` (잘라 낸 경로), `/simple_l
 | `rotate_to_heading_angular_vel` | 1.0 | 제자리 회전 속도 [rad/s] |
 | `rotate_to_heading_tolerance` | 0.03 | 제자리 회전을 끝내는 방향 오차 [rad]. 서 있다가 출발할 때 이보다 틀어져 있으면 먼저 회전 |
 | `rotate_settled_angular_vel` | 0.05 | 회전이 이 각속도 아래로 멈춘 뒤에 출발 [rad/s] |
-| `max_linear_accel` | 0.5 | [m/s²] |
+| `max_linear_accel` | 0.5 | 가속도 [m/s²] |
+| `max_linear_decel` | 0.5 | 감속도 [m/s²] |
+| `max_linear_jerk` | 0.0 | 가속도가 바뀌는 빠르기 [m/s³]. 0 이하면 제한 없음 (사다리꼴). 이 저장소 설정은 1.0 |
 | `max_angular_accel` | 3.2 | [rad/s²] |
-| `approach_dist` | 0.6 | goal 감속 시작 거리 [m] |
-| `min_approach_linear_vel` | 0.05 | 감속 하한 [m/s] |
+| `min_approach_linear_vel` | 0.05 | goal 앞 감속의 하한. 이 속도로 도착 범위에 들어간다 [m/s] |
 | `transform_tolerance` | 0.1 | TF 대기 시간 [s] |
 | `max_robot_pose_search_dist` | -1.0 | 가장 가까운 경로 점을 찾을 범위 [m]. 0 이하면 local costmap 반폭 |
 
@@ -97,12 +116,14 @@ source install/setup.bash
 export TURTLEBOT3_MODEL=waffle
 export GAZEBO_MODEL_PATH=$GAZEBO_MODEL_PATH:/opt/ros/humble/share/turtlebot3_gazebo/models
 
-ros2 launch simple_line_bringup simple_line.launch.py
+ros2 launch simple_line_bringup simple_line.launch.py                        # 빈 방
+ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse       # 창고 (지도 maps/warehouse)
+ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse slam:=True   # 창고 지도를 새로 만들기
 ```
 
-- Gazebo(빈 방) + TurtleBot3 waffle + Nav2 + RViz 가 뜬다. 로봇은 (-2.0, -1.0) 에서 +x 를 보고 시작하고,
-  AMCL 초기 자세도 같은 값으로 설정되어 있다.
-- RViz 의 **Nav2 Goal** 로 목표를 찍으면 된다. Nav2 기본 BT 를 그대로 쓰므로 1초마다 현재 위치에서 직선을 다시 긋는다.
+- Gazebo + TurtleBot3 waffle + Nav2 + RViz 가 뜬다. 빈 방이면 로봇은 (-2.0, -1.0), 창고면 (-4.0, -2.5) 에서
+  +x 를 보고 시작하고, AMCL 초기 자세도 같은 값으로 준다.
+- RViz 의 **Nav2 Goal** 로 목표를 찍으면 된다. 1초마다 현재 위치에서 직선을 다시 긋는다.
 - 터미널에서 보낼 때:
   ```bash
   ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
@@ -111,13 +132,22 @@ ros2 launch simple_line_bringup simple_line.launch.py
 
 | launch 인자 | 기본값 | 설명 |
 |---|---|---|
-| `world` / `map` | 빈 방 | 다른 월드를 쓸 때 (예: turtlebot3_world + 그 맵, 스폰 `-2.0, -0.5`) |
-| `x_pose` / `y_pose` / `yaw` | -2.0 / -1.0 / 0.0 | 스폰 위치 (AMCL 초기 자세도 같이 바뀜) |
+| `world` | `empty_room` | `empty_room`, `warehouse`, 또는 `.world` 파일 경로 |
+| `map` | `maps/<world>.yaml` | 지도 yaml |
+| `slam` | False | True: 지도를 새로 만든다 (slam_toolbox). 저장은 `ros2 run nav2_map_server map_saver_cli -f <이름>` |
+| `x_pose` / `y_pose` / `yaw` | 월드마다 | 스폰 위치 (AMCL 초기 자세도 같이 바뀜) |
 | `headless` / `use_rviz` | False / True | |
 
-`simple_line.launch.py` 는 설치된 Humble 기본 `nav2_params.yaml` 위에
-`params/simple_line_params.yaml` 을 덮어써서 `tb3_simulation_launch.py` 에 넘긴다.
-플러그인 이름을 기본 BT 가 부르는 `GridBased` / `FollowPath` 그대로 두었기 때문에 BT 는 바꾸지 않는다.
+launch 는 두 덩어리다 ([AMR.md 1장](AMR.md#1-launch-구조)).
+
+- `simple_line.launch.py`: 시뮬레이션 로봇(Gazebo, 스폰, robot_state_publisher)을 띄우고 아래 둘을 부른다.
+- `navigation.launch.py`: 로봇과 무관한 내비게이션. SLAM 또는 AMCL, planner / controller / behavior / bt_navigator,
+  collision_monitor, velocity_smoother. 실제 로봇에서도 이 파일을 그대로 쓴다.
+  설치된 Humble 기본 `nav2_params.yaml` 위에 `params/simple_line_params.yaml` 을 덮어쓴다.
+- `rviz.launch.py`: Nav2 기본 RViz 화면에 collision_monitor 의 SlowZone(주황), StopZone(빨강)을 더한다.
+
+플러그인 이름은 BT 가 부르는 `GridBased` / `FollowPath` 그대로다. navigation BT 는 Nav2 기본 트리에서 회전, 후진
+recovery 만 뺀 `behavior_trees/navigate_to_pose_amr.xml` 을 쓴다 ([AMR.md 6장](AMR.md#6-막혔을-때-회전-후진-없이-기다리기)).
 
 goal 에 도착했다고 보는 범위(goal checker)도 줄였다. Humble 기본값(xy 0.25m / yaw 0.25rad)이면 로봇이 goal
 20cm 남짓 앞에서 멈춘다.
@@ -131,15 +161,17 @@ goal 에 도착했다고 보는 범위(goal checker)도 줄였다. Humble 기본
 
 ### 장애물 앞에서 멈췄다 가기 (collision_monitor)
 
-planner 와 controller 는 장애물을 보지 않는다. 대신 launch 가 Nav2 의 `collision_monitor` 를 Nav2 와 로봇 사이에 둔다.
+planner 와 controller 는 지도에 없는 장애물을 보지 않는다. 대신 navigation.launch.py 가 Nav2 의 `collision_monitor` 를
+Nav2 와 velocity_smoother 사이에 둔다.
 
 ```
-Nav2 (velocity_smoother, behavior_server) ──/cmd_vel──▶ collision_monitor ──/cmd_vel_safe──▶ 로봇
+controller_server, behavior_server ─/cmd_vel_nav─▶ collision_monitor ─/cmd_vel_safe─▶ velocity_smoother ─/cmd_vel─▶ 로봇
 ```
 
-- 로봇 앞 0.5 m × 폭 0.5 m 사각형(StopZone, RViz 에 빨간 사각형)에 레이저 점이 들어오면 0 속도를 보낸다. 비면 Nav2 의 속도를 그대로 넘긴다.
+- 로봇 앞 1.0 m x 폭 0.6 m(SlowZone, RViz 주황)에 레이저 점이 들어오면 속도를 0.3 배로, 앞 0.5 m x 폭 0.5 m
+  (StopZone, RViz 빨강)에 들어오면 0 으로 바꾼다. 비면 Nav2 의 속도를 그대로 넘긴다.
+- 그 변화는 velocity_smoother 의 감속도(0.6 m/s²)로 이어져서 로봇이 부드럽게 줄이고 선다 ([AMR.md 5장](AMR.md#5-장애물-앞에서-감속하고-서기)).
 - Nav2 goal 은 취소되지 않는다. 치우면 같은 경로로 다시 간다.
-- launch 는 로봇이 `/cmd_vel_safe` 를 듣도록 `waffle.model` 을 고친 사본으로 스폰한다.
 - 서 있는 시간도 progress checker 에 들어가므로 `movement_time_allowance` 를 30초로 늘렸다 (Humble 기본 10초).
 
 장애물은 `obstacle.py` 로 놓고 치운다 (Gazebo 의 `/spawn_entity`, `/delete_entity` 서비스).
