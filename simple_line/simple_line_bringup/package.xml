@@ -13,9 +13,21 @@
   <exec_depend>simple_line_controller</exec_depend>
   <exec_depend>nav2_bringup</exec_depend>
   <exec_depend>nav2_waypoint_follower</exec_depend>
-  <!-- stop & go: collision_monitor 와 그것만 맡는 lifecycle_manager (launch/simple_line.launch.py) -->
+  <!-- launch/navigation.launch.py 가 띄우는 노드 -->
+  <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>nav2_map_server</exec_depend>
+  <exec_depend>nav2_amcl</exec_depend>
+  <exec_depend>nav2_planner</exec_depend>
+  <exec_depend>nav2_controller</exec_depend>
+  <exec_depend>nav2_behaviors</exec_depend>
+  <exec_depend>nav2_bt_navigator</exec_depend>
   <exec_depend>nav2_collision_monitor</exec_depend>
+  <exec_depend>nav2_velocity_smoother</exec_depend>
   <exec_depend>nav2_lifecycle_manager</exec_depend>
+  <!-- launch/simple_line.launch.py (시뮬레이션), launch/rviz.launch.py -->
+  <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>rviz2</exec_depend>
   <exec_depend>turtlebot3_gazebo</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>

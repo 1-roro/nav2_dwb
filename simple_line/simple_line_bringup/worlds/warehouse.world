@@ -1,0 +1,206 @@
+<?xml version="1.0"?>
+<!-- 10m x 8m warehouse-like room for mapping (slam_toolbox) and AMCL.
+     Two shelf rows, two pillars, a partition and a crate, placed so the room is not symmetric.
+     Robot spawns at (-4, -2.5) facing +x. Map made from it: maps/warehouse.yaml
+
+       y  4 +==========================================+
+            |                         |part.           |
+            |                         |      pillar_1  |
+            |      [====== shelf_a ======]             |
+            |                                          |
+          0 |   pillar_2       [====== shelf_b ======] |
+            |                                          |
+            | robot >                                  |
+            |          crate                           |
+         -4 +==========================================+
+           -5                     0                    5  x
+-->
+<sdf version="1.6">
+  <world name="default">
+
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+
+    <include>
+      <uri>model://sun</uri>
+    </include>
+
+    <scene>
+      <shadows>false</shadows>
+    </scene>
+
+    <gui fullscreen='0'>
+      <camera name='user_camera'>
+        <pose frame=''>0 0 16 0 1.570796 0</pose>
+        <view_controller>orbit</view_controller>
+        <projection_type>perspective</projection_type>
+      </camera>
+    </gui>
+
+    <physics type="ode">
+      <real_time_update_rate>1000.0</real_time_update_rate>
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1</real_time_factor>
+    </physics>
+
+    <model name="walls">
+      <static>true</static>
+      <link name="north">
+        <pose>0 4.05 0.25 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>10.2 0.1 0.5</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>10.2 0.1 0.5</size></box></geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/Grey</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="south">
+        <pose>0 -4.05 0.25 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>10.2 0.1 0.5</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>10.2 0.1 0.5</size></box></geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/Grey</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="east">
+        <pose>5.05 0 0.25 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>0.1 8.2 0.5</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.1 8.2 0.5</size></box></geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/Grey</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="west">
+        <pose>-5.05 0 0.25 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>0.1 8.2 0.5</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.1 8.2 0.5</size></box></geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/Grey</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="warehouse_objects">
+      <static>true</static>
+      <link name="shelf_a">
+        <pose>-1.5 1.8 0.5 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>4 0.8 1</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4 0.8 1</size></box></geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/Wood</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="shelf_b">
+        <pose>1.5 -1.0 0.5 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>4 0.8 1</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>4 0.8 1</size></box></geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/Wood</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="pillar_1">
+        <pose>3.5 2.5 0.5 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>0.4 0.4 1</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.4 0.4 1</size></box></geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/DarkGrey</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="pillar_2">
+        <pose>-3.5 -1.0 0.5 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>0.4 0.4 1</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.4 0.4 1</size></box></geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/DarkGrey</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="partition">
+        <pose>2.0 3.5 0.25 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>0.1 1 0.5</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.1 1 0.5</size></box></geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/Grey</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+      <link name="crate">
+        <pose>-2.0 -3.3 0.25 0 0 0</pose>
+        <collision name="collision">
+          <geometry><box><size>0.6 0.6 0.5</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.6 0.6 0.5</size></box></geometry>
+          <material>
+            <script>
+              <uri>file://media/materials/scripts/gazebo.material</uri>
+              <name>Gazebo/Wood</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>

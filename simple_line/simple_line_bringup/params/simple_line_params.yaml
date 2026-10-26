@@ -1,22 +1,37 @@
-# nav2_bringup/params/nav2_params.yaml (Humble 기본값) 위에 덮어쓸 부분만 적는다.
-# simple_line.launch.py 가 두 파일을 합친다. 'plugin' 키가 있는 항목은 통째로 교체된다.
+# nav2_bringup/params/nav2_params.yaml (Humble 기본값)와 slam_toolbox 의 mapper_params_online_async.yaml 위에
+# 덮어쓸 부분만 적는다. navigation.launch.py 가 합친다. 'plugin' 키가 있는 항목은 통째로 교체된다.
+# use_sim_time 은 launch 인자로 모든 노드에 같이 정한다.
+#
+# 실제 로봇에 옮길 때 먼저 볼 값: [로봇] 표시. 속도/가감속, 로봇 크기, collision_monitor 구역.
 
+# 위치 추정 (slam:=False). Humble 기본값은 레이저를 넓게 봐서(sigma_hit 0.2 m) 창고 월드에서 평균 10 cm 틀렸다.
+# 레이저를 더 믿고 더 자주 고치게 바꿨다. 실제 로봇에서는 odom 이 얼마나 틀리는지(alpha1~5)부터 맞춘다
 amcl:
   ros__parameters:
-    # 스폰 위치. launch 인자 x_pose / y_pose / yaw 로 다시 덮어쓴다.
-    set_initial_pose: true
-    initial_pose:
-      x: -2.0
-      y: -1.0
-      z: 0.0
-      yaw: 0.0
+    sigma_hit: 0.1                         # [로봇] 레이저 거리 오차 표준편차 [m] (기본 0.2)
+    z_hit: 0.8                             # 레이저 측정이 맞을 비중 (기본 0.5)
+    z_rand: 0.2                            # 엉뚱한 측정(사람, 물건)의 비중 (기본 0.5)
+    max_beams: 120                         # 한 번에 쓰는 빔 수 (기본 60)
+    update_min_d: 0.1                      # 이만큼 움직이면 위치를 고친다 [m] (기본 0.25)
+    update_min_a: 0.1                      # 이만큼 돌면 위치를 고친다 [rad] (기본 0.2)
 
 planner_server:
   ros__parameters:
-    # 장애물을 보지 않고 직선을 긋는다. 길에 장애물이 있으면 collision_monitor 가 로봇을 세운다 (아래)
+    # 직선을 긋는다. 직선이 지도의 장애물(global costmap)을 지나면 경로를 만들지 않는다.
+    # 지도에 없는 장애물(사람, 물건)은 보지 않는다. 그것은 collision_monitor 가 맡는다 (아래)
     GridBased:
       plugin: "simple_line_planner::SimpleLinePlanner"
       interpolation_resolution: 0.1        # [m]
+      fail_on_obstacle: true               # 직선이 로봇이 닿는 칸(cost >= 253)을 지나면 실패
+      allow_unknown: true                  # 지도에서 모르는 칸은 지나가도 된다 (지도를 만드는 중에 필요)
+
+# global costmap 은 지도(static_layer)와 그 둘레(inflation)만 쓴다. 레이저로 본 장애물을 넣지 않아서,
+# 길에 사람이 서 있어도 planner 가 실패하지 않고 collision_monitor 가 로봇을 세워 기다린다.
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      plugins: ["static_layer", "inflation_layer"]
+      robot_radius: 0.22                   # [로봇] 로봇 반지름 [m]. 이 안이 cost 253 (닿는 칸)
 
 controller_server:
   ros__parameters:
@@ -29,22 +44,35 @@ controller_server:
     # collision_monitor 가 로봇을 세워 둔 시간도 여기에 들어가므로, 장애물을 기다려 줄 시간으로 정한다 (Humble 기본 10초)
     progress_checker:
       movement_time_allowance: 30.0        # [s]
-    # 장애물을 보지 않는다. 길에 장애물이 있으면 collision_monitor 가 로봇을 세운다 (아래)
     FollowPath:
       plugin: "simple_line_controller::SimpleLineController"
-      desired_linear_vel: 0.25             # [m/s]  (velocity_smoother 상한 0.26)
+      desired_linear_vel: 0.25             # [로봇] 순항 속도 [m/s] (velocity_smoother 상한 0.26)
       max_angular_vel: 1.0                 # [rad/s] (velocity_smoother 상한 1.0)
       lookahead_dist: 0.6                  # [m]
       rotate_to_heading_min_angle: 0.785   # 경로가 이보다 크게 틀어져 있으면 제자리 회전 [rad]
       rotate_to_heading_angular_vel: 1.0   # [rad/s]
       rotate_to_heading_tolerance: 0.03    # 제자리 회전은 방향 오차가 이 안으로 들어올 때까지 계속한다 [rad]
       rotate_settled_angular_vel: 0.05     # 회전이 이 각속도 아래로 멈춘 뒤에 출발한다 [rad/s]
-      max_linear_accel: 0.5                # [m/s^2]
-      max_angular_accel: 3.2               # [rad/s^2]
-      approach_dist: 0.6                   # goal 이 이 거리 안이면 감속 [m]
-      min_approach_linear_vel: 0.05        # [m/s]
+      # 속도 프로파일 (README '가감속'): 가속 → 순항 → goal 까지 남은 거리로 감속해서 선다
+      max_linear_accel: 0.5                # [로봇] [m/s^2]
+      max_linear_decel: 0.5                # [로봇] [m/s^2]. goal 앞 감속 v = sqrt(2·decel·남은 거리)
+      max_linear_jerk: 1.0                 # [로봇] 가속도가 바뀌는 빠르기 [m/s^3]. 0 이면 제한 없음 (사다리꼴)
+      max_angular_accel: 3.2               # [로봇] [rad/s^2]
+      min_approach_linear_vel: 0.05        # goal 바로 앞에서 이 속도 아래로는 줄이지 않는다 [m/s]
       transform_tolerance: 0.1             # [s]
       max_robot_pose_search_dist: -1.0     # 가장 가까운 경로 점을 찾을 범위 [m], <= 0 이면 local costmap 반폭
+
+# 로봇에 가는 마지막 단계의 가감속 제한. controller 의 프로파일보다 조금 넉넉하게 두어 평소에는 손대지 않고,
+# collision_monitor 가 속도를 갑자기 줄이거나 0 으로 바꿀 때 그 변화를 이 가감속으로 이어 준다.
+velocity_smoother:
+  ros__parameters:
+    smoothing_frequency: 20.0              # [Hz] (controller_frequency 와 같게)
+    feedback: "OPEN_LOOP"                  # 자기가 낸 속도에서 이어 간다 (odom 의 잡음을 타지 않는다)
+    max_velocity: [0.26, 0.0, 1.0]         # [로봇] [vx m/s, vy, wz rad/s]
+    min_velocity: [-0.26, 0.0, -1.0]
+    max_accel: [0.6, 0.0, 3.2]             # [로봇] (Humble 기본 2.5 m/s^2 는 사실상 제한 없음)
+    max_decel: [-0.6, 0.0, -3.2]           # [로봇]
+    velocity_timeout: 1.0                  # 입력이 이만큼 끊기면 감속해서 멈춘다 [s]
 
 waypoint_follower:
   ros__parameters:
@@ -57,31 +85,47 @@ waypoint_follower:
       enabled: true
       waypoint_pause_duration: 200         # 각 goal 에 도착한 뒤 기다리는 시간 [ms]
 
-# stop & go: 로봇 앞 정지 구역에 레이저 점이 들어오면 로봇을 세우고, 비면 다시 보낸다 (Nav2 collision_monitor, Humble).
-#   Nav2 (velocity_smoother, behavior_server) --cmd_vel--> collision_monitor --cmd_vel_safe--> 로봇
-# Nav2 goal 은 취소되지 않는다. 그동안 controller 는 계속 cmd_vel 을 내고, collision_monitor 가 0 으로 바꿔 보낸다.
-# simple_line.launch.py 가 이 노드를 띄우고, 로봇(Gazebo diff drive)이 cmd_vel_safe 를 듣게 한다.
+# stop & go (Nav2 collision_monitor, Humble). 안전 레이저 스캐너의 경고 구역 / 보호 구역과 같은 생각이다.
+#   SlowZone 에 레이저 점이 있으면 속도를 slowdown_ratio 배로, StopZone 에 있으면 0 으로 바꾼다.
+#   controller_server, behavior_server --cmd_vel_nav--> collision_monitor --cmd_vel_safe--> velocity_smoother --cmd_vel--> 로봇
+# Nav2 goal 은 취소되지 않는다. 줄인 속도와 0 은 velocity_smoother 의 감속도로 이어져서 로봇이 부드럽게 선다.
 collision_monitor:
   ros__parameters:
-    use_sim_time: true
     base_frame_id: "base_footprint"
     odom_frame_id: "odom"
-    cmd_vel_in_topic: "cmd_vel"
+    cmd_vel_in_topic: "cmd_vel_nav"
     cmd_vel_out_topic: "cmd_vel_safe"
     transform_tolerance: 0.5               # [s]
     source_timeout: 5.0                    # scan 이 이보다 오래되면 버린다. 그러면 막힌 곳이 없는 것으로 본다 (Humble 동작) [s]
     base_shift_correction: true            # scan 이후 로봇이 움직인 만큼 점을 옮겨서 판단한다
     stop_pub_timeout: 2.0                  # 세운 뒤 0 속도를 이 시간 동안 보내고 멈춘다 [s]
-    polygons: ["StopZone"]
+    polygons: ["StopZone", "SlowZone"]
+    # [로봇] 두 구역은 로봇 크기와 속도에 맞춘다. base_footprint 기준 사각형 [x1, y1, x2, y2, ...] [m].
+    # waffle 은 폭 0.31m, 앞면 x=0.07m. 서는 거리 = 반응 지연 x 속도 + 속도^2 / (2 x 감속도) 보다 StopZone 을 길게
     StopZone:
       type: "polygon"
-      # base_footprint 기준 사각형 [x1, y1, x2, y2, ...] [m]. 앞 0.5m, 좌우 0.25m (waffle 폭 0.31m, 앞면 x=0.07m)
-      points: [0.5, 0.25, 0.5, -0.25, 0.0, -0.25, 0.0, 0.25]
+      points: [0.5, 0.25, 0.5, -0.25, 0.0, -0.25, 0.0, 0.25]   # 앞 0.5m, 좌우 0.25m
       action_type: "stop"
-      max_points: 3                        # 구역 안의 점이 이보다 많으면 세운다
+      max_points: 3                        # 구역 안의 점이 이보다 많으면 동작
       visualize: true
-      polygon_pub_topic: "polygon_stop"    # RViz 의 StopZone 표시
+      polygon_pub_topic: "polygon_stop"    # RViz 의 StopZone (빨강)
+    SlowZone:
+      type: "polygon"
+      points: [1.0, 0.3, 1.0, -0.3, 0.0, -0.3, 0.0, 0.3]       # 앞 1.0m, 좌우 0.3m
+      action_type: "slowdown"
+      slowdown_ratio: 0.3                  # 0.25 m/s -> 0.075 m/s
+      max_points: 3
+      visualize: true
+      polygon_pub_topic: "polygon_slow"    # RViz 의 SlowZone (주황)
     observation_sources: ["scan"]
     scan:
       type: "scan"
       topic: "scan"
+
+# 지도 만들기 (slam:=True). 나머지는 slam_toolbox 의 mapper_params_online_async.yaml 기본값
+slam_toolbox:
+  ros__parameters:
+    base_frame: base_footprint
+    scan_topic: /scan
+    resolution: 0.05                       # 지도 한 칸 [m]
+    map_update_interval: 2.0               # RViz 의 지도를 고치는 주기 [s] (기본 5)

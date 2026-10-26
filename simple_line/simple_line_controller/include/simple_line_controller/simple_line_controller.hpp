@@ -16,6 +16,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
 #include "rclcpp_lifecycle/lifecycle_publisher.hpp"
+#include "simple_line_controller/motion_profile.hpp"
 #include "tf2_ros/buffer.h"
 
 namespace simple_line_controller
@@ -30,7 +31,9 @@ namespace simple_line_controller
 //   2. goal 의 xy 에 도착했으면       -> 제자리에서 goal yaw 로 회전
 //      경로 쪽으로 크게 틀어져 있으면  -> 제자리에서 경로 쪽으로 회전
 //      그 외                          -> pure pursuit (곡률 k = 2y / L^2)
-//   3. 가속도 제한, goal 근처 감속, 각속도 상한(곡률 유지) 적용
+//   3. 직선 속도: 가속 → 순항 → goal 까지 남은 거리로 감속 (S 커브, motion_profile.hpp)
+//      각속도: 가속도 제한, 제자리 회전은 남은 각도로 감속, 상한에 걸리면 곡률을 유지하며 v 도 줄인다
+//   가감속은 바로 전 주기에 낸 명령에서 이어 간다 (odom 의 잡음을 타지 않는다).
 class SimpleLineController : public nav2_core::Controller
 {
 public:
@@ -88,14 +91,22 @@ private:
   double rotate_to_heading_tolerance_{0.03};      // 제자리 회전을 끝내는 방향 오차 [rad]
   double rotate_settled_angular_vel_{0.05};       // 회전이 멈췄다고 보는 각속도 [rad/s]
   double max_linear_accel_{0.5};
+  double max_linear_decel_{0.5};
+  double max_linear_jerk_{0.0};                   // 0 이하면 jerk 제한 없음
   double max_angular_accel_{3.2};
-  double approach_dist_{0.6};
-  double min_approach_linear_vel_{0.05};
+  double min_approach_linear_vel_{0.05};          // goal 바로 앞까지 이 속도로 다가간다
   double transform_tolerance_{0.1};
   double max_robot_pose_search_dist_{-1.0};   // <= 0 이면 local costmap 반폭
 
   double control_duration_{0.05};
+  rclcpp::Clock::SharedPtr clock_;
   bool rotating_{false};              // 경로 쪽으로 제자리 회전 중 (방향이 맞을 때까지 계속)
+  bool braking_{false};               // goal 앞에서 감속 중
+  // 바로 전 주기에 낸 명령. 가감속은 여기서 이어 간다
+  Motion motion_;                     // 직선 속도와 가속도
+  double last_w_{0.0};
+  rclcpp::Time last_cmd_time_;
+  bool has_last_cmd_{false};
   double speed_limit_{0.0};           // 0 = 제한 없음
   bool speed_limit_is_percentage_{false};
 

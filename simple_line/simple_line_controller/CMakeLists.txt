@@ -52,6 +52,12 @@ install(TARGETS ${PROJECT_NAME}
 install(DIRECTORY include/ DESTINATION include)
 install(FILES simple_line_controller.xml DESTINATION share/${PROJECT_NAME})
 
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_motion_profile test/test_motion_profile.cpp)
+  target_include_directories(test_motion_profile PRIVATE include)
+endif()
+
 ament_export_include_directories(include)
 ament_export_libraries(${PROJECT_NAME})
 ament_export_dependencies(${dependencies})
