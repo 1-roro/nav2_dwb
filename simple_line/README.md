@@ -1,7 +1,8 @@
 # simple_line: 직선 경로 planner + controller (ROS 2 Humble, C++)
 
 장애물을 돌아가지 않는 가장 단순한 형태의 Nav2 플러그인 두 개와 실행 설정이다.
-길에 장애물이 있으면 Nav2 의 collision_monitor 가 로봇을 줄이고 세웠다가, 치우면 다시 보낸다 (아래 "장애물 앞에서 멈췄다 가기").
+길에 장애물이 있으면 controller 가 그 앞에서 S 커브로 감속해서 서고, 치우면 다시 간다. 너무 가까이 갑자기 나타나면
+Nav2 의 collision_monitor 가 비상 정지한다 (아래 "장애물 앞에서 멈췄다 가기").
 
 실제 AMR 로 옮기는 데 필요한 것(지도 만들기와 AMCL, 부드러운 가감속, 장애물 감속, 실제 로봇 개발 방식)은
 [AMR.md](AMR.md) 에 정리했다.
@@ -65,6 +66,12 @@ simple_line/
    - 가감속은 바로 전 주기에 낸 명령에서 이어 간다 (odom 의 잡음을 타지 않는다). 새 goal 로 다시 시작할 때만
      로봇의 실제 속도에서 시작한다.
    - 달리다가 제자리 회전을 해야 하면(꺾인 경로) 먼저 곧게 감속해서 선 뒤 돈다.
+   - 경로 위 장애물: 경로를 따라가며 양옆 `obstacle_check_width` 안에 local costmap 의 장애물 칸(LETHAL)이 있는
+     첫 지점까지의 거리를 잰다. goal 과 같은 방식으로 그 `obstacle_stop_distance` 앞에 0 으로 서도록 감속한다.
+     장애물이 사라지거나 0.3 m 넘게 멀어지면 다시 S 커브로 가속한다. 서서 기다리던 중이면 그 상태가
+     `obstacle_resume_delay` 동안 이어져야 출발한다.
+   - 명령을 내는데 로봇이 1초 넘게 서 있으면(collision_monitor 의 비상 정지 등) 명령을 `min_approach_linear_vel`
+     로 낮춰 둔다. 풀렸을 때 순항 속도로 튀어 나가지 않는다.
 5. **제한**
    - 제자리 회전 시 각가속도 `max_angular_accel`
    - `|w|` 가 `max_angular_vel` 을 넘으면 v 도 같은 비율로 줄여 곡률(지나가는 원호)을 유지
@@ -86,6 +93,10 @@ RViz 확인용 토픽: `/simple_line/local_plan` (잘라 낸 경로), `/simple_l
 | `max_linear_jerk` | 0.0 | 가속도가 바뀌는 빠르기 [m/s³]. 0 이하면 제한 없음 (사다리꼴). 이 저장소 설정은 1.0 |
 | `max_angular_accel` | 3.2 | [rad/s²] |
 | `min_approach_linear_vel` | 0.05 | goal 앞 감속의 하한. 이 속도로 도착 범위에 들어간다 [m/s] |
+| `obstacle_check` | true | 경로 위 장애물 앞에서 감속해서 서기 |
+| `obstacle_check_width` | 0.3 | 경로 양옆으로 이만큼 안의 장애물을 본다 [m] (로봇 반폭 + 여유) |
+| `obstacle_stop_distance` | 0.4 | 막힌 지점 이만큼 앞에 선다 [m]. 로봇 중심에서 장애물까지 약 width + 이 값 |
+| `obstacle_resume_delay` | 1.0 | 서서 기다리다가 길이 이 시간 동안 계속 비어 있으면 출발 [s] |
 | `transform_tolerance` | 0.1 | TF 대기 시간 [s] |
 | `max_robot_pose_search_dist` | -1.0 | 가장 가까운 경로 점을 찾을 범위 [m]. 0 이하면 local costmap 반폭 |
 
@@ -144,33 +155,38 @@ launch 는 두 덩어리다 ([AMR.md 1장](AMR.md#1-launch-구조)).
 - `navigation.launch.py`: 로봇과 무관한 내비게이션. SLAM 또는 AMCL, planner / controller / behavior / bt_navigator,
   collision_monitor, velocity_smoother. 실제 로봇에서도 이 파일을 그대로 쓴다.
   설치된 Humble 기본 `nav2_params.yaml` 위에 `params/simple_line_params.yaml` 을 덮어쓴다.
-- `rviz.launch.py`: Nav2 기본 RViz 화면에 collision_monitor 의 SlowZone(주황), StopZone(빨강)을 더한다.
+- `rviz.launch.py`: Nav2 기본 RViz 화면에 collision_monitor 의 StopZone(빨강)을 더한다.
 
 플러그인 이름은 BT 가 부르는 `GridBased` / `FollowPath` 그대로다. navigation BT 는 Nav2 기본 트리에서 회전, 후진
 recovery 만 뺀 `behavior_trees/navigate_to_pose_amr.xml` 을 쓴다 ([AMR.md 6장](AMR.md#6-막혔을-때-회전-후진-없이-기다리기)).
 
 goal 에 도착했다고 보는 범위(goal checker)도 줄였다. Humble 기본값(xy 0.25m / yaw 0.25rad)이면 로봇이 goal
-20cm 남짓 앞에서 멈춘다.
+20cm 남짓 앞에서 멈춘다. 그리고 범위 안에 들어온 뒤 **로봇이 멈춰야** 도착으로 본다 (`StoppedGoalChecker`).
+범위만 보면 들어서는 순간 controller_server 가 0 을 보내서, 다가가던 속도(0.05 m/s)가 한 번에 0 이 된다.
 
 | 파라미터 (`controller_server.general_goal_checker`) | Humble 기본 | 여기서 | 설명 |
 |---|---|---|---|
+| `plugin` | `SimpleGoalChecker` | `StoppedGoalChecker` | 범위 + 멈춤 |
 | `xy_goal_tolerance` | 0.25 | 0.05 | goal 위치에서 이 거리 안이면 도착 [m] |
 | `yaw_goal_tolerance` | 0.25 | 0.05 | goal 방향과 이 각도 안이면 도착 [rad] (약 3°) |
+| `trans_stopped_velocity` / `rot_stopped_velocity` | 0.25 / 0.25 | 0.01 / 0.05 | 이보다 느리면 멈춘 것 [m/s], [rad/s] |
 
 더 정확히 서야 하면 더 줄인다. 다만 위치 추정(AMCL) 오차보다 작게 하면 도착 판정이 늦어지거나 안 날 수 있다.
 
-### 장애물 앞에서 멈췄다 가기 (collision_monitor)
+### 장애물 앞에서 멈췄다 가기
 
-planner 와 controller 는 지도에 없는 장애물을 보지 않는다. 대신 navigation.launch.py 가 Nav2 의 `collision_monitor` 를
-Nav2 와 velocity_smoother 사이에 둔다.
+planner 는 지도에 없는 장애물을 보지 않는다 (돌아가지 않는다). 장애물은 두 곳에서 다룬다
+([AMR.md 5장](AMR.md#5-장애물-앞에서-감속하고-서기)).
 
 ```
 controller_server, behavior_server ─/cmd_vel_nav─▶ collision_monitor ─/cmd_vel_safe─▶ velocity_smoother ─/cmd_vel─▶ 로봇
+  경로 위 장애물 앞에서 S 커브 감속             갑자기 막히면 0 (비상)              가속 0.6, 비상 감속 1.0 m/s² 한계
 ```
 
-- 로봇 앞 1.0 m x 폭 0.6 m(SlowZone, RViz 주황)에 레이저 점이 들어오면 속도를 0.3 배로, 앞 0.5 m x 폭 0.5 m
-  (StopZone, RViz 빨강)에 들어오면 0 으로 바꾼다. 비면 Nav2 의 속도를 그대로 넘긴다.
-- 그 변화는 velocity_smoother 의 감속도(0.6 m/s²)로 이어져서 로봇이 부드럽게 줄이고 선다 ([AMR.md 5장](AMR.md#5-장애물-앞에서-감속하고-서기)).
+- **평소 (controller)**: local costmap(레이저)에서 경로 위 장애물까지 거리를 재고, goal 과 같은 S 커브로 감속해서
+  로봇 중심에서 장애물까지 약 0.7 m 를 두고 선다. 치우면 1~2초 뒤 다시 S 커브로 가속한다.
+- **비상 (collision_monitor)**: 로봇 앞 0.5 m x 폭 0.5 m(StopZone, RViz 빨강)에 레이저 점이 들어오면 0 으로 바꾼다.
+  controller 가 서기에는 너무 가까이 갑자기 나타났을 때만 동작한다. velocity_smoother 가 1.0 m/s² 로 세운다.
 - Nav2 goal 은 취소되지 않는다. 치우면 같은 경로로 다시 간다.
 - 서 있는 시간도 progress checker 에 들어가므로 `movement_time_allowance` 를 30초로 늘렸다 (Humble 기본 10초).
 

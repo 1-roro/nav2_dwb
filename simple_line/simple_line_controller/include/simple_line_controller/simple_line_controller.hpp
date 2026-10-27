@@ -2,6 +2,7 @@
 #define SIMPLE_LINE_CONTROLLER__SIMPLE_LINE_CONTROLLER_HPP_
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -32,6 +33,7 @@ namespace simple_line_controller
 //      경로 쪽으로 크게 틀어져 있으면  -> 제자리에서 경로 쪽으로 회전
 //      그 외                          -> pure pursuit (곡률 k = 2y / L^2)
 //   3. 직선 속도: 가속 → 순항 → goal 까지 남은 거리로 감속 (S 커브, motion_profile.hpp)
+//      경로 위에 장애물(local costmap)이 있으면 그 앞 obstacle_stop_distance 에 서도록 같은 방식으로 감속
 //      각속도: 가속도 제한, 제자리 회전은 남은 각도로 감속, 상한에 걸리면 곡률을 유지하며 v 도 줄인다
 //   가감속은 바로 전 주기에 낸 명령에서 이어 간다 (odom 의 잡음을 타지 않는다).
 class SimpleLineController : public nav2_core::Controller
@@ -71,6 +73,11 @@ private:
     geometry_msgs::msg::PoseStamped & out) const;
   // global 경로를 잘라내고, local costmap 범위 안의 경로를 로봇 좌표계로 반환
   std::vector<Pose2D> localPlan(const Pose2D & robot);
+  // 경로(로봇 좌표계)를 따라 로봇에서 처음으로 막힌 점까지의 거리 [m]. 막힌 점 = 반경
+  // obstacle_check_width 안에 local costmap 의 장애물 칸이 있는 점. 없으면 무한대.
+  // pose 는 local costmap frame(odom)의 로봇 위치
+  double obstacleDistanceOnPath(
+    const std::vector<Pose2D> & local, const geometry_msgs::msg::PoseStamped & pose) const;
   void publishLocalPlan(
     const std::vector<Pose2D> & local, const builtin_interfaces::msg::Time & stamp);
 
@@ -95,6 +102,10 @@ private:
   double max_linear_jerk_{0.0};                   // 0 이하면 jerk 제한 없음
   double max_angular_accel_{3.2};
   double min_approach_linear_vel_{0.05};          // goal 바로 앞까지 이 속도로 다가간다
+  bool obstacle_check_{true};                     // 경로 위 장애물 앞에서 감속해서 서기
+  double obstacle_check_width_{0.3};              // 경로 양옆으로 이만큼 안의 장애물을 본다 [m]
+  double obstacle_stop_distance_{0.4};            // 막힌 점 이만큼 앞에 선다 [m]
+  double obstacle_resume_delay_{1.0};             // 서서 기다리다가 길이 이만큼 비어 있으면 출발 [s]
   double transform_tolerance_{0.1};
   double max_robot_pose_search_dist_{-1.0};   // <= 0 이면 local costmap 반폭
 
@@ -102,6 +113,10 @@ private:
   rclcpp::Clock::SharedPtr clock_;
   bool rotating_{false};              // 경로 쪽으로 제자리 회전 중 (방향이 맞을 때까지 계속)
   bool braking_{false};               // goal 앞에서 감속 중
+  bool obstacle_braking_{false};      // 경로 위 장애물 앞에서 감속 중 (또는 서서 기다리는 중)
+  bool held_{false};                  // 명령을 내는데 로봇이 서 있다 (collision_monitor, 비상정지 등)
+  rclcpp::Time held_since_;
+  std::optional<rclcpp::Time> clear_since_;   // 경로 위 장애물이 사라진 때 (다시 막히면 비운다)
   // 바로 전 주기에 낸 명령. 가감속은 여기서 이어 간다
   Motion motion_;                     // 직선 속도와 가속도
   double last_w_{0.0};

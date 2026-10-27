@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "nav2_core/exceptions.hpp"
+#include "nav2_costmap_2d/cost_values.hpp"
 #include "nav2_costmap_2d/costmap_filters/filter_values.hpp"
 #include "nav2_util/node_utils.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
@@ -74,6 +75,12 @@ void SimpleLineController::configure(
   param("max_linear_jerk", max_linear_jerk_);
   param("max_angular_accel", max_angular_accel_);
   param("min_approach_linear_vel", min_approach_linear_vel_);
+  param("obstacle_check_width", obstacle_check_width_);
+  param("obstacle_stop_distance", obstacle_stop_distance_);
+  param("obstacle_resume_delay", obstacle_resume_delay_);
+  nav2_util::declare_parameter_if_not_declared(
+    node, plugin_name_ + ".obstacle_check", rclcpp::ParameterValue(obstacle_check_));
+  node->get_parameter(plugin_name_ + ".obstacle_check", obstacle_check_);
   param("transform_tolerance", transform_tolerance_);
   param("max_robot_pose_search_dist", max_robot_pose_search_dist_);
 
@@ -162,6 +169,56 @@ std::vector<SimpleLineController::Pose2D> SimpleLineController::localPlan(const 
   return local;
 }
 
+double SimpleLineController::obstacleDistanceOnPath(
+  const std::vector<Pose2D> & local, const geometry_msgs::msg::PoseStamped & pose) const
+{
+  auto * costmap = costmap_ros_->getCostmap();
+  std::unique_lock<nav2_costmap_2d::Costmap2D::mutex_t> lock(*costmap->getMutex());
+  const double yaw = yawOf(pose.pose.orientation);
+  const double c = std::cos(yaw);
+  const double s = std::sin(yaw);
+  const int r = static_cast<int>(std::ceil(obstacle_check_width_ / costmap->getResolution()));
+  const int size_x = static_cast<int>(costmap->getSizeInCellsX());
+  const int size_y = static_cast<int>(costmap->getSizeInCellsY());
+
+  // 경로 점(planner 간격, 0.1 m) 사이도 costmap 칸 간격으로 본다. 경로 점에서만 보면 경로를 다시 계산할 때마다
+  // 점의 위치가 바뀌어 거리가 0.1 m 씩 튄다. 서서 기다리다 길이 빈 것으로 보고 움찔 다시 가는 일이 생겼다
+  const double step = costmap->getResolution();
+  double travelled = 0.0;
+  Pose2D prev;                        // 로봇 (로봇 좌표계의 원점)
+  for (const auto & p : local) {
+    const double seg = std::hypot(p.x - prev.x, p.y - prev.y);
+    const int n = std::max(1, static_cast<int>(std::ceil(seg / step)));
+    for (int k = 1; k <= n; ++k) {
+      const double f = static_cast<double>(k) / n;
+      const double x = prev.x + f * (p.x - prev.x);
+      const double y = prev.y + f * (p.y - prev.y);
+      unsigned int mx = 0;
+      unsigned int my = 0;
+      if (!costmap->worldToMap(
+          pose.pose.position.x + c * x - s * y, pose.pose.position.y + s * x + c * y, mx, my))
+      {
+        return std::numeric_limits<double>::infinity();   // local costmap 밖은 모른다
+      }
+      for (int dx = -r; dx <= r; ++dx) {
+        for (int dy = -r; dy <= r; ++dy) {
+          const int cx = static_cast<int>(mx) + dx;
+          const int cy = static_cast<int>(my) + dy;
+          if (dx * dx + dy * dy > r * r || cx < 0 || cy < 0 || cx >= size_x || cy >= size_y) {
+            continue;
+          }
+          if (costmap->getCost(cx, cy) == nav2_costmap_2d::LETHAL_OBSTACLE) {
+            return travelled + f * seg;
+          }
+        }
+      }
+    }
+    travelled += seg;
+    prev = p;
+  }
+  return std::numeric_limits<double>::infinity();
+}
+
 geometry_msgs::msg::TwistStamped SimpleLineController::computeVelocityCommands(
   const geometry_msgs::msg::PoseStamped & pose,
   const geometry_msgs::msg::Twist & velocity,
@@ -230,6 +287,24 @@ geometry_msgs::msg::TwistStamped SimpleLineController::computeVelocityCommands(
   const double w0 = continuing ? last_w_ : velocity.angular.z;
   const MotionLimits lin{max_linear_accel_, max_linear_decel_, max_linear_jerk_};
 
+  // 명령을 내는데 로봇이 1초 넘게 서 있으면(collision_monitor 의 StopZone, 비상정지, 무언가에 걸림)
+  // 명령을 저속(min_approach_linear_vel)으로 낮춰 둔다. 막힌 것이 풀렸을 때 순항 속도로 튀어 나가지
+  // 않고 저속에서 S 커브로 다시 가속한다
+  const double creep = std::min(min_approach_linear_vel_, desired_linear_vel_);
+  if (std::fabs(velocity.linear.x) >= 0.02) {
+    held_ = false;
+  } else if (continuing && m.v > creep + 0.01 && !held_) {
+    held_ = true;
+    held_since_ = now;
+  }
+  const bool held_long = held_ && (now - held_since_).seconds() > 1.0;
+  if (held_long && m.v > creep) {
+    RCLCPP_INFO_THROTTLE(
+      logger_, *clock_, 5000, "robot is not moving with %.2f m/s commanded, holding at %.2f m/s",
+      m.v, creep);
+    m = Motion{creep, 0.0};
+  }
+
   auto limit_w = [&](double w) {
       return std::clamp(w, w0 - max_angular_accel_ * dt, w0 + max_angular_accel_ * dt);
     };
@@ -247,8 +322,10 @@ geometry_msgs::msg::TwistStamped SimpleLineController::computeVelocityCommands(
   //   - 서 있는 상태에서 출발할 때 방향이 rotate_to_heading_tolerance 보다 틀어져 있을 때
   // 한 번 시작하면 방향 오차가 rotate_to_heading_tolerance 안으로 들어오고 회전이 멈출 때까지 계속한다.
   // 덜 돈 채로 출발하면 남은 오차를 pure pursuit 가 호를 그리며 줄여서 경로가 휜다.
+  // 장애물 앞에서 기다리는 동안에는 시작하지 않는다. collision_monitor 가 로봇을 세워 두면 회전 명령이
+  // 로봇에 닿지 않아 오차와 함께 커지기만 하고, 풀리는 순간 그 각속도가 한 번에 나간다
   const bool stopped = std::fabs(velocity.linear.x) < 0.01;
-  if (!rotating_ &&
+  if (!rotating_ && !obstacle_braking_ &&
     (std::fabs(carrot_angle) > rotate_to_heading_min_angle_ ||
     (stopped && std::fabs(carrot_angle) > rotate_to_heading_tolerance_)))
   {
@@ -290,7 +367,47 @@ geometry_msgs::msg::TwistStamped SimpleLineController::computeVelocityCommands(
     if (need >= to_stop) {
       braking_ = true;
     }
-    m = stepToward(m, braking_ ? v_end : v_max, lin, dt);
+    double target = braking_ ? v_end : v_max;
+
+    // 경로 위 장애물: goal 과 같은 방식으로, 막힌 점 obstacle_stop_distance 앞에 0 으로 서도록 감속한다.
+    // 장애물이 사라지면(local costmap 에서 지워지면) 다시 S 커브로 가속한다. 서서 기다리던 중이면
+    // 길이 obstacle_resume_delay 동안 계속 비어 있어야 출발한다 (안전 스캐너의 재시작 지연과 같은 생각)
+    if (obstacle_check_) {
+      const double obstacle = obstacleDistanceOnPath(local, pose);
+      const double to_obstacle = obstacle - obstacle_stop_distance_ - m.v * dt;
+      const double need_stop = brakingDistance(m, 0.0, lin, dt);
+      const bool was_braking = obstacle_braking_;
+      // 감속을 푸는 것은 장애물이 0.3 m 넘게 멀어졌거나 사라졌을 때. costmap 칸이 한두 칸(5~10 cm) 흔들리거나
+      // 필요보다 조금 일찍 감속을 시작해서 생긴 여유로는 풀지 않는다 (풀었다가 다시 감속하는 꿀렁임이 생겼다)
+      const bool clear = to_obstacle > need_stop + 0.3;
+      if (!clear) {
+        clear_since_.reset();
+      } else if (!clear_since_) {
+        clear_since_ = now;
+      }
+      if (obstacle_braking_ && clear &&
+        (m.v > 0.01 || (now - *clear_since_).seconds() >= obstacle_resume_delay_))
+      {
+        obstacle_braking_ = false;
+      }
+      if (need_stop >= to_obstacle) {
+        obstacle_braking_ = true;
+      }
+      if (obstacle_braking_ != was_braking) {
+        if (obstacle_braking_) {
+          RCLCPP_INFO(logger_, "obstacle on the path %.2f m ahead, slowing down to stop", obstacle);
+        } else {
+          RCLCPP_INFO(logger_, "path clear, going again");
+        }
+      }
+      if (obstacle_braking_) {
+        target = 0.0;
+      }
+    }
+    if (held_long) {
+      target = std::min(target, creep);
+    }
+    m = stepToward(m, target, lin, dt);
     m.v = std::max(m.v, 0.0);
 
     w = m.v * curvature;

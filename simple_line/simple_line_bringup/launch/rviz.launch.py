@@ -1,5 +1,5 @@
 """
-RViz: Nav2 기본 화면에 collision_monitor 의 SlowZone(주황)과 StopZone(빨강)을 더한다.
+RViz: Nav2 기본 화면에 collision_monitor 의 StopZone(빨강)을 더한다.
 
   ros2 launch simple_line_bringup rviz.launch.py                     # 실제 로봇에 붙어서 (개발 PC)
   ros2 launch simple_line_bringup rviz.launch.py use_sim_time:=True  # 시뮬레이션 (simple_line.launch.py 가 띄운다)
@@ -15,7 +15,7 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 import yaml
 
-ZONES = (('SlowZone', '/polygon_slow', '255; 160; 0'), ('StopZone', '/polygon_stop', '255; 0; 0'))
+ZONES = (('StopZone', '/polygon_stop', '255; 0; 0'),)
 
 
 def launch_setup(context):
