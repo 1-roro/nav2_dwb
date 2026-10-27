@@ -14,7 +14,7 @@ digraph layers {
   L1 [label=<<b>상위 작업 계층</b><br/>무엇을, 어떤 순서로,<br/>실패하면 어떻게>];
   L2 [label=<<b>bt_navigator</b><br/>goal 까지 어떻게 갈지<br/>(내부 BT: 재계획, recovery)>];
   L3 [label=<<b>서버</b><br/>경로 계산, 경로 추종,<br/>제자리 동작>];
-  L4 [label=<<b>속도 관문</b> (6장)<br/>앞이 막히면 줄이거나 0,<br/>가감속 제한>];
+  L4 [label=<<b>속도 관문</b> (6장)<br/>갑자기 막히면 비상 정지,<br/>가감속 한계>];
   L5 [label=""];
   L0 -> L1 -> L2 -> L3 -> L4 -> L5 [style=invis];
 
@@ -27,13 +27,13 @@ digraph layers {
       fillcolor="#cde2fb", color="#2a78d6"];
   planner [label=<<b>planner_server</b><br/><font point-size="10">GridBased = SimpleLinePlanner (이 저장소)</font>>,
            fillcolor="#cde2fb", color="#2a78d6"];
-  controller [label=<<b>controller_server</b><br/><font point-size="10">FollowPath = SimpleLineController (이 저장소)</font>>,
+  controller [label=<<b>controller_server</b><br/><font point-size="10">FollowPath = SimpleLineController (이 저장소)<br/>S 커브 가감속, 장애물 앞 감속</font>>,
               fillcolor="#cde2fb", color="#2a78d6"];
   behavior [label=<<b>behavior_server</b><br/><font point-size="10">spin, wait, backup ...</font>>,
             fillcolor="#cde2fb", color="#2a78d6"];
-  cm [label=<<b>collision_monitor</b><br/><font point-size="10">SlowZone 에 레이저 점: 0.3배<br/>StopZone 에 레이저 점: 0</font>>,
+  cm [label=<<b>collision_monitor</b><br/><font point-size="10">StopZone 에 레이저 점: 0 (비상)</font>>,
       fillcolor="#cde2fb", color="#2a78d6"];
-  smoother [label=<<b>velocity_smoother</b><br/><font point-size="10">가감속 0.6 m/s² 로 잇는다</font>>,
+  smoother [label=<<b>velocity_smoother</b><br/><font point-size="10">가속 0.6, 비상 감속 1.0 m/s² 한계</font>>,
       fillcolor="#cde2fb", color="#2a78d6"];
   robot [label=<<b>로봇</b><br/><font point-size="10">/cmd_vel 을 받아 움직인다</font>>,
          fillcolor="#f0efec", color="#52514e"];

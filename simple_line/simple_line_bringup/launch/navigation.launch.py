@@ -15,8 +15,9 @@
 속도가 로봇까지 가는 길
   controller_server, behavior_server --cmd_vel_nav--> collision_monitor --cmd_vel_safe-->
   velocity_smoother --cmd_vel--> 로봇
-  collision_monitor 는 앞이 막히면 속도를 줄이거나(SlowZone) 0 으로(StopZone) 바꾸고,
-  velocity_smoother 가 가감속 제한을 걸어 로봇에 가는 속도가 갑자기 바뀌지 않게 한다.
+  장애물 앞 감속은 controller 가 경로 위 장애물까지의 거리로 S 커브를 그려 하고, collision_monitor 는
+  갑자기 나타난 것이 StopZone 에 들어올 때만 0 으로 바꾸는 비상 정지다. velocity_smoother 는
+  로봇이 낼 수 있는 가감속 한계를 지킨다.
 
 로봇이 줘야 하는 것: /scan, /odom, TF odom -> base_footprint -> base_scan, /cmd_vel 을 받아 움직이기.
 
