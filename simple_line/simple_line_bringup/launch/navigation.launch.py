@@ -16,8 +16,8 @@
   controller_server, behavior_server --cmd_vel_nav--> collision_monitor --cmd_vel_safe-->
   velocity_smoother --cmd_vel--> 로봇
   장애물 앞 감속은 controller 가 경로 위 장애물까지의 거리로 S 커브를 그려 하고, collision_monitor 는
-  갑자기 나타난 것이 StopZone 에 들어올 때만 0 으로 바꾸는 비상 정지다. velocity_smoother 는
-  로봇이 낼 수 있는 가감속 한계를 지킨다.
+  지금 명령대로 움직이면 곧 부딪힐 때만 줄이거나 세우는 비상 정지다 (회전, 멀어지는 방향은 막지 않는다).
+  velocity_smoother 는 로봇이 낼 수 있는 가감속 한계를 지킨다.
 
 로봇이 줘야 하는 것: /scan, /odom, TF odom -> base_footprint -> base_scan, /cmd_vel 을 받아 움직이기.
 

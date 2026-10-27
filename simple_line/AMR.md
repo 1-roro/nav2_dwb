@@ -8,7 +8,7 @@
 | 2 | 지도 만들기(SLAM)와 저장한 지도에서 위치 추정(AMCL) | 창고 월드 `worlds/warehouse.world`, 지도 `maps/warehouse.*`, AMCL 설정 |
 | 3 | 지도 위에서 점 명령 주기 | planner 가 지도의 장애물을 지나는 직선을 거절 (`fail_on_obstacle`) |
 | 4 | 가감속 알고리즘 정리와 선택 | controller 의 S 커브 속도 프로파일, velocity_smoother 는 한계와 비상 감속만 |
-| 5 | 장애물 앞에서 감속하고 서기 | controller 가 경로 위 장애물까지 거리로 S 커브 감속. collision_monitor 는 비상 정지(StopZone)만 |
+| 5 | 장애물 앞에서 감속하고 서기 | controller 가 경로 위 장애물까지 거리로 S 커브 감속. collision_monitor 는 움직이는 방향만 보는 비상 감속(approach) |
 | 6 | 막혔을 때 로봇이 스스로 돌거나 뒤로 가지 않게 | navigation BT `behavior_trees/navigate_to_pose_amr.xml` |
 | 7 | 실제 로봇 개발은 보통 어떻게 하나 | (설명) |
 | 8 | 확인한 것 | |
@@ -215,7 +215,7 @@ task> inspect:5 -4,3.2,90
 | 어디서 | 방법 | 언제 | 설정 |
 |---|---|---|---|
 | **controller** (`SimpleLineController`) | S 커브 + 거리 기반 브레이크. 가속 → 순항 → goal 이나 경로 위 장애물 앞에서 감속해서 선다 | 평소 전부 | `max_linear_accel` 0.5, `max_linear_decel` 0.5, `max_linear_jerk` 1.0 |
-| **collision_monitor** (Nav2) | StopZone 에 레이저 점이 들어오면 0 | controller 가 서기에 너무 가까이 갑자기 나타났을 때 | `StopZone` 앞 0.5 m |
+| **collision_monitor** (Nav2) | 로봇 둘레 원을 지금 명령대로 1.2초 움직여 보고, 닿으면 닿기까지 남은 시간에 비례해 줄이거나 0 (approach) | controller 가 서기에 너무 가까이 갑자기 나타났을 때 | `Footprint` 원 0.3 m, 1.2 s |
 | **velocity_smoother** (Nav2) | 직선 (가속도 제한). 평소에는 controller 보다 넉넉해서 손대지 않고, 비상 정지를 1.0 m/s² 로 잇는다 | 마지막 한계 | `max_accel` 0.6, `max_decel` -1.0 |
 | **모터 드라이버** (로봇) | 바퀴 속도 제어. 대개 자체 ramp 와 전류 제한이 있다 | 항상 | 드라이버 설정 |
 
@@ -256,7 +256,7 @@ task> inspect:5 -4,3.2,90
 ### 4-4. 알아둘 것
 
 - **회전은 아직 사다리꼴이다.** 제자리 회전(경로 쪽으로, goal 방향으로)은 각가속도 제한(3.2 rad/s²)과 남은 각도로 감속(`sqrt(a · 남은 각)`)만 한다. goal 에서 몇 도를 맞출 때도 0.2~0.6 rad/s 의 짧은 회전이 나오고, 한 번 지나쳐 되돌아온 적도 있다 (5장의 비상 정지 시험 끝). 회전 관성이 큰 로봇이면 같은 S 커브를 각속도에도 쓰는 것이 다음 단계다.
-- **두 타이머**: velocity_smoother 는 controller 의 명령을 자기 20 Hz 타이머로 다시 읽어서 낸다. 두 타이머의 위상이 어긋나면 같은 값을 두 번 내고 다음에 두 칸을 건너뛴다 (예: 0.025, 0.025, 0.0075). 가속도 한계는 넘지 않지만 메시지 사이 jerk 가 가끔 7~10 m/s³ 로 튄다. 시뮬레이션은 시계가 10 Hz 라 더 잦다. 실제 로봇에서는 모터 드라이버가 보간해서 거의 느껴지지 않는다. 그래도 거슬리면 velocity_smoother 를 빼고 controller → collision_monitor → 로봇으로 보내고, 비상 정지의 감속은 모터 드라이버의 ramp(감속 정지 기능)에 맡기는 구성도 쓴다.
+- **두 타이머**: velocity_smoother 는 controller 의 명령을 자기 20 Hz 타이머로 다시 읽어서 낸다. 두 타이머의 위상이 어긋나면 같은 값을 두 번 내고 다음에 두 칸을 건너뛴다 (예: 0.025, 0.025, 0.0075). 0.1초로 재면 가속도 한계 안이지만, 메시지 사이로 재면 jerk 가 7~19 m/s³, 가속도가 두 배(0.95)로 보이기도 한다. 이 시뮬레이션은 Gazebo 시계가 10 Hz 라서 두 타이머가 0.1초마다 두 번씩 몰아서 돌아 특히 잦다. 실제 로봇에서는 모터 드라이버가 보간해서 거의 느껴지지 않는다. 그래도 거슬리면 velocity_smoother 를 빼고 controller → collision_monitor → 로봇으로 보내고, 비상 정지의 감속은 모터 드라이버의 ramp(감속 정지 기능)에 맡기는 구성도 쓴다.
 - **20 Hz 계단**: 명령은 20 Hz 로 나가서 50 ms 마다 조금씩 바뀌는 계단이다. 실제 모터 드라이버는 그 사이를 수백 Hz~1 kHz 로 보간해서 매끄럽게 만든다. 시뮬레이션에서 velocity_smoother 를 50 Hz 로 올려 봤지만 입력이 20 Hz 라 계단이 남고 오히려 짧은 펄스가 생겨서, controller 와 같은 20 Hz 로 두었다.
 - **도착 정확도는 위치 추정이 정한다.** controller 는 AMCL 이 말하는 위치로 선다. 빈 방(특징이 적은 대칭 공간)에서는 AMCL 이 7 cm 틀려서 실제로는 goal 에서 7 cm 떨어져 섰다. 창고 월드에서 AMCL 을 맞춘 뒤에는 0~6 cm 였다 (8장).
 
@@ -264,51 +264,71 @@ task> inspect:5 -4,3.2,90
 
 ## 5. 장애물 앞에서 감속하고 서기
 
-평소에는 **controller** 가 경로 위 장애물까지 남은 거리로 S 커브 감속해서 그 앞에 선다 (goal 앞에서 서는 것과 같은 계산). collision_monitor 는 controller 가 서기에는 너무 가까이 갑자기 나타났을 때만 세우는 **비상 정지**다.
+평소에는 **controller** 가 경로 위 장애물까지 남은 거리로 S 커브 감속해서 그 앞에 선다 (goal 앞에서 서는 것과 같은 계산). collision_monitor 는 controller 가 서기에는 너무 가까이 갑자기 나타났을 때만 줄이거나 세우는 **비상 감속**이다. 로봇이 지금 명령대로 움직이면 부딪히는지를 보므로, 장애물 앞에서도 돌아서 나가는 회전은 막지 않는다 (5-2).
 
 ![obstacle braking](doc/obstacle_braking.png)
 
 빈 방, goal (1,-1) 로 가는 길에 반지름 0.15 m 원기둥. 아래 줄은 로봇에 간 명령(`/cmd_vel`)의 가속도다.
 
-| | 이전: SlowZone 0.3배 → StopZone | 지금: controller S 커브 | 갑자기 0.4 m 앞에: StopZone 비상 정지 |
+| | 이전: SlowZone 0.3배 → StopZone | 지금: controller S 커브 | 갑자기 0.4 m 앞에: collision_monitor 비상 감속 |
 |---|---|---|---|
-| 감속 시작 | 장애물이 앞 0.97 m 구역에 들어올 때 | 필요한 거리에서 (로봇 중심 → 장애물 0.80 m) | StopZone 에 들어온 순간 |
-| 로봇에 간 명령 | 가속도 0 → -0.6 이 한 주기에 (jerk 12 m/s³) | 가속도 0 → -0.5 → 0 (jerk 1.0 m/s³) | 가속도 -1.0 (jerk 20 m/s³) |
-| 서기까지 | 0.075 m/s 로 6초 기어간 뒤 0.17초 | 0.82초, 10.0 cm | 0.27초, 2.6 cm |
-| 선 자리 (로봇 중심 → 장애물 표면) | 0.49 m | 0.70 m (StopZone 끝에서 0.20 m 밖) | 0.32 m |
-| 치운 뒤 | 0.6 m/s² 직선으로 가속 | 1.6초 뒤 S 커브로 가속 | 1.8초 뒤 S 커브로 가속 |
+| 감속 시작 | 장애물이 앞 0.97 m 구역에 들어올 때 | 필요한 거리에서 (로봇 중심 → 장애물 0.80 m) | 원(0.3 m)이 1.2초 안에 닿게 된 순간 |
+| 로봇에 간 명령 | 가속도 0 → -0.6 이 한 주기에 (jerk 12 m/s³) | 가속도 0 → -0.5 → 0 (jerk 1.0 m/s³) | 가속도 -1.0 으로 0.05 m/s 까지 (jerk 20 m/s³), 그 뒤 0.03 m/s 로 다가감 |
+| 서기까지 | 0.075 m/s 로 6초 기어간 뒤 0.17초 | 0.82초, 10.0 cm | 0.95초, 5.0 cm |
+| 선 자리 (로봇 중심 → 장애물 표면) | 0.49 m | 0.70 m (collision_monitor 는 동작 안 함) | 0.33 m |
+| 치운 뒤 | 0.6 m/s² 직선으로 가속 | 1.6초 뒤 S 커브로 가속 | 1.9초 뒤 S 커브로 가속 |
 
-"지금" 은 출발부터 도착까지 controller 명령이 가속도 ±0.50 m/s², jerk 1.04 m/s³ 이하였다. 로봇에 간 명령도 가속도는 ±0.50 안이었지만, goal 바로 앞에서 한 번 메시지 사이 jerk 가 7 로 튀었다 (4-4 의 두 타이머). 기다리는 8초 동안 로봇은 움직이지 않았고(최대 0.003 m/s), collision_monitor 는 한 번도 동작하지 않았다.
+"지금" 은 출발부터 도착까지 controller 명령이 가속도 ±0.50 m/s², jerk 1.04 m/s³ 이하였다. 로봇에 간 명령은 velocity_smoother 가 값을 다시 읽는 탓에 메시지 사이 jerk 가 가끔 튀었다 (4-4 의 두 타이머. 같은 시험을 다시 했을 때는 두 칸을 한 번에 내서 메시지 사이 가속도가 -0.95 로 보이기도 했다). 기다리는 8초 동안 로봇은 움직이지 않았고(최대 0.003 m/s), collision_monitor 는 한 번도 동작하지 않았다.
 
 ### 5-1. controller 가 하는 일 (`SimpleLineController`)
 
-1. **장애물까지 거리**: 경로를 따라 costmap 칸(5 cm) 간격으로 가면서, 양옆 `obstacle_check_width`(0.3 m) 안에 local costmap 의 장애물 칸(LETHAL, 레이저로 본 것)이 있는 첫 지점까지의 경로 길이를 잰다. 직선 거리가 아니라 경로를 따라 잰다.
+1. **장애물까지 거리**: 경로를 따라 costmap 칸(5 cm) 간격으로 가면서, 양옆 `obstacle_check_width`(0.3 m) 안에 local costmap 의 장애물 칸(LETHAL, 레이저로 본 것)이 있는 첫 지점까지의 경로 길이를 잰다. 직선 거리가 아니라 경로를 따라 잰다. 로봇(회전 중심)보다 뒤에 있는 칸은 보지 않는다. 처음에는 경로의 첫 점(로봇 자리) 둘레까지 봐서, 장애물을 등지고 돌아선 뒤에도 등 뒤 0.33 m 의 그 장애물을 "앞에 있다" 고 보고 출발하지 않았다.
 2. **언제 감속하나**: goal 과 같다. `brakingDistance()` 로 0 까지 서는 거리를 굴려 보고, 그것이 `장애물 거리 - obstacle_stop_distance`(0.4 m)에 닿으면 목표 속도를 0 으로 한다. 그래서 장애물이 멀면 순항 속도 그대로 가다가 필요한 거리에서만 감속한다.
 3. **다시 가기**: 장애물이 사라지거나 0.3 m 넘게 멀어지면 감속을 풀고 S 커브로 다시 가속한다. 서서 기다리던 중이면 그 상태가 `obstacle_resume_delay`(1초) 동안 이어져야 출발한다 (안전 스캐너의 재시작 지연과 같은 생각). 처음에는 이 여유가 0.1 m 이고 지연이 없어서, costmap 칸이 한두 칸 흔들리면 장애물 앞에 섰다가 5 cm 움찔 다시 가거나, 감속 중에 0.4초 풀렸다가 다시 감속했다.
-4. **기다리는 동안 회전하지 않는다**: 서 있으면 출발 전에 방향을 맞추는 제자리 회전이 있는데, 장애물 앞에서 기다리는 동안에는 시작하지 않는다. 처음에는 기다리는 동안 회전 명령(최대 0.42 rad/s)이 쌓였다가 StopZone 이 풀리는 순간 한 번에 나갔다.
+4. **기다리는 동안의 회전**: 서 있으면 출발 전에 방향을 몇 도 맞추는 제자리 회전이 있는데, 장애물 앞에서 기다리는 동안에는 하지 않는다 (처음에는 막힌 회전 명령이 0.42 rad/s 까지 쌓였다가 풀리는 순간 한 번에 나갔다). 반대로 경로가 크게 틀어지면(반대쪽 goal) 기다리지 않고 바로 돌고, 장애물 상태는 지난 방향의 것이므로 비운다. 처음에는 대기 상태가 풀릴 때까지 1.6초 동안 돌지 않았다.
 5. **로봇이 명령을 따라오지 않으면**: 명령을 내는데 1초 넘게 서 있으면(비상 정지, 걸림) 명령을 `min_approach_linear_vel`(0.05 m/s)로 낮춰 둔다. 풀렸을 때 순항 속도로 튀어 나가지 않는다.
 
 | 파라미터 | 여기서 | 정하는 법 (실제 로봇) |
 |---|---|---|
 | `obstacle_check` | true | 끄면 장애물은 collision_monitor 만 본다 |
 | `obstacle_check_width` | 0.3 m | 로봇 반폭 + 여유. 좁은 통로에서 옆 선반 때문에 서 버리면 줄인다 |
-| `obstacle_stop_distance` | 0.4 m | 서는 자리 = 로봇 중심에서 장애물까지 약 width + 이 값. StopZone 보다 0.2 m 이상 멀게 |
+| `obstacle_stop_distance` | 0.4 m | 서는 자리 = 로봇 중심에서 장애물까지 약 width + 이 값. collision_monitor 가 평소에 걸리지 않게, 원 반지름 + (속도 x 1.2초) 보다 멀게 |
 | `obstacle_resume_delay` | 1.0 s | 길이 빈 뒤 출발까지. 사람이 지나가는 곳이면 늘린다 |
 
-### 5-2. 비상 정지 (collision_monitor, velocity_smoother)
+### 5-2. 비상 감속: 움직이는 방향만 본다 (collision_monitor approach)
 
-| 구역 | 크기 (로봇 기준) | 레이저 점이 들어오면 |
+**처음 방식의 문제**: 처음에는 로봇 앞 0.5 m 사각형(StopZone, `action_type: "stop"`)에 레이저 점이 들어오면 0 으로 했다. Humble 의 stop 은 회전 속도까지 0 으로 만든다 (`collision_monitor_node.cpp` 의 `processStopSlowdown`). 그래서 장애물이 사각형 안에 있으면, 반대쪽 goal 을 받아 돌아서 나가려 해도 돌지 못했다 (아래 그림 B 이전: 60초 동안 0.5° 돌고 `Failed to make progress` 반복).
+
+**"회전이면 예외로 통과" 로 하지 않은 이유**: 회전도 부딪힐 수 있다. waffle 은 회전 중심(바퀴 축)이 앞쪽에 있어서 제자리에서 돌면 뒤 모서리가 반지름 0.24 m 원을 쓸고 간다. 앞 0.20 m 에 물체가 있을 때 180° 돌면 뒤 모서리가 그것을 친다 (그림 C). 그래서 물어야 할 것은 "회전인가" 가 아니라 **"지금 명령대로 움직이면 부딪히는가"** 다. 직진, 회전, 후진, 멀어지는 방향 모두 같은 질문 하나로 판단된다.
+
+**실제 AMR 은**: 안전 레이저 스캐너에 보호 구역을 여러 벌(field set) 두고, 드라이브가 알려 주는 움직임(전진 속도 구간, 제자리 회전, 후진)에 따라 구역을 바꾼다 (monitoring case 전환). 전진할 때는 앞으로 긴 구역, 제자리 회전할 때는 로봇을 둘러싼 작은 구역, 후진할 때는 뒤쪽 구역이다. Nav2 도 Jazzy 부터는 속도에 따라 구역을 고르는 VelocityPolygon 이 있다. Humble 에서 같은 일을 하는 것이 `approach` 다.
+
+**`approach` (Humble)**: 로봇 둘레 모양을 지금 명령한 속도(직진, 회전 모두)로 `time_before_collision`(1.2초) 앞까지 0.05초씩 움직여 보고(`Polygon::getCollisionTime`), 그 안에 레이저 점이 닿으면 닿기까지 남은 시간에 비례해 속도를 줄인다 (1.2초 뒤에 닿으면 그대로, 0.6초 뒤면 절반). 모양이 지금 이미 점에 닿아 있으면 0 이다.
+
+| 설정 | 값 | 이유 |
 |---|---|---|
-| **StopZone** (RViz 빨강) | 앞 0.5 m, 좌우 0.25 m | 0. velocity_smoother 가 비상 감속도 1.0 m/s² 로 세운다 |
+| 모양 | 원, 반지름 0.3 m (RViz 빨강) | 제자리에서 돌 때 쓸고 가는 원(0.24 m) + 여유 6 cm. 원은 돌아도 모양이 같아서, 이 원 밖의 물체에는 회전이 막히지 않는다. 원 안에 무엇이 있으면 돌다가 닿을 수 있으므로 회전도 막는다 |
+| `time_before_collision` | 1.2 s | 0.25 m/s 면 0.3 m 앞까지. controller 가 평소에 서는 자리(0.7 m)보다 가까워서 평소에는 동작하지 않는다 |
+| 감속 | velocity_smoother 의 비상 감속 1.0 m/s² | 줄인 속도가 한 번에 바뀌면 velocity_smoother 가 이 기울기로 잇는다 |
 
-- controller 가 서는 자리(0.70 m)가 StopZone(0.5 m) 밖이라서 평소에는 동작하지 않는다.
-- 위 그림 오른쪽: 장애물이 갑자기 0.4 m 앞에 나타나면 controller 의 S 커브(0.25 m/s 에서 12.5 cm 필요)로는 늦다. StopZone 이 0 을 내고 0.27초, 2.6 cm 만에 섰다. controller 도 장애물을 보고 S 커브로 0 까지 내려와서(주황), StopZone 이 풀렸을 때 순항 속도로 튀지 않고 0 에서 S 커브로 다시 출발했다.
-- 비상 정지만 직선(jerk 제한 없음)인 이유는 4-2.
+![turn away](doc/turn_away.png)
+
+장애물 앞에 선 로봇에게 왔던 쪽 goal (-2,-1, 180°) 을 보냈다 (빈 방).
+
+| 경우 | 이전 (StopZone + 대기 상태) | 지금 |
+|---|---|---|
+| A: controller 가 장애물 0.70 m 앞에 세움 (사각형 밖) | 1.6초 뒤에 돌기 시작, SUCCEEDED | 0.5초 뒤에 돌기 시작, SUCCEEDED |
+| B: 갑자기 나타나 0.33 m 앞에 섬 (사각형 안, 원 밖) | 돌지 못함. 60초 동안 0.5°, 진행 실패 반복 | 0.3초 뒤에 돌기 시작, 2초에 90°, SUCCEEDED |
+| C: 0.20 m 앞에 장애물 (원 안. 돌면 뒤 모서리가 닿는다) | 돌지 못함 | 돌지 못함 (0.3°). 부딪히지 않는다 |
+
+- C 처럼 원 안에 무엇이 있으면 로봇은 스스로 빠져나오지 않는다. 사람이 치우거나 조이스틱으로 빼낸다. 이 controller 는 후진하지 않는다.
+- 위 5장 표 오른쪽(갑자기 0.4 m 앞에)도 approach 로 다시 쟀다. 원이 1.2초 안에 닿게 되자 collision_monitor 출력이 0.25 → 0.06 m/s 로 줄고, 로봇은 1.0 m/s² 로 0.05 m/s 까지 줄인 뒤 controller 가 S 커브로 0 이 될 때까지 0.03 m/s 로 다가가, 0.95초, 5.0 cm 만에 0.33 m 앞에 섰다. stop 사각형일 때(0.27초, 2.6 cm, 0.32 m)와 선 자리는 거의 같다.
 
 **크기 정하기 (실제 로봇)**
 
-- 비상 정지 거리 = 반응 지연 x 속도 + 속도² / (2 x 비상 감속도). 레이저 주기(보통 0.05~0.1초)와 collision_monitor, velocity_smoother 주기가 지연이다. 예: 1.0 m/s, 1.0 m/s², 지연 0.2초 → 0.2 + 0.5 = 0.7 m. StopZone 을 그보다 길게.
-- controller 가 서는 자리(width + stop_distance)는 StopZone 보다 0.2 m 이상 멀게.
+- 원의 반지름(또는 다각형)은 로봇이 제자리에서 돌 때 쓸고 가는 범위 + 여유. 길쭉한 로봇이면 원이 너무 커지므로 `type: "polygon"` 으로 실제 모양을 준다 (Humble 의 approach 다각형은 모양을 `local_costmap/published_footprint` 에서 받는다. local costmap 에 `footprint` 를 적는다).
+- 비상 정지 거리 = 반응 지연 x 속도 + 속도² / (2 x 비상 감속도). 레이저 주기(보통 0.05~0.1초)와 collision_monitor, velocity_smoother 주기가 지연이다. 예: 1.0 m/s, 1.0 m/s², 지연 0.2초 → 0.2 + 0.5 = 0.7 m. `time_before_collision` x 속도가 그보다 길게 (1.0 m/s 면 1.2초 → 1.2 m).
+- controller 가 서는 자리(width + stop_distance)는 원 반지름 + (속도 x `time_before_collision`) 보다 멀게. 그래야 평소에 비상 감속이 끼어들지 않는다.
 - **local costmap 이 브레이크 거리보다 멀리 봐야 한다.** S 커브로 서는 거리는 `v²/(2a) + v·a/(2j)` 다. 1.0 m/s, 0.5 m/s², 1 m/s³ 이면 1.25 m 이고, 여기에 서는 자리(0.7 m)를 더해 약 2 m 앞의 장애물을 봐야 한다. 지금 local costmap 은 3 x 3 m(앞 1.5 m)라서 0.25 m/s 에는 넉넉하지만, 빠른 로봇이면 `local_costmap` 의 `width` / `height` 를 늘린다. 못 보면 늦게 감속해서 비상 정지가 대신 세운다.
 
 **소프트웨어 안전장치의 한계**: collision_monitor 는 사람을 지키는 안전 기능으로 인증된 것이 아니다. 실제 AMR 에서 사람 보호는 안전 인증 레이저 스캐너와 안전 PLC 가 모터 전원을 직접 끊는 하드웨어 계층이 맡고, 비상정지 버튼이 있다. 안전 스캐너는 보통 속도에 따라 보호 구역을 바꾸고, 그 앞의 경고 구역에서 감속시키기도 한다. 이 저장소의 controller 와 collision_monitor 는 그 안쪽에서 부드럽게 서는 역할이다.
@@ -380,7 +400,7 @@ Nav2 Humble 의 기본 navigation BT 는 이동이 실패하면 recovery 로 제
 2. `ros2 topic hz /scan /odom`: 주기가 일정한지 (라이다 5~20 Hz, odom 20 Hz 이상).
 3. odometry 시험: 2 m 직진, 제자리 360° 회전 뒤 실제 이동과 `/odom` 을 비교한다. 많이 틀리면 바퀴 지름과 바퀴 간격부터 고친다. AMCL 의 `alpha` 도 이 결과로 정한다.
 4. RViz 에서 레이저가 로봇 앞을 맞는 방향으로 보는지 (URDF 의 `base_scan` 위치와 방향).
-5. 장애물: 경로 위에 상자를 두고 controller 가 감속해서 그 앞에 서는지, 손을 갑자기 로봇 앞 0.4 m 에 넣어 StopZone 이 세우는지 (로봇을 들어 바퀴를 띄운 상태에서 먼저).
+5. 장애물: 경로 위에 상자를 두고 controller 가 감속해서 그 앞에 서는지, 손을 갑자기 로봇 앞 0.4 m 에 넣어 collision_monitor 가 세우는지, 그 상태에서 반대쪽 goal 을 주면 돌아서 나가는지 (로봇을 들어 바퀴를 띄운 상태에서 먼저).
 6. 그 다음 지도 만들기 (2-2) → AMCL (2-3) → 짧은 goal → 미션.
 
 **저장소를 나누는 방식**: 로봇마다 `<로봇이름>_bringup` 패키지를 따로 둔다 (URDF, 드라이버 launch, 이 파라미터 파일의 로봇용 사본, 지도). 이 저장소의 planner, controller, `navigation.launch.py`, 미션은 그대로 쓰고 `params_file:=` 과 `map:=` 만 넘긴다.
@@ -400,11 +420,12 @@ Gazebo 11 + TurtleBot3 waffle(레이저 5 Hz) + Nav2 Humble 1.1.18, 화면 없�
 | 지도의 장애물을 지나는 직선 | planner 가 거절 `crosses an obstacle in the map at (-3.15, -1.38)`, 로봇은 움직이지 않음, 39초 뒤 ABORTED |
 | 직선 주행 (S 커브) | 창고 4 m: goal 2.1 cm 앞에 섰다 (도착 범위 5 cm), 직선에서 0.6 cm, 로봇 가속도 -0.47 ~ +0.53 m/s². 빈 방 출발부터 도착까지 controller 명령 가속도 ±0.50 m/s², jerk 1.04 m/s³ 이하 |
 | 경로 위 장애물 (빈 방, 5장) | 로봇 중심 → 장애물 0.80 m 에서 S 커브 감속 시작, 0.82초 / 10.0 cm 뒤 0.70 m 에 정지. 비상 정지 동작 없음. 치우자 1.6초 뒤 다시 가서 SUCCEEDED |
-| 갑자기 0.4 m 앞에 나타난 장애물 (5장) | StopZone 비상 정지 0.27초 / 2.6 cm (1.0 m/s²). 치우자 1.8초 뒤 S 커브로 출발, SUCCEEDED |
+| 갑자기 0.4 m 앞에 나타난 장애물 (5장) | collision_monitor approach 로 0.95초 / 4.9 cm 만에 0.33 m 앞에 정지. 치우자 1.9초 뒤 S 커브로 출발, SUCCEEDED |
+| 장애물 앞에 선 뒤 반대쪽 goal (5-2) | 0.70 m 앞: 0.5초 뒤 돌기 시작 / 0.33 m 앞: 0.3초 뒤 돌기 시작, 둘 다 SUCCEEDED. 0.20 m 앞(돌면 닿음): 돌지 않음 |
 | (이전) SlowZone 0.3배 + StopZone | 0.97 m 앞에서 0.075 m/s 로 감속(로봇에 간 명령 jerk 12 m/s³), 6초 기어간 뒤 0.50 m 앞에서 정지 |
 | 장애물을 치우지 않음 (6장) | 457초 동안 움직이지 않음, 30초마다 재시도, 그 뒤 ABORTED |
 | 작업 4개 (빈 방) | 모두 SUCCEEDED, 74 s |
-| 창고 경로 9점, AMCL, 장애물 감속 켬 | SUCCEEDED. 선반, 벽 옆에서 잘못 서지 않음. AMCL 위치 오차 평균 3.5 cm |
+| 창고 경로 9점, AMCL, 장애물 감속 켬 | SUCCEEDED. 선반, 벽 옆에서 controller 도 collision_monitor 도 잘못 서지 않음. AMCL 위치 오차 평균 3.4 cm |
 | `send_waypoints.py`, `follow_waypoints.py` (MULTI_GOAL.md) | 둘 다 SUCCEEDED, 최종 오차 2 cm, 3 cm |
 | 단위 테스트 | `test_motion_profile` 6개 통과 |
 
@@ -417,7 +438,7 @@ Gazebo 11 + TurtleBot3 waffle(레이저 5 Hz) + Nav2 Humble 1.1.18, 화면 없�
 ```
 simple_line/
 ├── AMR.md                                   이 문서
-├── doc/accel_profiles.png, motion_profile.png, obstacle_braking.png, warehouse_map.png
+├── doc/accel_profiles.png, motion_profile.png, obstacle_braking.png, turn_away.png, warehouse_map.png
 ├── simple_line_controller/
 │   ├── include/simple_line_controller/motion_profile.hpp   S 커브 가감속, 브레이크 거리 (4장)
 │   ├── src/simple_line_controller.cpp       goal, 경로 위 장애물 앞 감속, 바로 전 명령에서 이어 가는 가감속
@@ -426,7 +447,7 @@ simple_line/
 └── simple_line_bringup/
     ├── launch/navigation.launch.py          로봇과 무관한 내비게이션 (SLAM 또는 AMCL, Nav2, 안전, 가감속)
     ├── launch/simple_line.launch.py         시뮬레이션 로봇 + navigation + RViz
-    ├── launch/rviz.launch.py                RViz (Nav2 화면 + StopZone)
+    ├── launch/rviz.launch.py                RViz (Nav2 화면 + collision_monitor 원)
     ├── behavior_trees/navigate_to_pose_amr.xml   회전, 후진 recovery 없는 navigation BT (6장)
     ├── params/simple_line_params.yaml       덮어쓰는 파라미터. [로봇] 표시가 로봇마다 바꿀 값
     ├── worlds/warehouse.world               창고 월드 (지도 만들기, AMCL 시험)

@@ -207,9 +207,18 @@ double SimpleLineController::obstacleDistanceOnPath(
           if (dx * dx + dy * dy > r * r || cx < 0 || cy < 0 || cx >= size_x || cy >= size_y) {
             continue;
           }
-          if (costmap->getCost(cx, cy) == nav2_costmap_2d::LETHAL_OBSTACLE) {
-            return travelled + f * seg;
+          if (costmap->getCost(cx, cy) != nav2_costmap_2d::LETHAL_OBSTACLE) {
+            continue;
           }
+          // 로봇(회전 중심)보다 뒤에 있는 것은 가는 길 위가 아니다. 경로의 첫 점은 로봇 자리라서, 그 둘레를 보면
+          // 돌아서서 멀어지려는 장애물까지 막힌 것으로 본다
+          double wx = 0.0;
+          double wy = 0.0;
+          costmap->mapToWorld(cx, cy, wx, wy);
+          if (c * (wx - pose.pose.position.x) + s * (wy - pose.pose.position.y) <= 0.0) {
+            continue;
+          }
+          return travelled + f * seg;
         }
       }
     }
@@ -322,14 +331,17 @@ geometry_msgs::msg::TwistStamped SimpleLineController::computeVelocityCommands(
   //   - 서 있는 상태에서 출발할 때 방향이 rotate_to_heading_tolerance 보다 틀어져 있을 때
   // 한 번 시작하면 방향 오차가 rotate_to_heading_tolerance 안으로 들어오고 회전이 멈출 때까지 계속한다.
   // 덜 돈 채로 출발하면 남은 오차를 pure pursuit 가 호를 그리며 줄여서 경로가 휜다.
-  // 장애물 앞에서 기다리는 동안에는 시작하지 않는다. collision_monitor 가 로봇을 세워 두면 회전 명령이
-  // 로봇에 닿지 않아 오차와 함께 커지기만 하고, 풀리는 순간 그 각속도가 한 번에 나간다
+  // 장애물 앞에서 기다리는 동안에는 출발 전 방향 맞추기(작은 회전)를 하지 않는다. 회전 명령이 막혀 있으면
+  // 오차와 함께 커지기만 하다가 풀리는 순간 한 번에 나간다. 경로가 크게 틀어졌으면(새 goal 이 반대쪽)
+  // 기다리지 않고 바로 돈다. 장애물 상태는 지난 방향의 것이므로 비우고, 돈 뒤 새 경로에서 다시 본다
   const bool stopped = std::fabs(velocity.linear.x) < 0.01;
-  if (!rotating_ && !obstacle_braking_ &&
-    (std::fabs(carrot_angle) > rotate_to_heading_min_angle_ ||
-    (stopped && std::fabs(carrot_angle) > rotate_to_heading_tolerance_)))
+  const bool turn = std::fabs(carrot_angle) > rotate_to_heading_min_angle_;
+  if (!rotating_ &&
+    (turn || (stopped && !obstacle_braking_ && std::fabs(carrot_angle) > rotate_to_heading_tolerance_)))
   {
     rotating_ = true;
+    obstacle_braking_ = false;
+    clear_since_.reset();
   }
   if (rotating_ && std::fabs(carrot_angle) <= rotate_to_heading_tolerance_ &&
     std::fabs(velocity.angular.z) <= rotate_settled_angular_vel_)

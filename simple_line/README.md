@@ -2,7 +2,7 @@
 
 장애물을 돌아가지 않는 가장 단순한 형태의 Nav2 플러그인 두 개와 실행 설정이다.
 길에 장애물이 있으면 controller 가 그 앞에서 S 커브로 감속해서 서고, 치우면 다시 간다. 너무 가까이 갑자기 나타나면
-Nav2 의 collision_monitor 가 비상 정지한다 (아래 "장애물 앞에서 멈췄다 가기").
+Nav2 의 collision_monitor 가 움직이는 방향만 보고 비상 감속한다 (아래 "장애물 앞에서 멈췄다 가기").
 
 실제 AMR 로 옮기는 데 필요한 것(지도 만들기와 AMCL, 부드러운 가감속, 장애물 감속, 실제 로봇 개발 방식)은
 [AMR.md](AMR.md) 에 정리했다.
@@ -155,7 +155,7 @@ launch 는 두 덩어리다 ([AMR.md 1장](AMR.md#1-launch-구조)).
 - `navigation.launch.py`: 로봇과 무관한 내비게이션. SLAM 또는 AMCL, planner / controller / behavior / bt_navigator,
   collision_monitor, velocity_smoother. 실제 로봇에서도 이 파일을 그대로 쓴다.
   설치된 Humble 기본 `nav2_params.yaml` 위에 `params/simple_line_params.yaml` 을 덮어쓴다.
-- `rviz.launch.py`: Nav2 기본 RViz 화면에 collision_monitor 의 StopZone(빨강)을 더한다.
+- `rviz.launch.py`: Nav2 기본 RViz 화면에 collision_monitor 의 원(빨강)을 더한다.
 
 플러그인 이름은 BT 가 부르는 `GridBased` / `FollowPath` 그대로다. navigation BT 는 Nav2 기본 트리에서 회전, 후진
 recovery 만 뺀 `behavior_trees/navigate_to_pose_amr.xml` 을 쓴다 ([AMR.md 6장](AMR.md#6-막혔을-때-회전-후진-없이-기다리기)).
@@ -180,13 +180,15 @@ planner 는 지도에 없는 장애물을 보지 않는다 (돌아가지 않는�
 
 ```
 controller_server, behavior_server ─/cmd_vel_nav─▶ collision_monitor ─/cmd_vel_safe─▶ velocity_smoother ─/cmd_vel─▶ 로봇
-  경로 위 장애물 앞에서 S 커브 감속             갑자기 막히면 0 (비상)              가속 0.6, 비상 감속 1.0 m/s² 한계
+  경로 위 장애물 앞에서 S 커브 감속       곧 부딪히는 움직임만 줄이거나 0 (비상)     가속 0.6, 비상 감속 1.0 m/s² 한계
 ```
 
 - **평소 (controller)**: local costmap(레이저)에서 경로 위 장애물까지 거리를 재고, goal 과 같은 S 커브로 감속해서
   로봇 중심에서 장애물까지 약 0.7 m 를 두고 선다. 치우면 1~2초 뒤 다시 S 커브로 가속한다.
-- **비상 (collision_monitor)**: 로봇 앞 0.5 m x 폭 0.5 m(StopZone, RViz 빨강)에 레이저 점이 들어오면 0 으로 바꾼다.
-  controller 가 서기에는 너무 가까이 갑자기 나타났을 때만 동작한다. velocity_smoother 가 1.0 m/s² 로 세운다.
+- **비상 (collision_monitor, `approach`)**: 로봇 둘레 원(반지름 0.3 m, RViz 빨강)을 지금 명령한 속도로 1.2초 앞까지
+  움직여 보고, 레이저 점에 닿으면 닿기까지 남은 시간에 비례해 줄이거나 0 으로 한다. controller 가 서기에는 너무 가까이
+  갑자기 나타났을 때만 동작한다. 움직이는 방향만 보므로 장애물 앞에서도 돌아서 나가는 회전은 막지 않는다
+  (앞 사각형을 쓰던 처음에는 회전까지 0 이 되어 돌아서 나갈 수 없었다).
 - Nav2 goal 은 취소되지 않는다. 치우면 같은 경로로 다시 간다.
 - 서 있는 시간도 progress checker 에 들어가므로 `movement_time_allowance` 를 30초로 늘렸다 (Humble 기본 10초).
 

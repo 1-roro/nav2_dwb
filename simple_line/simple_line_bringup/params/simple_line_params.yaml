@@ -67,7 +67,7 @@ controller_server:
       min_approach_linear_vel: 0.05        # goal 바로 앞에서 이 속도 아래로는 줄이지 않는다 [m/s]
       # 경로 위 장애물: 같은 S 커브로 감속해서 막힌 곳 앞에 선다 (AMR.md 5장).
       # local costmap(레이저)의 장애물 칸을 본다. 로봇 중심에서 장애물까지 약 width + stop_distance 를 두고 선다.
-      # 그 자리가 collision_monitor 의 StopZone(앞 0.5 m) 보다 넉넉히 멀어야 평소에 비상 정지가 걸리지 않는다
+      # 그 자리가 collision_monitor 의 원(0.3 m) + 속도 x 1.2초보다 멀어야 평소에 비상 감속이 걸리지 않는다
       obstacle_check: true
       obstacle_check_width: 0.3            # [로봇] 경로 양옆으로 이만큼 안의 장애물을 본다 [m] (로봇 반폭 + 여유)
       obstacle_stop_distance: 0.4          # [로봇] 막힌 곳 이만큼 앞에 선다 [m]. 로봇 중심에서 장애물까지 약 0.7 m
@@ -98,10 +98,13 @@ waypoint_follower:
       enabled: true
       waypoint_pause_duration: 200         # 각 goal 에 도착한 뒤 기다리는 시간 [ms]
 
-# 비상 정지 (Nav2 collision_monitor, Humble). 안전 레이저 스캐너의 보호 구역과 같은 생각이다.
+# 비상 정지 (Nav2 collision_monitor, Humble). 로봇이 지금 명령대로 움직이면 부딪히는지를 본다.
 #   controller_server, behavior_server --cmd_vel_nav--> collision_monitor --cmd_vel_safe--> velocity_smoother --cmd_vel--> 로봇
-# 평소에는 controller 가 장애물 앞에서 먼저 감속해서 StopZone 바깥에 서므로 동작하지 않는다.
-# 갑자기 나타난 것(앞으로 끼어든 사람)이 StopZone 에 들어오면 0 으로 바꾸고, velocity_smoother 의 비상 감속도로 선다.
+# 로봇 둘레의 원(Footprint)을 지금 명령한 속도(직진, 회전 모두)로 time_before_collision 초 앞까지 움직여 보고,
+# 그 안에 레이저 점이 닿으면 닿기까지 남은 시간에 비례해 속도를 줄인다 (approach). 원이 이미 점에 닿아 있으면 0.
+# 앞에 장애물이 있어도 그쪽으로 가는 명령만 줄이고, 제자리 회전이나 멀어지는 방향은 막지 않는다.
+# 앞 사각형(stop)은 안에 점이 있으면 회전까지 0 으로 만들어서, 장애물 앞에 선 로봇이 돌아서 나갈 수 없었다.
+# 평소에는 controller 가 장애물 앞에서 먼저 감속해서 서므로 동작하지 않는다.
 collision_monitor:
   ros__parameters:
     base_frame_id: "base_footprint"
@@ -112,16 +115,19 @@ collision_monitor:
     source_timeout: 5.0                    # scan 이 이보다 오래되면 버린다. 그러면 막힌 곳이 없는 것으로 본다 (Humble 동작) [s]
     base_shift_correction: true            # scan 이후 로봇이 움직인 만큼 점을 옮겨서 판단한다
     stop_pub_timeout: 2.0                  # 세운 뒤 0 속도를 이 시간 동안 보내고 멈춘다 [s]
-    polygons: ["StopZone"]
-    # [로봇] 로봇 크기와 속도에 맞춘다. base_footprint 기준 사각형 [x1, y1, x2, y2, ...] [m].
-    # waffle 은 폭 0.31m, 앞면 x=0.07m. 서는 거리 = 반응 지연 x 속도 + 속도^2 / (2 x 비상 감속도) 보다 StopZone 을 길게
-    StopZone:
-      type: "polygon"
-      points: [0.5, 0.25, 0.5, -0.25, 0.0, -0.25, 0.0, 0.25]   # 앞 0.5m, 좌우 0.25m
-      action_type: "stop"
-      max_points: 3                        # 구역 안의 점이 이보다 많으면 동작
+    polygons: ["Footprint"]
+    # [로봇] 원의 반지름 = 로봇이 제자리에서 돌 때 쓸고 가는 반지름 + 여유. waffle 은 뒤 모서리가 회전 중심(base_footprint)에서
+    # 0.24 m 라서 0.24 + 0.06. 이 원 안에 무엇이 있으면 돌다가 부딪힐 수 있으므로 회전도 막는다.
+    # 길쭉한 로봇이면 원 대신 다각형(type "polygon")을 쓴다. 그때는 모양을 local costmap 의 footprint 에서 받는다
+    Footprint:
+      type: "circle"
+      radius: 0.3                          # [m]
+      action_type: "approach"
+      time_before_collision: 1.2           # 이만큼 앞까지 움직여 본다 [s]. 0.25 m/s 면 0.3 m 앞
+      simulation_time_step: 0.05           # [s]
+      max_points: 3                        # 원 안의 점이 이보다 많으면 닿은 것
       visualize: true
-      polygon_pub_topic: "polygon_stop"    # RViz 의 StopZone (빨강)
+      polygon_pub_topic: "polygon_footprint"   # RViz 의 Footprint (빨강)
     observation_sources: ["scan"]
     scan:
       type: "scan"
