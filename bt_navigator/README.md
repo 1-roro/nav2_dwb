@@ -7,12 +7,17 @@
 - **작업 하나** = 들를 점들 + 할 일 (`go`, `inspect`, `scan`, `look_around`)
 - 로봇은 **점마다 멈춰서** 위치와 방향을 맞추고, 도착을 알린 뒤 다음 점으로 간다.
 - 작업은 **액션**(`execute_task`)으로 받는다. 결과, 진행 상황(BT 상태 포함), 취소, 선점이 있다.
-- 길에 장애물이 있으면 **멈춰서 기다렸다가** 치우면 다시 간다 (stop & go). Nav2 goal 은 그대로 두고 속도만 막는다. Nav2 의 collision_monitor 가 한다 (6장).
+- 길에 장애물이 있으면 **감속해서 멈춰 기다렸다가** 치우면 다시 간다 (stop & go). Nav2 goal 은 그대로 두고 속도만 0 으로 한다. controller 가 감속해서 서고, 갑자기 나타나면 collision_monitor 가 비상 감속한다 (6장).
+
+![stop and go with waypoints](docs/stop_and_go_waypoints.gif)
+
+점 3개 작업 중에 장애물을 놓았다가 5초 뒤 치웠다. 왼쪽 Gazebo, 오른쪽 RViz, 3.5배속. 시나리오, mp4, 캡처 이미지는 [docs/](docs/README.md).
 
 ```
 bt_navigator/
 ├── bt_mission/        미션 BT (task.xml), 직접 만든 BT 노드, 작업 액션 서버, 클라이언트
-└── bt_mission_msgs/   작업 메시지와 액션 (Task.msg, ExecuteTask.action)
+├── bt_mission_msgs/   작업 메시지와 액션 (Task.msg, ExecuteTask.action)
+└── docs/              시뮬레이션 기록 (주행 영상, 캡처)
 ```
 
 | 하고 싶은 것 | 실행 | 장 |
@@ -1013,6 +1018,8 @@ task> go 1,-1,0
 5. 비상 감속을 보려면 달리는 로봇 바로 앞(0.4~0.5 m)을 찍는다. `Robot to approach ...` 가 나오고 1.0 m/s² 로 줄여 선다.
 6. 그 상태에서 `task> go -2,-1,180` 처럼 반대쪽 goal 을 보내면 로봇이 그 자리에서 돌아서 간다. 장애물이 로봇 중심에서 0.3 m 안(RViz 의 빨간 원 안)이면 돌다가 닿을 수 있어서 돌지 않는다. 치우거나 조이스틱으로 빼낸다.
 
+이 순서(점 3개 작업, 장애물을 놓고 5초 뒤 치움)를 녹화한 영상과 캡처는 [docs/](docs/README.md) 에 있다.
+
 장애물은 다른 방법으로도 놓고 치울 수 있다.
 
 | 방법 | 놓기 | 치우기 |
@@ -1301,6 +1308,10 @@ bt_navigator/
         ├── task.png                         BT 그림 (draw_bt.py 로 생성)
         ├── stop_and_go.png                  Gazebo 에서 장애물을 놓고 치운 기록 (6장)
         └── layers.dot / layers.png          계층 구조 그림
+docs/                                        시뮬레이션 기록 (README.md 에 시나리오와 녹화 방법)
+├── stop_and_go_waypoints.mp4 / .gif         점 3개 작업 + 장애물 stop & go, Gazebo | RViz, 3.5배속
+├── rviz_path.png                            RViz: 경로와 웨이포인트
+└── gazebo_obstacle_stop.png                 Gazebo: 장애물 앞에서 대기
 ```
 
 장애물 처리(controller 의 장애물 감속은 `simple_line/simple_line_controller`, collision_monitor 설정과 장애물 도구 `obstacle.py` 는 `simple_line/simple_line_bringup`)는 6-2 에 있다.
