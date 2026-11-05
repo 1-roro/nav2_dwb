@@ -16,14 +16,17 @@
     inspect      점을 차례로 들른 뒤, 마지막 점에서 정지 상태로 duration 초 작업
     scan         점을 차례로 들르는 동안 0.5m 마다 스캔
     look_around  점을 차례로 들른 뒤, 마지막 점에서 제자리 한 바퀴
+    dock         점을 차례로 들른 뒤(마지막 점 = dock 앞 staging 자리), {target} QR 을 보고 도킹 (아래 Dock 트리)
+    undock       점 없이, 그 자리에서 dock 을 빠져나온다 (아래 Undock 트리)
 
-  장애물은 이 트리가 다루지 않는다. 길이 막히면 Nav2 아래의 collision_monitor 가 로봇을 세우고,
-  NavigateToPose 는 goal 을 그대로 둔 채 RUNNING 으로 기다린다 (README 6장).
+  장애물은 이 트리가 다루지 않는다. 길이 막히면 controller 가 그 앞에서 감속해서 서고(갑자기 나타나면
+  collision_monitor 가 세운다), NavigateToPose 는 goal 을 그대로 둔 채 RUNNING 으로 기다린다 (README 6장).
 -->
 <root main_tree_to_execute="Task">
+
   <BehaviorTree ID="Task">
-    <Switch3 name="by_action" variable="{action}"
-             case_1="inspect" case_2="scan" case_3="look_around">
+    <Switch5 name="by_action" variable="{action}"
+             case_1="inspect" case_2="scan" case_3="look_around" case_4="dock" case_5="undock">
       <Sequence name="inspect">
         <ForEachWaypoint name="inspect_points" poses="{waypoints}" pose="{waypoint}"
                          reached="{waypoints_reached}" task_id="{task_id}">
@@ -45,10 +48,71 @@
         </ForEachWaypoint>
         <Spin name="spin" spin_dist="6.28" time_allowance="20" is_recovery="false"/>
       </Sequence>
+      <Sequence name="dock">
+        <ForEachWaypoint name="dock_points" poses="{waypoints}" pose="{waypoint}"
+                         reached="{waypoints_reached}" task_id="{task_id}">
+          <NavigateToPose name="go_staging" goal="{waypoint}"/>
+        </ForEachWaypoint>
+        <SubTree ID="Dock" __shared_blackboard="true"/>
+      </Sequence>
+      <SubTree ID="Undock" __shared_blackboard="true"/>
       <ForEachWaypoint name="go_points" poses="{waypoints}" pose="{waypoint}"
                        reached="{waypoints_reached}" task_id="{task_id}">
         <NavigateToPose name="go_only" goal="{waypoint}"/>
       </ForEachWaypoint>
-    </Switch3>
+    </Switch5>
+  </BehaviorTree>
+
+  <!--
+  QR 도킹 (DOCKING.md). 위 Task 트리의 dock, undock 가지가 SubTree 로 부른다.
+  (따로 파일로 두고 <include> 하면 task_server 는 되지만, task_server_lifecycle 이 쓰는 Nav2 BtActionServer 는
+   XML 을 글자로 읽어서 상대 경로를 찾지 못한다. 그래서 한 파일에 둔다)
+
+    dock   : 작업의 마지막 점(dock 앞에서 QR 이 보이는 staging 자리)에 Nav2 로 간 뒤 이 Dock 트리를 돈다
+    undock : 이 Undock 트리만 돈다 (점 없음)
+
+  카메라 영상의 QR 은 qr_detector.py 가 찾아 dock/qr 로 보낸다. QR 의 자리는 odom 에 잡아 두므로
+  가까이 가서 QR 이 화면을 넘쳐도(blind_distance 안) 그 자리와 odom 으로 마저 간다.
+
+  거리는 모두 "로봇 중심(base_footprint) ↔ QR 면" [m]. 아래 값은 시뮬레이션의 waffle 기준이다
+  (앞면이 중심에서 0.07 m, 카메라가 0.07 m). 실제 로봇에 맞춰 바꾼다 (DOCKING.md).
+  -->
+  <BehaviorTree ID="Dock">
+    <Sequence name="dock">
+      <!-- 실패하면 뒤로 물러나 처음(QR 찾기)부터 다시. 3번 해서 안 되면 작업 실패 -->
+      <RetryUntilSuccessful num_attempts="3">
+        <Fallback name="dock_or_retreat">
+          <Sequence name="dock_attempt">
+            <!-- staging 자리에서 QR 을 8번 보고 dock 의 자리를 잡는다 -->
+            <DetectDock name="find_qr" target="{target}" timeout="5" dock_pose="{dock_pose}"/>
+            <!-- QR 0.5 m 앞까지. 옆으로 어긋난 것, 비스듬한 것을 여기서 맞춘다. collision_monitor 는 켜 둔 채 -->
+            <ApproachDock name="align" target="{target}" dock_pose="{dock_pose}"
+                          distance="0.5" max_speed="0.15" lost_timeout="2.0" timeout="20"/>
+            <!-- 마지막 접근: dock 은 붙어야 하는 물체라 collision_monitor 를 끄고 0.05 m/s 로.
+                 카메라가 QR 0.3 m 안에 들어가면 QR 을 믿지 않고 odom 으로 마저 간다 -->
+            <MuteCollisionMonitor name="mute_safety" polygon="Footprint">
+              <ApproachDock name="final" target="{target}" dock_pose="{dock_pose}"
+                            distance="0.10" max_speed="0.05" accel="0.1" xy_tolerance="0.005"
+                            lost_timeout="0" blind_distance="0.3" timeout="30"/>
+            </MuteCollisionMonitor>
+          </Sequence>
+          <!-- 물러날 때는 BackOff 가 레이저로 뒤를 본다 (collision_monitor 대신). 뒤가 막혀 있으면 그 자리에서 다음 시도 -->
+          <ForceFailure>
+            <MuteCollisionMonitor name="mute_safety_retreat" polygon="Footprint">
+              <BackOff name="retreat" distance="0.4" speed="0.1" fail_when_blocked="false"/>
+            </MuteCollisionMonitor>
+          </ForceFailure>
+        </Fallback>
+      </RetryUntilSuccessful>
+      <!-- 충전 접점 신호 (std_msgs/Bool). topic 을 비우면 확인하지 않는다 -->
+      <CheckCharging name="charging" topic="" timeout="5"/>
+    </Sequence>
+  </BehaviorTree>
+
+  <BehaviorTree ID="Undock">
+    <!-- dock 이 collision_monitor 의 원 안에 있으므로 끄고 물러난다. 다 물러나면 다시 켜진다 -->
+    <MuteCollisionMonitor name="mute_safety_undock" polygon="Footprint">
+      <BackOff name="undock" distance="0.4" speed="0.05"/>
+    </MuteCollisionMonitor>
   </BehaviorTree>
 </root>

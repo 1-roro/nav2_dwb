@@ -101,8 +101,9 @@ CallbackReturn TaskServerLifecycle::on_shutdown(const rclcpp_lifecycle::State & 
 bool TaskServerLifecycle::onGoalReceived(ExecuteTask::Goal::ConstSharedPtr goal)
 {
   // false 를 돌려주면 BtActionServer 가 goal 을 ABORTED 로 끝낸다 (이미 수락된 뒤라 거절은 아니다)
-  if (goal->task.waypoints.empty()) {
-    RCLCPP_WARN(get_logger(), "[task] %s rejected: no waypoints", goal->task.id.c_str());
+  const std::string reason = checkTask(goal->task);
+  if (!reason.empty()) {
+    RCLCPP_WARN(get_logger(), "[task] %s rejected: %s", goal->task.id.c_str(), reason.c_str());
     return false;
   }
   startTask(*goal);
@@ -148,8 +149,9 @@ void TaskServerLifecycle::onPreempt(ExecuteTask::Goal::ConstSharedPtr goal)
   if (bt_server_->getTree().rootNode()->status() != BT::NodeStatus::RUNNING) {
     return;
   }
-  if (goal->task.waypoints.empty()) {
-    RCLCPP_WARN(get_logger(), "[task] %s rejected: no waypoints", goal->task.id.c_str());
+  const std::string reason = checkTask(goal->task);
+  if (!reason.empty()) {
+    RCLCPP_WARN(get_logger(), "[task] %s rejected: %s", goal->task.id.c_str(), reason.c_str());
     bt_server_->terminatePendingGoal();
     return;
   }

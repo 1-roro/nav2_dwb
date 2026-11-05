@@ -3,7 +3,7 @@
 <package format="3">
   <name>bt_mission</name>
   <version>0.1.0</version>
-  <description>Mission BT on Nav2 Humble that takes tasks at run time through the ExecuteTask action: action servers (plain and nav2_behavior_tree::BtActionServer versions), BT nodes (per-waypoint navigation, stop and go), and a task client.</description>
+  <description>Mission BT on Nav2 Humble that takes tasks at run time through the ExecuteTask action: action servers (plain and nav2_behavior_tree::BtActionServer versions), BT nodes (per-waypoint navigation, QR docking for a holonomic base), a QR detector, and a task client.</description>
   <maintainer email="user@example.com">nav2_dwb</maintainer>
   <license>Apache-2.0</license>
 
@@ -17,8 +17,10 @@
   <depend>lifecycle_msgs</depend>
   <depend>tf2</depend>
   <depend>tf2_ros</depend>
+  <depend>tf2_geometry_msgs</depend>
   <depend>ament_index_cpp</depend>
   <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
   <depend>bt_mission_msgs</depend>
   <depend>nav2_util</depend>
   <depend>rclcpp_lifecycle</depend>
@@ -26,6 +28,9 @@
   <exec_depend>simple_line_bringup</exec_depend>
   <exec_depend>nav2_msgs</exec_depend>
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
   <exec_depend>nav2_lifecycle_manager</exec_depend>
   <exec_depend>launch_ros</exec_depend>
 

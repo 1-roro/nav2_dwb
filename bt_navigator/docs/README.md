@@ -1,4 +1,9 @@
-# 시뮬레이션 기록: 창고 지도에서 웨이포인트 주행 중 장애물 stop & go
+# 시뮬레이션 기록
+
+- 창고 지도에서 웨이포인트 주행 중 장애물 stop & go (아래)
+- QR 도킹: `dock_runs.png` (staging 세 곳에서 도킹한 길과 오차), `dock_camera_debug.jpg` (staging 에서 본 카메라 화면과 검출). 설명은 [DOCKING.md](../DOCKING.md)
+
+## 창고 지도에서 웨이포인트 주행 중 장애물 stop & go
 
 ![stop and go in the warehouse](warehouse_stop_and_go.gif)
 
@@ -12,7 +17,7 @@
 | `warehouse_rviz_path.png` | RViz: 2번에서 3번으로 통로를 달리는 중. 경로(초록, 파랑)와 웨이포인트 1, 2, 3 |
 | `warehouse_gazebo_obstacle_stop.png` | Gazebo: 통로의 장애물(빨간 원기둥) 앞에 서서 기다리는 중 |
 
-## 지도와 costmap
+### 지도와 costmap
 
 ![map and costmap](warehouse_map_costmap.png)
 
@@ -20,7 +25,7 @@
 - **오른쪽: global costmap.** 주행 중에 `/global_costmap/costmap` 을 받아 그렸다. 지도의 장애물(100)에 로봇 반지름 0.22 m 띠(99)와 그 바깥으로 갈수록 옅어지는 둘레(inflation, 1~98)를 붙인 것이다. planner(`SimpleLinePlanner`)는 99 이상을 지나는 직선을 거절하므로, 점은 선반과 기둥을 피해 이어지게 골랐다.
 - 주행 중에 놓은 장애물은 지도와 global costmap 에 없다. 레이저가 보고 local costmap(RViz 에서 로봇 둘레 3 x 3 m)에만 들어가고, controller 가 그것을 보고 감속한다.
 
-## 시나리오
+### 시나리오
 
 창고 월드(`simple_line.launch.py world:=warehouse`), 로봇은 (-4,-2.5) 에서 +x 를 보고 시작한다.
 
@@ -30,7 +35,7 @@
 4. 선 뒤 5초(시뮬레이션 시간)가 지나 장애물을 치웠다. 약 3초 뒤 다시 출발했다 (local costmap 에서 지워지는 시간 + 출발 지연 1초 + 가속).
 5. 3번에 도착, 작업 `SUCCEEDED`. 출발부터 도착까지 약 58초.
 
-## 화면에 보이는 것 (RViz)
+### 화면에 보이는 것 (RViz)
 
 | 표시 | 뜻 |
 |---|---|
@@ -42,7 +47,7 @@
 | 선반, 벽 둘레의 분홍, 하늘색 띠 | global costmap (위 그림 오른쪽과 같은 것, RViz 색) |
 | 로봇 둘레 3 x 3 m 의 진한 색 | local costmap (레이저로 지금 보는 것. 놓은 장애물도 여기에 나타난다) |
 
-## 직접 해 보기
+### 직접 해 보기
 
 ```bash
 ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse
@@ -54,7 +59,7 @@ task> go -1,-2.5 -1,0.3 2.5,0.3
 
 로봇이 2번을 지나 통로로 들어서면 RViz 의 Publish Point 로 (1.3,0.3) 근처를 찍어 장애물을 놓고, 서 있는 로봇 앞의 장애물을 다시 찍어 치운다. 명령줄로 하려면 `ros2 run simple_line_bringup obstacle.py put 1.3,0.3` / `remove`. 나머지는 [6-1](../README.md#6-1-직접-해-보기-gazebo) 과 같다.
 
-## 녹화한 방법
+### 녹화한 방법
 
 화면이 없는 환경이라 gzserver 와 Nav2 를 띄운 뒤, gzclient 와 RViz 를 각각 가상 화면(Xvfb)에 띄워 `ffmpeg -f x11grab` 으로 10 fps 녹화했다. 3D 화면 부분만 잘라 나란히 붙이고, 단계마다 설명을 넣고, 구간별로 배속을 달리해 15 fps 로 줄였다. 장애물이 나타나고 사라지는 시점은 Gazebo 화면에서 빨간 원기둥이 보이는 프레임으로 맞췄다.
 

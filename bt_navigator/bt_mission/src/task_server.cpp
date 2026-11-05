@@ -21,11 +21,12 @@ TaskServer::TaskServer(
 
   server_ = rclcpp_action::create_server<ExecuteTask>(
     node_, action_name,
-    // 새 goal: 점이 하나라도 있으면 받는다
+    // 새 goal: 점이 하나라도 있으면 받는다 (undock 은 점 없이도)
     [this](const rclcpp_action::GoalUUID &, std::shared_ptr<const ExecuteTask::Goal> goal) {
-      if (goal->task.waypoints.empty()) {
+      const std::string reason = checkTask(goal->task);
+      if (!reason.empty()) {
         RCLCPP_WARN(
-          node_->get_logger(), "[task] %s rejected: no waypoints", goal->task.id.c_str());
+          node_->get_logger(), "[task] %s rejected: %s", goal->task.id.c_str(), reason.c_str());
         return rclcpp_action::GoalResponse::REJECT;
       }
       return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;

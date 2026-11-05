@@ -8,6 +8,7 @@
 #include <chrono>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <utility>
@@ -22,11 +23,55 @@
 #include "bt_mission_msgs/action/execute_task.hpp"
 #include "test_fakes.hpp"
 #include "tf2_ros/buffer.h"
+#include "geometry_msgs/msg/transform_stamped.hpp"
 
 using ExecuteTask = bt_mission_msgs::action::ExecuteTask;
 using GoalHandle = rclcpp_action::ClientGoalHandle<ExecuteTask>;
 using rclcpp_action::ResultCode;
 using namespace std::chrono_literals;
+
+// collision_monitor 대신: Footprint.enabled 파라미터만 있고, 바뀐 값을 차례로 적어 둔다.
+// MuteCollisionMonitor 는 응답을 기다리며 막히므로(다시 켤 때) 따로 스레드에서 돈다
+class FakeCollisionMonitor
+{
+public:
+  FakeCollisionMonitor()
+  : node_(std::make_shared<rclcpp::Node>("collision_monitor"))
+  {
+    node_->declare_parameter("Footprint.enabled", true);
+    callback_ = node_->add_on_set_parameters_callback(
+      [this](const std::vector<rclcpp::Parameter> & params) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (const auto & p : params) {
+          changes_.push_back(p.as_bool());
+        }
+        rcl_interfaces::msg::SetParametersResult result;
+        result.successful = true;
+        return result;
+      });
+    executor_.add_node(node_);
+    thread_ = std::thread([this] {executor_.spin();});
+  }
+  ~FakeCollisionMonitor()
+  {
+    executor_.cancel();
+    thread_.join();
+  }
+  std::vector<bool> changes() const
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return changes_;
+  }
+  bool enabled() const {return node_->get_parameter("Footprint.enabled").as_bool();}
+
+private:
+  rclcpp::Node::SharedPtr node_;
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr callback_;
+  rclcpp::executors::SingleThreadedExecutor executor_;
+  std::thread thread_;
+  mutable std::mutex mutex_;
+  std::vector<bool> changes_;
+};
 
 class TaskServerTest : public ::testing::Test
 {
@@ -40,8 +85,8 @@ protected:
     bt_mission::registerNodes(factory_);
 
     node_ = std::make_shared<rclcpp::Node>("test_task_server");
-    auto blackboard = bt_mission::createBlackboard(
-      node_, std::make_shared<tf2_ros::Buffer>(node_->get_clock()), 100.0);
+    tf_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
+    auto blackboard = bt_mission::createBlackboard(node_, tf_, 100.0);
     bt_mission::TaskServer::prepareBlackboard(blackboard);
     tree_ = factory_.createTreeFromFile(TASK_XML, blackboard);
     recorder_ = std::make_unique<Recorder>(tree_.rootNode());
@@ -130,6 +175,7 @@ protected:
 
   BT::BehaviorTreeFactory factory_;
   rclcpp::Node::SharedPtr node_;
+  std::shared_ptr<tf2_ros::Buffer> tf_;
   BT::Tree tree_;
   std::unique_ptr<Recorder> recorder_;
   std::unique_ptr<bt_mission::TaskServer> server_;
@@ -259,4 +305,42 @@ TEST_F(TaskServerTest, RejectsATaskWithoutWaypoints)
 {
   EXPECT_FALSE(send(makeGoal("r", "go", {})));
   EXPECT_FALSE(server_->busy());
+}
+
+TEST_F(TaskServerTest, UndockNeedsNoWaypointsAndSwitchesTheSafetyFieldBackOn)
+{
+  FakeCollisionMonitor monitor;
+  // 로봇의 자리(odom -> base_footprint)가 없으므로 BackOff 는 시작하자마자 실패한다
+  auto handle = send(makeGoal("u", "undock", {}));
+  ASSERT_TRUE(handle);                                  // 점이 없어도 받는다 (undock 만)
+  const auto result = waitResult(handle);
+  EXPECT_EQ(result.code, ResultCode::ABORTED);
+  EXPECT_EQ(result.result->message, "undock failed");
+  EXPECT_EQ(monitor.changes(), (std::vector<bool>{false, true}));   // 끄고, 실패해도 다시 켠다
+  EXPECT_TRUE(monitor.enabled());
+}
+
+TEST_F(TaskServerTest, CancelDuringUndockSwitchesTheSafetyFieldBackOn)
+{
+  FakeCollisionMonitor monitor;
+  geometry_msgs::msg::TransformStamped robot;           // 로봇은 움직이지 않으므로 BackOff 는 끝나지 않는다
+  robot.header.frame_id = "odom";
+  robot.child_frame_id = "base_footprint";
+  robot.transform.rotation.w = 1.0;
+  tf_->setTransform(robot, "test", true);
+  auto handle = send(makeGoal("c", "undock", {}));
+  ASSERT_TRUE(handle);
+  for (int i = 0; i < 200 && monitor.changes().empty(); ++i) {
+    step();
+  }
+  ASSERT_EQ(monitor.changes(), std::vector<bool>{false});
+  EXPECT_FALSE(monitor.enabled());                      // BackOff 가 도는 동안은 꺼져 있다
+  for (int i = 0; i < 20; ++i) {
+    step();
+  }
+  client_->async_cancel_goal(handle);
+  const auto result = waitResult(handle);
+  EXPECT_EQ(result.code, ResultCode::CANCELED);
+  EXPECT_EQ(monitor.changes(), (std::vector<bool>{false, true}));   // halt 에서 다시 켠다
+  EXPECT_TRUE(monitor.enabled());
 }

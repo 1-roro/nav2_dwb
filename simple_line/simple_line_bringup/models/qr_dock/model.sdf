@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<!-- make_qr.py 가 만든 dock: 회색 몸통 앞면에 QR 판 (DOCK_A, 판 0.200 m, QR 0.1448 m).
+     원점 = QR 판 앞면의 바닥 자리, +x = QR 앞으로 나오는 법선. 월드에서는 앞면이 방을 보게 놓는다 -->
+<sdf version="1.6">
+  <model name="qr_dock">
+    <static>true</static>
+    <link name="body">
+      <collision name="body_collision">
+        <pose>-0.1 0 0.15 0 0 0</pose>
+        <geometry><box><size>0.2 0.5 0.3</size></box></geometry>
+      </collision>
+      <visual name="body_visual">
+        <pose>-0.1 0 0.15 0 0 0</pose>
+        <geometry><box><size>0.2 0.5 0.3</size></box></geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/DarkGrey</name>
+          </script>
+        </material>
+      </visual>
+      <visual name="qr_visual">
+        <pose>0.0010 0 0.115 0 0 0</pose>
+        <geometry><box><size>0.0020 0.200 0.200</size></box></geometry>
+        <material>
+          <script>
+            <uri>model://qr_dock/materials/scripts</uri>
+            <uri>model://qr_dock/materials/textures</uri>
+            <name>QrDock/DOCK_A</name>
+          </script>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

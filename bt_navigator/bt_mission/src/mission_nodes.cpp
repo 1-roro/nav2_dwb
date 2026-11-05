@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "bt_mission/dock_nodes.hpp"
 #include "tf2/exceptions.h"
 
 namespace bt_mission
@@ -211,6 +212,7 @@ void registerNodes(BT::BehaviorTreeFactory & factory)
   factory.registerNodeType<DoWork>("DoWork");
   factory.registerNodeType<ScanWhileMoving>("ScanWhileMoving");
   factory.registerNodeType<ForEachWaypoint>("ForEachWaypoint");
+  registerDockNodes(factory);    // Dock, Undock 트리의 노드 (dock_nodes.hpp)
 }
 
 }  // namespace bt_mission

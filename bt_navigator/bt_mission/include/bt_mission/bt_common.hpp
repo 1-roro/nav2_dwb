@@ -31,7 +31,11 @@ BT::Blackboard::Ptr createBlackboard(
   const rclcpp::Node::SharedPtr & node, const std::shared_ptr<tf2_ros::Buffer> & tf_buffer,
   double tick_hz);
 
-// 작업 하나를 task.xml 의 blackboard 항목 {waypoints} {task_id} {action} {duration} 에 쓴다.
+// 받을 수 없는 작업이면 이유를, 받을 수 있으면 빈 문자열을 돌려준다.
+// 점이 하나도 없으면 받지 않는다. undock 만 점 없이 받는다 (그 자리에서 dock 을 빠져나온다)
+std::string checkTask(const bt_mission_msgs::msg::Task & task);
+
+// 작업 하나를 task.xml 의 blackboard 항목 {waypoints} {task_id} {action} {duration} {target} 에 쓴다.
 // frame 이 빈 점은 map 으로, id 가 비면 "task<count>" 로 채운다. 쓴 task_id 를 돌려준다.
 std::string writeTask(
   const BT::Blackboard::Ptr & blackboard, bt_mission_msgs::msg::Task task, int count);

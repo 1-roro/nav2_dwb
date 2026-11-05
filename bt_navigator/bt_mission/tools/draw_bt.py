@@ -29,7 +29,7 @@ DECORATOR = {
     'KeepRunningUntilFailure', 'RateController', 'DistanceController', 'SpeedController',
     'GoalUpdater', 'SingleTrigger', 'Delay', 'SubTree',
 }
-MY_DECORATOR = {'ForEachWaypoint'}     # 이 패키지에서 만든 데코레이터
+MY_DECORATOR = {'ForEachWaypoint', 'MuteCollisionMonitor'}     # 이 패키지에서 만든 데코레이터
 NAV2 = {
     'NavigateToPose', 'NavigateThroughPoses', 'ComputePathToPose', 'ComputePathThroughPoses',
     'FollowPath', 'SmoothPath', 'Spin', 'Wait', 'BackUp', 'DriveOnHeading', 'ClearEntireCostmap',

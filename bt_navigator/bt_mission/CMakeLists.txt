@@ -17,8 +17,10 @@ find_package(geometry_msgs REQUIRED)
 find_package(lifecycle_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(bt_mission_msgs REQUIRED)
 find_package(nav2_util REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
@@ -32,13 +34,15 @@ set(dependencies
   lifecycle_msgs
   tf2
   tf2_ros
+  tf2_geometry_msgs
   ament_index_cpp
   std_msgs
+  sensor_msgs
   bt_mission_msgs
 )
 
-# 이 패키지의 BT 노드들
-add_library(${PROJECT_NAME}_nodes SHARED src/mission_nodes.cpp)
+# 이 패키지의 BT 노드들 (작업 노드, 도킹 노드)
+add_library(${PROJECT_NAME}_nodes SHARED src/mission_nodes.cpp src/dock_nodes.cpp)
 target_include_directories(${PROJECT_NAME}_nodes PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
@@ -77,7 +81,7 @@ install(
   RUNTIME DESTINATION bin
 )
 install(TARGETS task_server task_server_lifecycle DESTINATION lib/${PROJECT_NAME})
-install(PROGRAMS scripts/task_client.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/task_client.py scripts/qr_detector.py tools/make_qr.py DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY behavior_trees launch DESTINATION share/${PROJECT_NAME})
 
@@ -87,6 +91,10 @@ if(BUILD_TESTING)
   add_library(test_fake_nav2 SHARED test/test_fakes.cpp)
   target_compile_definitions(test_fake_nav2 PRIVATE BT_PLUGIN_EXPORT)
   ament_target_dependencies(test_fake_nav2 behaviortree_cpp_v3 geometry_msgs)
+
+  # 도킹 제어식 (ROS 없이)
+  ament_add_gtest(test_dock_control test/test_dock_control.cpp)
+  target_include_directories(test_dock_control PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
   ament_add_gtest(test_task_server test/test_task_server.cpp TIMEOUT 120)
   target_link_libraries(test_task_server ${PROJECT_NAME}_bt test_fake_nav2)
