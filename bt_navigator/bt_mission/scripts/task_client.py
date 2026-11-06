@@ -12,7 +12,8 @@ task_server 에 작업을 액션(execute_task, bt_mission_msgs/action/ExecuteTas
   ros2 run bt_mission task_client.py inspect 0,-1 1.5,-1,90
 
 작업 한 줄의 형식: <action>[:option] x,y[,yaw_deg] [x,y[,yaw_deg] ...]
-  - option: inspect 는 작업 시간 [s] (inspect:5), dock 은 찾을 QR 의 내용 (dock:DOCK_A, 비우면 처음 보이는 QR)
+  - option: inspect 는 작업 시간 [s] (inspect:5), dock 은 찾을 QR 의 내용 (dock:DOCK_A, 비우면 처음 보이는 QR),
+    dock_aruco 는 board 이름 (dock_aruco:dock_a, 비우면 처음 보이는 board)
   - 좌표는 map frame. 로봇은 점마다 멈춰서 위치와 방향을 맞추고(도착) 다음 점으로 간다.
     작업(inspect 의 점검, look_around 의 회전, dock 의 도킹)은 마지막 점에서 한다.
     dock 의 마지막 점은 dock 앞에서 QR 이 보이는 자리(staging)다
@@ -43,13 +44,14 @@ from bt_mission_msgs.msg import Task
 import tf2_ros
 
 ACTIONS = (Task.ACTION_GO, Task.ACTION_INSPECT, Task.ACTION_SCAN, Task.ACTION_LOOK_AROUND,
-           Task.ACTION_DOCK, Task.ACTION_UNDOCK)
+           Task.ACTION_DOCK, Task.ACTION_UNDOCK, Task.ACTION_DOCK_ARUCO)
 DEFAULT_DURATION = 3.0
 
 HELP = '''작업: <action>[:option] x,y[,yaw_deg] [x,y[,yaw_deg] ...]   (map frame)
-  action: go | inspect | scan | look_around | dock | undock. 점마다 멈춰서 도착을 알리고 다음 점으로, 작업은 마지막 점에서
+  action: go | inspect | scan | look_around | dock | undock | dock_aruco. 점마다 멈춰서 도착을 알리고 다음 점으로, 작업은 마지막 점에서
   예) inspect:5 0,-1 1.5,-1,90    scan 1.5,1.5 -1,1.5,180    look_around -1,1.5,180    go -2,-1,0
       dock:DOCK_A 3.9,-2.8,0 (마지막 점 = dock 앞 staging 자리, DOCK_A = QR 내용)    undock (점 없음)
+      dock_aruco:dock_a 3.5,1.0,0 (ArUco board dock_a)
   !<작업>: 지금 작업을 멈추고 바로 보냄    cancel: 지금 작업 취소 + 대기 비우기
   help: 이 도움말, quit 또는 Ctrl-D: 끝내기 (남은 작업이 끝날 때까지 기다림), Ctrl-C: 취소하고 끝내기'''
 
@@ -78,7 +80,7 @@ def parse_line(text):
     if len(tokens) < 2 and action != Task.ACTION_UNDOCK:
         raise ValueError('need at least one point')
     duration, target = DEFAULT_DURATION, ''
-    if action == Task.ACTION_DOCK:
+    if action in (Task.ACTION_DOCK, Task.ACTION_DOCK_ARUCO):
         target = option
     elif option:
         try:

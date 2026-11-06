@@ -9,6 +9,7 @@ find_package(std_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Task.msg"
   "msg/QrCode.msg"
+  "msg/ArucoDetection.msg"
   "action/ExecuteTask.action"
   DEPENDENCIES geometry_msgs std_msgs
 )

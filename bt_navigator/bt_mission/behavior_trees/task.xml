@@ -18,6 +18,7 @@
     look_around  점을 차례로 들른 뒤, 마지막 점에서 제자리 한 바퀴
     dock         점을 차례로 들른 뒤(마지막 점 = dock 앞 staging 자리), {target} QR 을 보고 도킹 (아래 Dock 트리)
     undock       점 없이, 그 자리에서 dock 을 빠져나온다 (아래 Undock 트리)
+    dock_aruco   점을 차례로 들른 뒤, {target} ArUco board 를 보고 도킹 (아래 DockAruco 트리, ARUCO_DOCKING.md)
 
   장애물은 이 트리가 다루지 않는다. 길이 막히면 controller 가 그 앞에서 감속해서 서고(갑자기 나타나면
   collision_monitor 가 세운다), NavigateToPose 는 goal 을 그대로 둔 채 RUNNING 으로 기다린다 (README 6장).
@@ -25,8 +26,9 @@
 <root main_tree_to_execute="Task">
 
   <BehaviorTree ID="Task">
-    <Switch5 name="by_action" variable="{action}"
-             case_1="inspect" case_2="scan" case_3="look_around" case_4="dock" case_5="undock">
+    <Switch6 name="by_action" variable="{action}"
+             case_1="inspect" case_2="scan" case_3="look_around" case_4="dock" case_5="undock"
+             case_6="dock_aruco">
       <Sequence name="inspect">
         <ForEachWaypoint name="inspect_points" poses="{waypoints}" pose="{waypoint}"
                          reached="{waypoints_reached}" task_id="{task_id}">
@@ -56,11 +58,18 @@
         <SubTree ID="Dock" __shared_blackboard="true"/>
       </Sequence>
       <SubTree ID="Undock" __shared_blackboard="true"/>
+      <Sequence name="dock_aruco">
+        <ForEachWaypoint name="aruco_points" poses="{waypoints}" pose="{waypoint}"
+                         reached="{waypoints_reached}" task_id="{task_id}">
+          <NavigateToPose name="go_aruco_staging" goal="{waypoint}"/>
+        </ForEachWaypoint>
+        <SubTree ID="DockAruco" __shared_blackboard="true"/>
+      </Sequence>
       <ForEachWaypoint name="go_points" poses="{waypoints}" pose="{waypoint}"
                        reached="{waypoints_reached}" task_id="{task_id}">
         <NavigateToPose name="go_only" goal="{waypoint}"/>
       </ForEachWaypoint>
-    </Switch5>
+    </Switch6>
   </BehaviorTree>
 
   <!--
@@ -114,5 +123,44 @@
     <MuteCollisionMonitor name="mute_safety_undock" polygon="Footprint">
       <BackOff name="undock" distance="0.4" speed="0.05"/>
     </MuteCollisionMonitor>
+  </BehaviorTree>
+
+  <!--
+  ArUco 도킹 (ARUCO_DOCKING.md). 카메라 영상의 board 는 aruco_detector.py 가 찾아 dock/aruco 로 보낸다 (자세 + 공분산).
+  board 는 충전 접점 면보다 0.3 m 뒤에 세워 두어, 로봇이 붙을 때까지 카메라가 본다 (odom 만으로 가는 구간이 없다).
+  설 곳: ~/.ros/aruco_taught/<board>.yaml (aruco_teach.py 로 가르친 자세) 이 있으면 그것, 없으면 접점 면 앞 0.10 m.
+  허용오차: 다가가기 앞뒤 3 mm, 옆 2 mm, 방향 0.29 도 (MecanumParams 기본값), 서서 고치기 1.5 mm, 1.5 mm, 0.2 도.
+  -->
+  <BehaviorTree ID="DockAruco">
+    <Sequence name="dock_aruco">
+      <RetryUntilSuccessful num_attempts="3">
+        <Fallback name="aruco_dock_or_retreat">
+          <Sequence name="aruco_attempt">
+            <!-- 서서 board 를 10번 보고 dock 의 자리(odom)를 잡는다. 설 곳도 정한다 -->
+            <DetectArucoDock name="find_board" target="{target}" state="{aruco_dock}" timeout="5"/>
+            <!-- 설 곳 0.25 m 앞까지. 옆과 방향을 깔때기 안으로 맞춘다. collision_monitor 는 켠 채 -->
+            <ArucoServo name="aruco_approach" state="{aruco_dock}" standoff="0.25" max_vx="0.15" max_vy="0.10"
+                        tol_along="0.01" tol_lat="0.005" tol_yaw="1.0" lost_timeout="1.0" timeout="30"/>
+            <MuteCollisionMonitor name="mute_safety_aruco" polygon="Footprint">
+              <Sequence name="aruco_insert_refine">
+                <!-- 마지막 0.25 m 를 0.05 m/s 로. 가며 본 board 로 dock 의 자리를 계속 고친다 -->
+                <ArucoServo name="aruco_insert" state="{aruco_dock}" standoff="0" max_vx="0.05" max_vy="0.03"
+                            accel_x="0.1" accel_y="0.1" lost_timeout="1.0" timeout="30"/>
+                <!-- 서서 재고 고치기: 움직이며 본 것의 늦음, 흔들림, 미끄러짐을 지운다 -->
+                <ArucoRefine name="aruco_refine" state="{aruco_dock}" max_vx="0.03" max_vy="0.03"
+                             tol_along="0.0015" tol_lat="0.0015" tol_yaw="0.2" max_iterations="3"/>
+              </Sequence>
+            </MuteCollisionMonitor>
+          </Sequence>
+          <!-- 실패하면 물러나(뒤는 레이저로 확인) 처음부터. 3번 안 되면 작업 실패 -->
+          <ForceFailure>
+            <MuteCollisionMonitor name="mute_safety_aruco_retreat" polygon="Footprint">
+              <BackOff name="aruco_retreat" distance="0.4" speed="0.1" fail_when_blocked="false"/>
+            </MuteCollisionMonitor>
+          </ForceFailure>
+        </Fallback>
+      </RetryUntilSuccessful>
+      <CheckCharging name="aruco_charging" topic="" timeout="5"/>
+    </Sequence>
   </BehaviorTree>
 </root>

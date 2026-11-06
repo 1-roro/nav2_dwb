@@ -1,5 +1,7 @@
 # QR 도킹: RealSense 로 QR 을 보고 dock 에 붙기 (메카넘 AMR)
 
+> mm 단위 정밀도와 실제 로봇으로 옮기는 방법(가르친 자세, 미끄러짐, 카메라 TF 오차)은 ArUco 판에서 따로 다룬다: [ARUCO_DOCKING.md](ARUCO_DOCKING.md).
+
 충전 dock 에 QR 을 붙여 두고, 로봇이 RealSense 카메라로 QR 을 보며 dock 에 붙는 작업 `dock` 와 빠져나오는 작업 `undock` 을 미션 BT 에 더했다. 로봇은 바퀴 4개가 메카넘이라 앞뒤(vx), 옆(vy), 회전(wz)을 한꺼번에 낸다.
 
 ![docking runs](docs/dock_runs.png)

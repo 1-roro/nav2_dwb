@@ -2,6 +2,7 @@
 
 - 창고 지도에서 웨이포인트 주행 중 장애물 stop & go (아래)
 - QR 도킹: `dock_runs.png` (staging 세 곳에서 도킹한 길과 오차), `dock_camera_debug.jpg` (staging 에서 본 카메라 화면과 검출). 설명은 [DOCKING.md](../DOCKING.md)
+- ArUco 도킹: `aruco_board.png` (dock 과 board 의 구성), `aruco_results.png` (실제 로봇과의 차이를 넣은 실험), `aruco_camera_debug.jpg` (붙은 자리에서 본 화면). 설명은 [ARUCO_DOCKING.md](../ARUCO_DOCKING.md)
 
 ## 창고 지도에서 웨이포인트 주행 중 장애물 stop & go
 
