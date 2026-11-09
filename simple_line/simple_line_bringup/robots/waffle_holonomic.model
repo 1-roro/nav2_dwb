@@ -1,0 +1,265 @@
+<?xml version="1.0"?>
+<!--
+  메카넘(홀로노믹) 로봇 대신 쓰는 시뮬레이션 로봇. 모양과 센서 자리는 nav2_bringup 의 waffle.model 과 같다.
+    1. 몸체가 link 하나다. 바퀴, 캐스터, 레이저, 카메라를 모두 한 link 에 붙였다 (joint 없음).
+       gazebo_ros_planar_move 는 모든 link 에 같은 속도를 덮어쓴다. 원래처럼 link 가 여럿이면 joint 가 벌어져
+       (특히 제자리 회전 뒤) 카메라가 TF 와 다른 곳에 가고, 레이저에 로봇 뒤 0.2 m 의 가짜 점(제 몸)이 생겨
+       collision_monitor 가 로봇을 세웠다. 한 link 이면 센서는 몸에 단단히 붙어 있다
+    1-1. 무게중심을 base_footprint 위로 옮겼다 (planar_move 는 무게중심의 속도를 정한다. 그래야 제자리에서 돈다).
+       그러면 무게중심이 바퀴 축 위라 앞뒤로 기울므로(12 도까지 기울어 카메라가 QR 을 놓쳤다) 앞쪽에 받침
+       (마찰 0 의 작은 공)을 더했다
+    1-2. 레이저의 최소 거리를 0.12 -> 0.20 m. 한 link 에서는 레이저가 제 몸의 상자를 본다 (Gazebo 의 ray 가
+       같은 link 의 충돌 모양을 빼지 않는다). 몸의 끝은 레이저에서 0.19 m 안이다
+    2. planar_move: cmd_vel 의 vx, vy, wz 를 그대로 몸체 속도로 준다 (메카넘 바퀴를 흉내 내지 않는다.
+       바퀴 자리의 충돌 모양은 마찰 0 으로 몸체만 받친다). odom 은 미끄러짐이 없는 참값이다
+    3. RealSense 처럼 컬러 + 컬러에 맞춘 깊이 (D435 컬러 848x480, 수평 화각 69.4 도, 15 Hz):
+       /camera/color/image_raw, /camera/color/camera_info, frame camera_rgb_optical_frame (URDF 에 있는 자리)
+       /camera/aligned_depth_to_color/image_raw: 같은 자리, 같은 화각의 깊이 (424x240, 32FC1 m)
+    4. 레이저 광선은 그리지 않는다 (카메라 영상에 보이지 않게)
+  TF 는 robot_state_publisher 가 nav2_bringup 의 turtlebot3_waffle.urdf 로 낸다 (바퀴 joint 상태는 없다).
+  simple_line.launch.py robot:=holonomic 이 이 파일을 쓴다.
+-->
+<sdf version="1.6">
+  <model name="waffle_holonomic">
+    <link name="base_footprint">
+      <inertial>
+        <!-- 무게중심을 회전 중심(base_footprint) 위에. planar_move 는 무게중심의 속도를 정하므로, 원래처럼 0.064 m
+             뒤에 있으면 제자리 회전 때 base_footprint 가 그 둘레를 돌아 자리가 바뀐다 (controller 가 그것과 싸웠다) -->
+        <pose>0 0 0.048 0 0 0</pose>
+        <mass>1.5</mass>
+        <inertia><ixx>0.01</ixx><ixy>0</ixy><ixz>0</ixz><iyy>0.01</iyy><iyz>0</iyz><izz>0.01</izz></inertia>
+      </inertial>
+
+      <collision name="base_collision">
+        <pose>-0.064 0 0.048 0 0 0</pose>
+        <geometry><box><size>0.265 0.265 0.089</size></box></geometry>
+        <surface><friction><ode><mu>0.0</mu><mu2>0.0</mu2></ode></friction></surface>
+      </collision>
+      <collision name="lidar_collision">
+        <pose>-0.052 0 0.111 0 0 0</pose>
+        <geometry><cylinder><radius>0.0508</radius><length>0.055</length></cylinder></geometry>
+      </collision>
+      <collision name="camera_collision">
+        <pose>0.069 0 0.102 0 0 0</pose>
+        <geometry><box><size>0.008 0.130 0.022</size></box></geometry>
+      </collision>
+      <collision name="wheel_left_collision">
+        <pose>0.0 0.144 0.023 -1.57 0 0</pose>
+        <geometry><cylinder><radius>0.033</radius><length>0.018</length></cylinder></geometry>
+        <surface><friction><ode><mu>0.0</mu><mu2>0.0</mu2></ode></friction></surface>
+      </collision>
+      <collision name="wheel_right_collision">
+        <pose>0.0 -0.144 0.023 -1.57 0 0</pose>
+        <geometry><cylinder><radius>0.033</radius><length>0.018</length></cylinder></geometry>
+        <surface><friction><ode><mu>0.0</mu><mu2>0.0</mu2></ode></friction></surface>
+      </collision>
+      <collision name="caster_left_collision">
+        <pose>-0.177 0.064 -0.004 0 0 0</pose>
+        <geometry><sphere><radius>0.005</radius></sphere></geometry>
+        <surface><friction><ode><mu>0.0</mu><mu2>0.0</mu2></ode></friction></surface>
+      </collision>
+      <!-- 앞쪽 받침 (원래 모델에는 없다). 무게중심을 바퀴 축 위로 옮겼으므로, 없으면 몸이 앞뒤로 기울었다 -->
+      <collision name="front_support_left_collision">
+        <pose>0.06 0.064 -0.004 0 0 0</pose>
+        <geometry><sphere><radius>0.005</radius></sphere></geometry>
+        <surface><friction><ode><mu>0.0</mu><mu2>0.0</mu2></ode></friction></surface>
+      </collision>
+      <collision name="front_support_right_collision">
+        <pose>0.06 -0.064 -0.004 0 0 0</pose>
+        <geometry><sphere><radius>0.005</radius></sphere></geometry>
+        <surface><friction><ode><mu>0.0</mu><mu2>0.0</mu2></ode></friction></surface>
+      </collision>
+      <collision name="caster_right_collision">
+        <pose>-0.177 -0.064 -0.004 0 0 0</pose>
+        <geometry><sphere><radius>0.005</radius></sphere></geometry>
+        <surface><friction><ode><mu>0.0</mu><mu2>0.0</mu2></ode></friction></surface>
+      </collision>
+
+      <visual name="base_visual">
+        <pose>-0.064 0 0 0 0 0</pose>
+        <geometry><mesh><uri>model://turtlebot3_common/meshes/waffle_base.dae</uri><scale>0.001 0.001 0.001</scale></mesh></geometry>
+      </visual>
+      <visual name="lidar_visual">
+        <pose>-0.064 0 0.121 0 0 0</pose>
+        <geometry><mesh><uri>model://turtlebot3_common/meshes/lds.dae</uri><scale>0.001 0.001 0.001</scale></mesh></geometry>
+      </visual>
+      <visual name="wheel_left_visual">
+        <pose>0.0 0.144 0.023 0 0 0</pose>
+        <geometry><mesh><uri>model://turtlebot3_common/meshes/tire.dae</uri><scale>0.001 0.001 0.001</scale></mesh></geometry>
+      </visual>
+      <visual name="wheel_right_visual">
+        <pose>0.0 -0.144 0.023 0 0 0</pose>
+        <geometry><mesh><uri>model://turtlebot3_common/meshes/tire.dae</uri><scale>0.001 0.001 0.001</scale></mesh></geometry>
+      </visual>
+
+      <sensor name="tb3_imu" type="imu">
+        <always_on>true</always_on>
+        <update_rate>200</update_rate>
+        <imu>
+          <angular_velocity>
+            <x>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>2e-4</stddev>
+              </noise>
+            </x>
+            <y>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>2e-4</stddev>
+              </noise>
+            </y>
+            <z>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>2e-4</stddev>
+              </noise>
+            </z>
+          </angular_velocity>
+          <linear_acceleration>
+            <x>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>1.7e-2</stddev>
+              </noise>
+            </x>
+            <y>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>1.7e-2</stddev>
+              </noise>
+            </y>
+            <z>
+              <noise type="gaussian">
+                <mean>0.0</mean>
+                <stddev>1.7e-2</stddev>
+              </noise>
+            </z>
+          </linear_acceleration>
+        </imu>
+        <plugin name="turtlebot3_imu" filename="libgazebo_ros_imu_sensor.so">
+          <initial_orientation_as_reference>false</initial_orientation_as_reference>
+          <ros>
+            <!-- <namespace>/tb3</namespace> -->
+            <remapping>~/out:=imu</remapping>
+          </ros>
+        </plugin>
+      </sensor>
+
+      <sensor name="hls_lfcd_lds" type="ray">
+        <always_on>true</always_on>
+        <visualize>false</visualize>
+        <pose>-0.064 0 0.15 0 0 0</pose>
+        <update_rate>5</update_rate>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>360</samples>
+              <resolution>1.000000</resolution>
+              <min_angle>0.000000</min_angle>
+              <max_angle>6.280000</max_angle>
+            </horizontal>
+          </scan>
+          <range>
+            <min>0.20</min>           <!-- 제 몸(레이저에서 0.19 m 안)을 보지 않게 (원래 0.12) -->
+            <max>20.0</max>
+            <resolution>0.015000</resolution>
+          </range>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.01</stddev>
+          </noise>
+        </ray>
+        <plugin name="turtlebot3_laserscan" filename="libgazebo_ros_ray_sensor.so">
+          <ros>
+              <!-- <namespace>/tb3</namespace> -->
+              <remapping>~/out:=scan</remapping>
+          </ros>
+          <output_type>sensor_msgs/LaserScan</output_type>
+          <frame_name>base_scan</frame_name>
+        </plugin>
+      </sensor>
+
+      <!-- RealSense 컬러 카메라 = URDF 의 camera_rgb_frame (base_footprint 에서 0.069, -0.047, 0.117) -->
+      <sensor name="realsense_color" type="camera">
+        <always_on>true</always_on>
+        <update_rate>15</update_rate>
+        <pose>0.069 -0.047 0.117 0 0 0</pose>
+        <camera name="color">
+          <horizontal_fov>1.211</horizontal_fov>
+          <image>
+            <width>848</width>
+            <height>480</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.02</near>
+            <far>10.0</far>
+          </clip>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.007</stddev>
+          </noise>
+        </camera>
+        <plugin name="realsense_color_driver" filename="libgazebo_ros_camera.so">
+          <ros>
+            <namespace>camera</namespace>
+          </ros>
+          <camera_name>color</camera_name>
+          <frame_name>camera_rgb_optical_frame</frame_name>
+        </plugin>
+      </sensor>
+
+      <!-- 컬러와 같은 자리, 같은 화각의 깊이 = realsense-ros 의 aligned_depth_to_color (해상도만 절반) -->
+      <sensor name="realsense_depth" type="depth">
+        <always_on>true</always_on>
+        <update_rate>15</update_rate>
+        <pose>0.069 -0.047 0.117 0 0 0</pose>
+        <camera name="depth">
+          <horizontal_fov>1.211</horizontal_fov>
+          <image>
+            <width>424</width>
+            <height>240</height>
+          </image>
+          <clip>
+            <near>0.1</near>
+            <far>5.0</far>
+          </clip>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.002</stddev>
+          </noise>
+        </camera>
+        <plugin name="realsense_depth_driver" filename="libgazebo_ros_camera.so">
+          <ros>
+            <namespace>camera</namespace>
+            <remapping>depth/depth/image_raw:=aligned_depth_to_color/image_raw</remapping>
+            <remapping>depth/depth/camera_info:=aligned_depth_to_color/camera_info</remapping>
+          </ros>
+          <camera_name>depth</camera_name>
+          <frame_name>camera_rgb_optical_frame</frame_name>
+          <min_depth>0.1</min_depth>
+          <max_depth>5.0</max_depth>
+        </plugin>
+      </sensor>
+    </link>
+
+    <plugin name="holonomic_drive" filename="libgazebo_ros_planar_move.so">
+      <ros>
+        <remapping>/tf:=tf</remapping>
+      </ros>
+      <update_rate>50</update_rate>
+      <publish_rate>30</publish_rate>
+      <publish_odom>true</publish_odom>
+      <publish_odom_tf>true</publish_odom_tf>
+      <odometry_frame>odom</odometry_frame>
+      <robot_base_frame>base_footprint</robot_base_frame>
+      <covariance_x>0.0001</covariance_x>
+      <covariance_y>0.0001</covariance_y>
+      <covariance_yaw>0.01</covariance_yaw>
+    </plugin>
+  </model>
+</sdf>

@@ -23,6 +23,7 @@
 
 파라미터: 설치된 Humble 기본 nav2_params.yaml 과 slam_toolbox 의 mapper_params_online_async.yaml 위에
 params_file(기본 params/simple_line_params.yaml)을 덮어쓴다. 'plugin' 키가 있는 항목은 통째로 바뀐다.
+holonomic:=True 이면 그 위에 params/holonomic.yaml (옆으로 가는 속도 vy 를 막지 않기, AMCL 운동 모델)을 또 덮는다.
 """
 
 import os
@@ -80,6 +81,9 @@ def launch_setup(context):
         params.update(yaml.safe_load(f))
     with open(os.path.expanduser(arg('params_file'))) as f:
         merge(params, yaml.safe_load(f))
+    if arg('holonomic').lower() == 'true':
+        with open(os.path.join(here, 'params', 'holonomic.yaml')) as f:
+            merge(params, yaml.safe_load(f))
 
     set_use_sim_time(params, use_sim_time)
     # 이 패키지의 navigation BT (제자리 회전, 후진 recovery 없음)
@@ -150,6 +154,8 @@ def generate_launch_description():
         DeclareLaunchArgument('initial_pose_y', default_value='', description='AMCL 초기 위치 y [m]'),
         DeclareLaunchArgument('initial_pose_yaw', default_value='',
                               description='AMCL 초기 방향 [rad]'),
+        DeclareLaunchArgument('holonomic', default_value='False',
+                              description='True: 메카넘처럼 옆으로도 가는 로봇 (params/holonomic.yaml)'),
         OpaqueFunction(function=launch_setup),
     ])
 

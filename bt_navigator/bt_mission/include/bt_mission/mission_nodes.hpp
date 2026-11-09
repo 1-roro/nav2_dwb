@@ -20,7 +20,7 @@
 namespace bt_mission
 {
 
-// task.xml 에서 쓰는 이 패키지의 BT 노드들을 factory 에 등록한다
+// task.xml (Task, Dock, Undock 트리) 에서 쓰는 이 패키지의 BT 노드들을 factory 에 등록한다
 void registerNodes(BT::BehaviorTreeFactory & factory);
 
 // 작업 진행 상황을 알리는 토픽 (std_msgs/String, "<작업 id> <상태>"). ForEachWaypoint 가 도착을 보낸다

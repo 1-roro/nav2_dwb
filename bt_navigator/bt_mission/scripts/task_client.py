@@ -11,9 +11,13 @@ task_server 에 작업을 액션(execute_task, bt_mission_msgs/action/ExecuteTas
   # 작업 하나만 보내고, 끝날 때까지 기다렸다가 종료 (종료 코드 0 = SUCCEEDED)
   ros2 run bt_mission task_client.py inspect 0,-1 1.5,-1,90
 
-작업 한 줄의 형식: <action>[:duration] x,y[,yaw_deg] [x,y[,yaw_deg] ...]
+작업 한 줄의 형식: <action>[:option] x,y[,yaw_deg] [x,y[,yaw_deg] ...]
+  - option: inspect 는 작업 시간 [s] (inspect:5), dock 은 찾을 QR 의 내용 (dock:DOCK_A, 비우면 처음 보이는 QR),
+    dock_aruco 는 board 이름 (dock_aruco:dock_a, 비우면 처음 보이는 board)
   - 좌표는 map frame. 로봇은 점마다 멈춰서 위치와 방향을 맞추고(도착) 다음 점으로 간다.
-    작업(inspect 의 점검, look_around 의 회전)은 마지막 점에서 한다
+    작업(inspect 의 점검, look_around 의 회전, dock 의 도킹)은 마지막 점에서 한다.
+    dock 의 마지막 점은 dock 앞에서 QR 이 보이는 자리(staging)다
+  - undock 은 점 없이 쓴다: 그 자리에서 dock 을 빠져나온다
   - yaw 는 그 점에 도착했을 때 볼 방향 [deg]. 생략하면 중간 점은 다음 점 쪽,
     마지막 점은 직전 점에서 온 방향으로 채운다.
     작업의 첫 점은 직전 작업의 마지막 점(첫 작업이면 로봇 현재 위치)에서 온 것으로 본다
@@ -39,12 +43,15 @@ from bt_mission_msgs.action import ExecuteTask
 from bt_mission_msgs.msg import Task
 import tf2_ros
 
-ACTIONS = (Task.ACTION_GO, Task.ACTION_INSPECT, Task.ACTION_SCAN, Task.ACTION_LOOK_AROUND)
+ACTIONS = (Task.ACTION_GO, Task.ACTION_INSPECT, Task.ACTION_SCAN, Task.ACTION_LOOK_AROUND,
+           Task.ACTION_DOCK, Task.ACTION_UNDOCK, Task.ACTION_DOCK_ARUCO)
 DEFAULT_DURATION = 3.0
 
-HELP = '''작업: <action>[:duration] x,y[,yaw_deg] [x,y[,yaw_deg] ...]   (map frame)
-  action: go | inspect | scan | look_around. 점마다 멈춰서 도착을 알리고 다음 점으로, 작업은 마지막 점에서
-  예) inspect 0,-1 1.5,-1,90    scan 1.5,1.5 -1,1.5,180    look_around -1,1.5,180    go -2,-1,0
+HELP = '''작업: <action>[:option] x,y[,yaw_deg] [x,y[,yaw_deg] ...]   (map frame)
+  action: go | inspect | scan | look_around | dock | undock | dock_aruco. 점마다 멈춰서 도착을 알리고 다음 점으로, 작업은 마지막 점에서
+  예) inspect:5 0,-1 1.5,-1,90    scan 1.5,1.5 -1,1.5,180    look_around -1,1.5,180    go -2,-1,0
+      dock:DOCK_A 3.9,-2.8,0 (마지막 점 = dock 앞 staging 자리, DOCK_A = QR 내용)    undock (점 없음)
+      dock_aruco:dock_a 3.5,1.0,0 (ArUco board dock_a)
   !<작업>: 지금 작업을 멈추고 바로 보냄    cancel: 지금 작업 취소 + 대기 비우기
   help: 이 도움말, quit 또는 Ctrl-D: 끝내기 (남은 작업이 끝날 때까지 기다림), Ctrl-C: 취소하고 끝내기'''
 
@@ -62,17 +69,24 @@ def on_sigint(*_):
 
 
 def parse_line(text):
-    """'inspect:5 0,-1 1.5,-1,90' -> ('inspect', 5.0, [(0, -1, None), (1.5, -1, 90)])"""
+    """'inspect:5 0,-1 1.5,-1,90' -> ('inspect', 5.0, '', [(0, -1, None), (1.5, -1, 90)])
+    'dock:DOCK_A 3.9,-2.8,0' -> ('dock', 3.0, 'DOCK_A', [(3.9, -2.8, 0)])"""
     tokens = text.split()
-    if len(tokens) < 2:
-        raise ValueError('need an action and at least one point')
-    action, _, duration = tokens[0].partition(':')
+    if not tokens:
+        raise ValueError('need an action')
+    action, _, option = tokens[0].partition(':')
     if action not in ACTIONS:
         raise ValueError(f"unknown action '{action}' (one of {', '.join(ACTIONS)})")
-    try:
-        duration = float(duration) if duration else DEFAULT_DURATION
-    except ValueError:
-        raise ValueError(f"duration '{duration}' is not a number (e.g. inspect:5)") from None
+    if len(tokens) < 2 and action != Task.ACTION_UNDOCK:
+        raise ValueError('need at least one point')
+    duration, target = DEFAULT_DURATION, ''
+    if action in (Task.ACTION_DOCK, Task.ACTION_DOCK_ARUCO):
+        target = option
+    elif option:
+        try:
+            duration = float(option)
+        except ValueError:
+            raise ValueError(f"duration '{option}' is not a number (e.g. inspect:5)") from None
     points = []
     for token in tokens[1:]:
         try:
@@ -82,7 +96,7 @@ def parse_line(text):
         if len(values) not in (2, 3):
             raise ValueError(f"'{token}' is not x,y or x,y,yaw_deg")
         points.append((values[0], values[1], values[2] if len(values) == 3 else None))
-    return action, duration, points
+    return action, duration, target, points
 
 
 def fill_yaws(start_xy, points):
@@ -163,9 +177,11 @@ class TaskClient(Node):
 
     # ---- 작업 보내기 ---------------------------------------------------------------------------
 
-    def make_task(self, action, duration, points):
+    def make_task(self, action, duration, points, target=''):
         self.count += 1
-        task = Task(id=f't{self.count}', action=action, duration=duration)
+        task = Task(id=f't{self.count}', action=action, duration=duration, target=target)
+        if not points:                      # undock: 그 자리에서
+            return task
         start = self.last_xy or (points[0][0], points[0][1])
         stamp = self.get_clock().now().to_msg()
         for x, y, yaw in fill_yaws(start, points):
@@ -190,8 +206,9 @@ class TaskClient(Node):
 
     def send(self, task):
         route = ' -> '.join(f'({p.pose.position.x:g},{p.pose.position.y:g})'
-                            for p in task.waypoints)
-        print(f'  -> {task.id}: {task.action} {route}', flush=True)
+                            for p in task.waypoints) or '(here)'
+        target = f' [{task.target}]' if task.target else ''
+        print(f'  -> {task.id}: {task.action}{target} {route}', flush=True)
         self.active = task.id
         self.sent[task.id] = task
         future = self.client.send_goal_async(
@@ -280,11 +297,11 @@ def interactive(node):
             continue
         now = line.startswith('!')
         try:
-            action, duration, points = parse_line(line.lstrip('!'))
+            action, duration, target, points = parse_line(line.lstrip('!'))
         except ValueError as e:
             print(f'  ! {e}')
             continue
-        node.add(node.make_task(action, duration, points), now=now)
+        node.add(node.make_task(action, duration, points, target), now=now)
     if node.active is not None or node.queue:
         print(f'waiting for {len(node.queue) + 1} task(s) to finish (Ctrl-C to cancel)')
         node.wait_until_idle()
@@ -292,8 +309,8 @@ def interactive(node):
 
 
 def once(node, args):
-    action, duration, points = parse_line(' '.join(args))
-    task = node.make_task(action, duration, points)
+    action, duration, target, points = parse_line(' '.join(args))
+    task = node.make_task(action, duration, points, target)
     node.add(task)
     node.wait_until_idle()
     return 0 if node.results.get(task.id, ('',))[0] == 'SUCCEEDED' else 1
