@@ -649,7 +649,7 @@ void TaskServer::finish(Outcome outcome, const std::string & message)
 | `inspect:10 0,-1 1.5,-1,90` | (0,-1) 에 들렀다가 (1.5,-1) 에서 90° 를 보고 10초 점검 |
 | `scan 1.5,1.5 -1,1.5,180` | 두 점을 들르는 동안 0.5m 마다 스캔 |
 | `look_around -1,1.5` | (-1,1.5) 에 가서 제자리 한 바퀴 |
-| `dock:dock_a 3.9,-2.5 3.9,1.0,0` | (창고, `robot:=holonomic dock:=True`) (3.9,-2.5) 를 지나 dock 앞 (3.9,1.0) 에서 0° 를 보고 선 뒤, 'dock_a' 의 marker 를 보고 붙는다 |
+| `dock:dock_a 3.85,-2.5 3.85,1.0,0` | (창고, `robot:=mecanum dock:=True`) (3.85,-2.5) 를 지나 dock 앞 (3.85,1.0) 에서 0° 를 보고 선 뒤, 'dock_a' 의 marker 를 보고 붙는다 |
 | `undock` | dock 에서 0.4 m 물러난다 |
 
 #### 4-5-3. 대화형 (`task_client.py`)

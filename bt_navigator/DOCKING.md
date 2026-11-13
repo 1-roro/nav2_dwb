@@ -1,14 +1,18 @@
 # ArUco marker 하나로 정밀 도킹 (메카넘)
 
-dock(충전대) 뒤판에 붙인 **ArUco marker 하나**를 RealSense 컬러 카메라로 보고, 메카넘(홀로노믹) 로봇을 충전 접점에 mm 단위로 붙인다. 작업은 `task_client.py` 의 `dock:<dock 이름> <staging 자리>` 로 보낸다. 미션 BT 의 다른 부분은 [README.md](README.md).
+dock(충전대) 뒤판에 붙인 **ArUco marker 하나**를 RealSense 컬러 카메라로 보고, 4바퀴 메카넘 로봇을 충전 접점에 mm 단위로 붙인다. 작업은 `task_client.py` 의 `dock:<dock 이름> <staging 자리>` 로 보낸다. 미션 BT 의 다른 부분은 [README.md](README.md).
 
-Gazebo 결과 (참값, 16회 모두 성공):
+![mecanum robot and dock](../simple_line/doc/mecanum_robot.png)
+
+시뮬레이션 로봇 (`simple_line.launch.py robot:=mecanum`, `simple_line_bringup/robots/make_mecanum.py`): 몸체 0.32 x 0.22 m, 45° 롤러 바퀴 넷 (X 배치, 반지름 0.04 m, 폭까지 0.30 m), 앞쪽 가운데 RealSense (높이 0.13 m), 위 라이다. base_footprint = 네 바퀴의 가운데, 바닥. 앞면이 중심에서 0.16 m 라서 접점 면 0.17 m 앞에 선다.
+
+Gazebo 결과 (참값, 10회 모두 성공):
 
 | 조건 | 앞뒤 [mm] | 옆 [mm] | 방향 [°] |
 |---|---|---|---|
-| 실제와의 차이 없음, 도면 값 목표 | +0.6 ~ +1.3 | -0.5 ~ -0.6 | 0.03 ~ 0.05 |
-| 차이 넣음 (메카넘 미끄러짐 + 카메라 TF yaw 1.5°, 옆 1 cm + marker 크기 2 %), 도면 값 목표 | -3.7 ~ -5.0 | **-8.7 ~ -10.1** | **+1.52 ~ +1.67** |
-| 같은 차이, **가르친 자세** 목표 | -0.4 ~ +0.9 | -0.2 ~ -0.4 | 0.00 ~ 0.01 |
+| 실제와의 차이 없음, 도면 값 목표 | -0.8 ~ +0.7 | -0.5 ~ -0.6 | 0.00 |
+| 차이 넣음 (메카넘 미끄러짐 + 카메라 TF yaw 1.5°, 옆 1 cm + marker 크기 2 %), 도면 값 목표 | -5.5 ~ -7.0 | **-5.5 ~ -7.0** | **+1.47 ~ +1.52** |
+| 같은 차이, **가르친 자세** 목표 | +0.8 ~ +1.3 | -0.5 | -0.02 ~ -0.03 |
 
 ![results](docs/aruco_results.png)
 
@@ -19,6 +23,8 @@ Gazebo 결과 (참값, 16회 모두 성공):
 - [3. 자세 추정: marker 하나에서 dock 의 자세까지](#3-자세-추정-marker-하나에서-dock-의-자세까지)
 - [4. dock 의 자리: 후보 고르기와 Kalman 필터](#4-dock-의-자리-후보-고르기와-kalman-필터)
 - [5. 제어: dock 좌표계, 깔때기, 서서 재고 고치기](#5-제어-dock-좌표계-깔때기-서서-재고-고치기)
+  - [5-4. 안 보일 때, 놓쳤을 때: 뒤로 가지 않고 그 자리에서](#5-4-안-보일-때-놓쳤을-때-뒤로-가지-않고-그-자리에서)
+  - [5-5. find_marker 가 실패할 때](#5-5-find_marker-가-실패할-때)
 - [6. 가르친 자세: 고정 오차 지우기](#6-가르친-자세-고정-오차-지우기)
 - [7. 시뮬레이션 실험](#7-시뮬레이션-실험)
 - [8. 실제 로봇에서 정밀도 높이기 (sim-to-real)](#8-실제-로봇에서-정밀도-높이기-sim-to-real)
@@ -31,28 +37,27 @@ Gazebo 결과 (참값, 16회 모두 성공):
 ## 1. 해 보기 (시뮬레이션)
 
 ```bash
-# 터미널 1: 창고 + 옆으로도 가는 로봇(컬러 카메라) + 동쪽 벽의 ArUco dock (접점 면 x = 4.55, y = 1.0)
-ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse robot:=holonomic dock:=True
+# 터미널 1: 창고 + 4바퀴 메카넘 로봇(컬러 카메라) + 동쪽 벽의 ArUco dock (접점 면 x = 4.55, y = 1.0)
+#          + marker 검출 노드 (aruco_detector.launch.py 를 같이 띄운다. 따로 띄우려면 aruco_detector:=False)
+ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse robot:=mecanum dock:=True
 # 터미널 2
 ros2 run bt_mission task_server
-# 터미널 3: marker 검출 (dock/aruco)
-ros2 launch bt_mission aruco_detector.launch.py use_sim_time:=True
-# 터미널 4
+# 터미널 3
 ros2 run bt_mission task_client.py
-task> dock:dock_a 3.9,-2.5 3.9,1.0,0      # 마지막 점 = dock 앞 staging 자리 (planner 가 직선이라 한 점을 거친다)
+task> dock:dock_a 3.85,-2.5 3.85,1.0,0    # 마지막 점 = dock 앞 staging 자리 (planner 가 직선이라 한 점을 거친다)
 task> undock
-task> dock:dock_a 3.9,1.25,-15            # 옆 0.25 m, 비스듬히 15 도에서
+task> dock:dock_a 3.85,1.25,-15           # 옆 0.25 m, 비스듬히 15 도에서
 ```
 
 실제 로봇과의 차이를 넣어 보려면 (7장):
 
 ```bash
-ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse robot:=holonomic dock:=True \
-    mecanum_slip:=True camera_tf_error:=1.5,0.0,0.01
+ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse robot:=mecanum dock:=True \
+    mecanum_slip:=True camera_tf_error:=1.5,0.0,0.01 aruco_detector:=False
 ros2 launch bt_mission aruco_detector.launch.py use_sim_time:=True marker_scale:=1.02
 ```
 
-가르친 자세 만들기 (6장): 로봇을 dock 에 제대로 붙여 두고 (시뮬레이션에서는 `x_pose:=4.45 y_pose:=1.0 yaw:=0.0` 으로 그 자리에 띄운다)
+가르친 자세 만들기 (6장): 로봇을 dock 에 제대로 붙여 두고 (시뮬레이션에서는 `x_pose:=4.38 y_pose:=1.0 yaw:=0.0` 으로 그 자리에 띄운다)
 
 ```bash
 ros2 run bt_mission aruco_teach.py --ros-args -p dock:=dock_a     # ~/.ros/aruco_taught/dock_a.yaml
@@ -62,17 +67,17 @@ RViz: `/dock/aruco_debug` (Image: 찾은 marker, 바닥 위 자세로 다시 그
 
 ![camera](docs/aruco_camera_debug.jpg)
 
-dock 0.73 m 앞에서 본 `/dock/aruco_debug`. 초록 = 검출한 모서리, 빨간 점 = 추정한 바닥 위 자세 (x, y, yaw) 로 다시 그린 모서리. 위 두 점이 초록보다 조금 위에 있는 것은 시뮬레이션 로봇의 `base_footprint` 가 바닥에서 1 cm 떠 있어(바퀴 충돌 모양) 카메라가 TF 보다 1 cm 높기 때문이다. 진단 값 `tilt 0.9deg z -7mm` 가 그것을 말해 준다 (3-4).
+marker 0.71 m 앞에서 본 `/dock/aruco_debug`. 초록 = 검출한 모서리, 빨간 점 = 추정한 바닥 위 자세 (x, y, yaw) 로 다시 그린 모서리. 둘이 겹치고 진단 값이 `tilt 0.1deg z +1mm` 이면 카메라 TF 와 config 가 맞다 (3-4). 둘이 어긋나고 tilt, z 가 크면 카메라 TF(높이, pitch)나 marker 높이가 틀렸다.
 
 ## 2. 정밀도는 어디서 깎이나: 오차 예산
 
-dock 좌표계 D: 원점 = 바닥에서 충전 접점 면의 가운데, x = 방 쪽, z = 위. 로봇은 D 에서 (0.10 m, 0, 180°) 에 선다. marker 는 접점 면보다 0.3 m 뒤에 있다 (3-1).
+dock 좌표계 D: 원점 = 바닥에서 충전 접점 면의 가운데, x = 방 쪽, z = 위. 로봇은 D 에서 (0.17 m, 0, 180°) 에 선다 (시뮬레이션의 메카넘). marker 는 접점 면보다 0.3 m 뒤에 있다 (3-1).
 
 | 오차의 근원 | 크기 (이 구성) | 성질 | 다루는 곳 |
 |---|---|---|---|
 | 모서리 위치 잡음 | 0.1 ~ 0.3 px | 무작위 | 공분산으로 무게 (3-3), 여러 장 합치기 (4장), 서서 재기 (5-3) |
-| **marker 의 방향(yaw)** | 정면에서 원근(사다리꼴)으로만 보인다. 0.33 m 에서 0.03°, 1.2 m 에서 2° | 무작위 + 뒤집힘 | 바닥 사전분포 MAP (3-2), 필터 (4장) |
-| 지렛대 | marker → 붙은 자리 0.4 m. 방향 1° = 옆 7 mm | 기하 | marker 를 크게, 가까이 (8-3) |
+| **marker 의 방향(yaw)** | 정면에서 원근(사다리꼴)으로만 보인다. 0.32 m 에서 0.02°, 1.45 m 에서 수 ° | 무작위 + 뒤집힘 | 바닥 사전분포 MAP (3-2), 필터 (4장) |
+| 지렛대 | marker → 붙은 자리 0.47 m. 방향 1° = 옆 8 mm | 기하 | marker 를 크게, 가까이 (8-3) |
 | 카메라 TF (extrinsic) | yaw 1.5°, 옆 1 cm → 옆 10 mm, 방향 1.5° (7장) | **고정 오차** | 가르친 자세 (6장) |
 | marker 크기, 인쇄, 붙인 자리 | 2 % → 앞뒤 5 mm | **고정 오차** | 자로 재기, 가르친 자세 |
 | 서브픽셀 모서리의 편향 | 안쪽으로 0.1 ~ 0.3 px (블러에 따라) → 거리 수 mm | **고정 오차** | 가르친 자세 |
@@ -91,8 +96,8 @@ dock 좌표계 D: 원점 = 바닥에서 충전 접점 면의 가운데, x = 방 
 
 ![marker](docs/aruco_marker.png)
 
-- **붙을 때까지 보이게.** marker 를 접점 면에 붙이면 붙기 직전 카메라가 몇 cm 까지 다가가 화면을 넘치고 초점이 맞지 않는다. 그러면 마지막 구간을 바퀴 odom 으로만 가야 하고, 메카넘의 odom 은 옆으로 갈 때 몇 % 씩 틀린다. 그래서 marker 를 접점 면보다 0.3 m 뒤 판에 세웠다 (충전대는 높이 5 cm 로 낮게). 붙은 자리에서도 카메라와 marker 는 0.33 m 떨어져 222 px 로 보인다. **마지막 mm 까지 영상으로 닫힌 제어**가 된다.
-- 크기 0.12 m (DICT_4X4_50 의 0 번): 붙은 자리에서 화면 안에 들어가는 가장 큰 크기 (화각 69° x 42°, 카메라 높이 0.12 m, marker 중심 높이 0.155 m). 약 3 m 에서도 찾는다. 흰 여백(quiet zone)은 한 변의 1/4.
+- **붙을 때까지 보이게.** marker 를 접점 면에 붙이면 붙기 직전 카메라가 몇 cm 까지 다가가 화면을 넘치고 초점이 맞지 않는다. 그러면 마지막 구간을 바퀴 odom 으로만 가야 하고, 메카넘의 odom 은 옆으로 갈 때 몇 % 씩 틀린다. 그래서 marker 를 접점 면보다 0.3 m 뒤 판에 세웠다 (충전대는 높이 5 cm 로 낮게). 붙은 자리에서도 카메라와 marker 는 0.32 m 떨어져 약 230 px 로 보인다. **마지막 mm 까지 영상으로 닫힌 제어**가 된다.
+- 크기 0.12 m (DICT_4X4_50 의 0 번): 붙은 자리에서 화면 안에 들어가는 가장 큰 크기 (화각 69° x 42°, 카메라 높이 0.13 m, marker 중심 높이 0.155 m). 약 3 m 에서도 찾는다. 흰 여백(quiet zone)은 한 변의 1/4.
 - `config/aruco_docks.yaml` 에 dock 마다 marker 번호, 크기, 뒤로 물린 거리(offset), 높이, 옆 위치를 적는다. `tools/make_aruco_dock.py` 가 이것으로 인쇄용 PNG 와 Gazebo dock 모델을 만든다.
 
 ### 3-2. 왜 그냥 PnP 가 아닌가: 평면 정사각형의 두 해와 기울기-방향 섞임
@@ -123,18 +128,20 @@ cᵢ: D 에서 marker 모서리 (config 의 offset, 높이, 크기),  uᵢ: 검�
 
 | 로봇 자리 (D 에서, 카메라 ↔ marker) | 카메라 TF | 3자유도 못박기 | **MAP (이것)** | 6자유도 PnP |
 |---|---|---|---|---|
-| 붙은 자리 (0.33 m) | 맞음 | 0.3 / 0.03 | **0.1 / 0.01** | 0.1 / 0.02 |
-| | 높이 1 cm 틀림 | 26.9 / 4.09 | **0.0 / 0.01** | 0.1 / 0.02 |
-| | pitch 1° 틀림 | 28.5 / 4.14 | **0.0 / 0.01** | 0.1 / 0.02 |
-| 0.65 m 앞, 옆 5 cm (0.88 m) | 맞음 | 2.5 / 0.31 | **1.0 / 0.09** | 1.0 / 0.12 |
-| | pitch 1° 틀림 | 115.7 / 17.8 | **1.3 / 0.13** | 1.0 / 0.12 |
-| 1.0 m 정면 (1.23 m) | 맞음 | 18.5 / 2.61 | **16.5 / 2.31** | 26.7 / 3.77 |
-| 1.6 m 정면 (1.83 m) | 맞음 | 8.7 / 1.14 | **6.2 / 0.78** | 8.6 / 1.31 |
-| 2.5 m 정면 (2.73 m) | 맞음 | 13.6 / 1.97 | **7.8 / 1.24** | 9.0 / 1.35 |
+| 붙은 자리 0.17 m (0.32 m) | 맞음 | 0.2 / 0.02 | **0.1 / 0.02** | 0.4 / 0.05 |
+| | 높이 1 cm 틀림 | 0.1 / 0.01 | **0.1 / 0.02** | 0.4 / 0.05 |
+| | pitch 1° 틀림 | 0.3 / 0.04 | **0.1 / 0.02** | 0.4 / 0.05 |
+| 0.70 m 앞, 옆 5 cm (0.85 m) | 맞음 | 1.4 / 0.15 | **0.6 / 0.05** | 1.2 / 0.14 |
+| | 높이 1 cm 틀림 | 21.7 / 2.91 | **0.4 / 0.04** | 1.2 / 0.14 |
+| | pitch 1° 틀림 | 147.4 / 18.6 | **0.7 / 0.07** | 1.2 / 0.14 |
+| 1.0 m 정면 (1.15 m) | 맞음 | 0.9 / 0.11 | **0.9 / 0.11** | 0.9 / 0.11 |
+| 1.3 m 정면 (1.45 m) | 맞음 | 40.9 / 4.96 | **39.7 / 4.81** | 55.4 / 6.74 |
+| 1.6 m 정면 (1.75 m) | 맞음 | 4.2 / 0.51 | **1.8 / 0.22** | 2.0 / 0.24 |
+| 2.5 m 정면 (2.65 m) | 맞음 | 14.8 / 1.76 | **10.8 / 1.42** | 13.1 / 1.69 |
 
-- 못박기는 TF 가 맞을 때도 썩 낫지 않고, 틀리면 무너진다. 이 표가 MAP 을 고른 이유다 (`test_wrong_camera_extrinsics_do_not_break_it`).
-- MAP 은 PnP 보다 멀고 정면일 때 낫고(뒤집힘, 섞임), 가까우면 같다.
-- **1 m 넘게 정면에서 본 한 장은 방향이 2° 안팎 틀린다.** 0.12 m marker 하나의 물리적 한계다. 그래서 dock 자리를 한 장으로 정하지 않고, 다가가며 정확해지는 측정을 필터로 합친다 (4장). 붙은 자리(0.33 m)에서는 0.01 ~ 0.03° 다.
+- 못박기는 TF 가 틀리면 비스듬한 자리에서 무너진다 (0.7 m, 옆 5 cm 에서 2 cm, 15 cm). 정면 가운데서는 높이 오차가 거리로만 가서 버틴다. 실제 로봇은 비스듬히 다가가므로 이 표가 MAP 을 고른 이유다 (`test_wrong_camera_extrinsics_do_not_break_it`).
+- MAP 은 어디서나 PnP 와 같거나 낫고, 두 해가 비슷해지는 자리(1.3 m 정면)에서 차이가 크다 (`test_floor_prior_stops_the_flip_far_away`).
+- **1 m 넘게 정면에서 본 한 장은 방향이 몇 ° 틀릴 수 있다** (어느 거리에서 크게 틀리는지는 모서리가 화소에 걸리는 모양에 따라 다르다). 0.12 m marker 하나의 물리적 한계다. 그래서 dock 자리를 한 장으로 정하지 않고, 다가가며 정확해지는 측정을 필터로 합친다 (4장). 붙은 자리(0.32 m)에서는 0.02° 다.
 
 ### 3-4. 공분산과 진단
 
@@ -172,9 +179,13 @@ detector 는 base 에서 본 자세를 낸다. BT 는 영상을 **찍은 시각*
 ![Dock BT](bt_mission/doc/dock.png)
 
 ```
-DetectArucoDock (서서 10장)  →  ArucoServo approach (설 곳 0.25 m 앞까지, 0.15 m/s, collision_monitor 켠 채)
-  →  [collision_monitor 끔]  ArucoServo insert (마지막 0.25 m, 0.05 m/s)  →  ArucoRefine (서서 재고 고치기)
-실패하면 BackOff 0.4 m (뒤는 레이저로 확인) 하고 처음부터, 3번까지.  끝에 CheckCharging (충전 신호, 선택)
+find_marker   DetectArucoDock: 그 자리에서 보고, 안 보이면 제자리에서 돌며 찾는다 (5-4). 못 찾으면 작업 실패
+3번까지:
+  approach    ArucoServo: 설 곳 0.25 m 앞까지, 0.15 m/s, collision_monitor 켠 채. 이미 더 가까우면 건너뛴다
+  insert      [collision_monitor 끔] ArucoServo: 마지막 0.25 m, 0.05 m/s
+  refine      ArucoRefine: 서서 재고 고치기
+  실패하면    look_again: 그 자리에 서서 다시 본다 (돌지 않는다, 뒤로 가지 않는다) → 지금 자리에서 다음 시도
+CheckCharging (충전 신호, 선택)
 ```
 
 ### 5-1. dock 좌표계의 오차와 깔때기 (`mecanumStep`)
@@ -215,11 +226,60 @@ gate (깔때기): 옆 오차가 폭 w(d) = 4 mm + 0.15 · d 안이면 1, 그 두
   아니면 odom 으로 그만큼 고친다 (0.03 m/s, 최소 속도로)
 ```
 
-미끄러져 덜 가면 다음 측정이 잡아서 다시 고친다. odom 의 정확도와 상관없이 마지막 몇 mm 를 맞춘다. 한 장의 σ 는 붙은 자리에서 옆 1 ~ 4 mm (보수적인 0.5 px 기준) 이지만 15장을 합치면 1/4 쯤이 된다.
+미끄러져 덜 가면 다음 측정이 잡아서 다시 고친다. odom 의 정확도와 상관없이 마지막 몇 mm 를 맞춘다. 한 장의 σ 는 붙은 자리에서 옆 1 ~ 5 mm (보수적인 0.5 px 기준) 이지만 15장을 합치면 1/4 쯤이 된다.
+
+### 5-4. 안 보일 때, 놓쳤을 때: 뒤로 가지 않고 그 자리에서
+
+예전 트리는 실패하면 `BackOff` 로 0.4 m 물러나서 처음부터 다시 했다. 뒤를 레이저로 보긴 하지만, 레이저(높이 0.16 m)보다 낮은 물건이나 사람의 발은 못 본다. 그리고 물러나도 더 잘 보이는 것이 아니다: 못 찾는 이유는 대개 **방향**(staging 에 섰을 때 AMCL 방향 오차로 marker 가 화면 밖)이거나 **잠깐 가려짐**이다. 그래서 물러나지 않고 그 자리에서 해결한다.
+
+**처음 찾기 (`find_marker`, DetectArucoDock)**
+
+```
+서기 0.5 s → 3 s 동안 본다 → 8장 보면 끝 (3 s 가 지나도 3장 이상이면 끝)
+안 보이면: detector 가 아예 없으면(토픽에 publisher 없음) 바로 실패. 돌아 봐야 소용없다
+           있으면 처음 방향에서 +30°, -30°, +60°, -60° 로 차례로 제자리 회전 → 서서 다시 본다
+           (카메라 화각 69° 라 처음 방향 ±95° 를 덮는다)
+           도는 중에 marker 가 보이면 그 자리에 서서 본다
+돌기 전과 도는 동안 매 주기: 레이저로 몸이 쓸고 갈 원 (turn_radius 0.22 m + 여유 0.05 m) 안을 본다
+           점이 3개 넘게 있으면 돌지 않는다 (이미 돌던 중이면 그 자리에 선다)
+```
+
+- 메카넘은 제자리에서 돌므로(중심 = 네 바퀴 가운데) 쓸고 가는 곳이 반지름 0.22 m 원 하나뿐이다. 그 안만 비어 있으면 안전하다.
+- dock 이 원 가까이 있으면 돌지 않는다. 충전대는 높이 5 cm 라 레이저에 안 보이기 때문이다 (앞선 시도가 잡은 dock 자리로 판단).
+- 실패하면 로그에 이유를 남긴다 (5-5).
+
+**들어가다 놓쳤을 때 (`look_again`, 다시 시도)**
+
+- `ArucoServo` 가 1 초 동안 marker 를 못 보면(가려짐, 흔들림) 멈춘다. 그 자리에 서서 다시 본다. 돌지 않는다: dock 가까이일 수 있다.
+- 다음 시도의 `approach` 는 `hold_if_closer="true"` 다. 이미 그 단계의 목표(설 곳 0.25 m 앞)보다 가까우면 뒤로 가지 않고 넘어간다. 또 움직이는 동안에도 dock 에서 멀어지는 쪽 명령은 내지 않는다. `insert` 는 그 자리에서 이어서 들어간다.
+- 뒤로 가는 것은 `insert`, `refine` 이 목표를 mm 넘었을 때 그만큼 되돌리는 것뿐이다.
+- 물러나는 것은 `undock`(일부러 dock 에서 나올 때)만 남았다. 그것도 레이저로 뒤를 확인하고, 막혀 있으면 그 자리에 선다.
+
+Gazebo 에서 확인한 것 (4바퀴 메카넘, 참값):
+
+| 경우 | 결과 |
+|---|---|
+| detector 를 안 띄우고 dock 작업 | 3.5 s 만에 실패: "aruco_detector is not running ..." 돌지 않음, 움직임 0 |
+| staging 에서 dock 을 70° 비껴 봄 (marker 가 화면 밖) | +30, -30, +60, -60° 로 찾다가 도는 중에 보여 섰다 → 도킹. 앞뒤 +0.6 mm, 옆 -0.6 mm |
+| insert 중에 detector 를 2.5 s 끊음 (marker 놓침) | insert 실패 → 그 자리에서 다시 봄(1.8 s) → approach 건너뜀("already 240 mm closer") → insert, refine → 앞뒤 +0.3 mm, 옆 -0.5 mm. **dock 에서 멀어진 거리 0.0 mm** |
+| 로봇 옆 0.3 m 에 상자, marker 는 화면 밖 | "not turning to search: 20 laser points within 0.27 m" 돌지 않고 실패. 움직임 0 |
+
+### 5-5. find_marker 가 실패할 때
+
+`find_marker failed` 이면 task_server 로그의 `[aruco] dock '...' not found (...)` 줄이 이유를 말한다.
+
+| 로그 | 원인 | 할 일 |
+|---|---|---|
+| `aruco_detector is not running` | 검출 노드가 없다. 또는 띄웠지만 죽었다 | `simple_line.launch.py robot:=mecanum dock:=True` 는 같이 띄운다. 따로 띄웠다면 그 터미널의 에러를 본다: `bt_mission_msgs` 를 새로 빌드하지 않았거나(`colcon build --packages-select bt_mission_msgs bt_mission simple_line_bringup` 후 `source install/setup.bash`), OpenCV 에 aruco 가 없다(`pip` 의 `opencv-python` 이 apt 의 것을 가림. `pip uninstall opencv-python` 또는 `opencv-contrib-python`) |
+| `running but saw no marker` | 화면에 marker 가 없다 | `robot:=mecanum` 인가 (waffle 은 이 카메라가 없다). `ros2 topic hz /camera/color/image_raw`. staging 이 dock 앞 0.5 ~ 1.5 m 이고 dock 을 보는가. `/dock/aruco_debug` 를 RViz 로 |
+| `saw only other docks: 'dock_a'` | 작업의 dock 이름이 다르다 | `dock:dock_a` (예전 QR 예시의 `dock:DOCK_A` 가 아니다) |
+| `detections dropped: no TF odom <- base_footprint` | 영상 시각의 로봇 자리를 모른다 | TF 가 끊기지 않았는지, 시계가 섞이지 않았는지 (detector 는 `use_sim_time:=True`) |
+| `only N usable detections` | 너무 느리다 (느린 PC 의 Gazebo 카메라) | `ros2 topic hz /dock/aruco`. `look_time` 을 늘리거나 `min_found` 를 줄인다 |
+| `Did not turn to search: ...` | 옆에 무엇이 있어 돌지 않았다 | 그 이유를 치우거나 staging 자리를 옮긴다 |
 
 ## 6. 가르친 자세: 고정 오차 지우기
 
-도면 값으로 "접점 면 앞 0.10 m" 를 계산하면 카메라 TF, marker 의 크기와 붙인 자리, 카메라 내부값, 서브픽셀 모서리의 편향이 모두 들어간다. 각각 mm 와 0.x° 단위로 틀리기 쉽고, 몇 번을 봐도 그대로 남는다.
+도면 값으로 "접점 면 앞 0.17 m" 를 계산하면 카메라 TF, marker 의 크기와 붙인 자리, 카메라 내부값, 서브픽셀 모서리의 편향이 모두 들어간다. 각각 mm 와 0.x° 단위로 틀리기 쉽고, 몇 번을 봐도 그대로 남는다.
 
 **가르친 자세**: 로봇을 한 번 손으로 제대로 붙여 두고(충전 신호가 들어오는 자리) `aruco_teach.py` 로 그때 detector 가 본 dock 의 자세 q* (base 에서 x, y, yaw) 를 남긴다. 설 곳 = (q*)⁻¹.
 
@@ -232,7 +292,7 @@ f 가 틀려도 양쪽에 같이 들어가서 지워진다 (PBVS 의 목표를 "
 
 - `DetectArucoDock` 는 `~/.ros/aruco_taught/<dock>.yaml` 이 있으면 그것을 설 곳으로 쓴다 (없으면 도면 값 `docked_distance`). 로그의 `target (taught ...)` 로 확인한다.
 - 카메라를 다시 달거나 marker 를 다시 붙이면 다시 가르친다. dock 마다 가르친다.
-- `aruco_teach.py` 가 적는 `robot_in_dock` (detector 가 본 로봇 자리) 과 도면 값 (0.10 m, 0, 180°) 의 차이가 TF 와 치수의 오차다. 7장에서는 "105.0 mm, +9.9 mm, 178.46°" 로, 넣은 오차(크기 2 %, 옆 1 cm, yaw 1.5°)가 그대로 드러났다.
+- `aruco_teach.py` 가 적는 `robot_in_dock` (detector 가 본 로봇 자리) 과 도면 값 (0.17 m, 0, 180°) 의 차이가 TF 와 치수의 오차다. 7장에서는 "176.6 mm, +6.6 mm, 178.50°" 로, 넣은 오차(크기 2 %, 옆 1 cm, yaw 1.5°)가 그대로 드러났다.
 
 ## 7. 시뮬레이션 실험
 
@@ -244,22 +304,20 @@ f 가 틀려도 양쪽에 같이 들어가서 지워진다 (PBVS 의 목표를 "
 | 카메라 TF | `camera_tf_error:=1.5,0.0,0.01`. TF(URDF)의 카메라 자리만 바꾼다. Gazebo 의 카메라는 그대로 | yaw 1.5°, 옆 1 cm |
 | marker 크기 | `marker_scale:=1.02`. detector 가 marker 를 실제보다 2 % 크다고 믿는다 | 2 % |
 
-그 밖에 시뮬레이션 로봇은 `base_footprint` 가 바닥에서 1 cm 떠 있어 카메라 높이가 TF 와 1 cm 다르다 (모든 실험에 있다).
-
-staging 서너 곳(정면 0.55 ~ 0.75 m, 옆 ±0.3 m, ±20°)에서 `dock:dock_a` → 끝난 자리를 Gazebo 참값(planar_move 의 odom)으로 잼 → `undock` 을 되풀이했다.
+staging 서너 곳(로봇 중심이 접점 면 0.65 ~ 0.8 m 앞, 옆 ±0.3 m, ±20°)에서 `dock:dock_a` → 끝난 자리를 Gazebo 참값(planar_move 의 odom)으로 잼 → `undock` 을 되풀이했다.
 
 | | 조건 | 횟수 | 앞뒤 [mm] (+ 덜 감) | 옆 [mm] | 방향 [°] |
 |---|---|---|---|---|---|
-| E0 | 차이 없음, 도면 값 | 5 | +0.6 ~ +1.3 | -0.5 ~ -0.6 | 0.03 ~ 0.05 |
-| E1 | 차이 넣음, 도면 값 | 5 | -3.7 ~ -5.0 | **-8.7 ~ -10.1** | **+1.52 ~ +1.67** |
-| E2 | 차이 넣음, 가르친 자세 | 6 | -0.4 ~ +0.9 | -0.2 ~ -0.4 | 0.00 ~ 0.01 |
+| E0 | 차이 없음, 도면 값 | 4 | -0.8 ~ +0.7 | -0.5 ~ -0.6 | 0.00 |
+| E1 | 차이 넣음, 도면 값 | 3 | -5.5 ~ -7.0 | **-5.5 ~ -7.0** | **+1.47 ~ +1.52** |
+| E2 | 차이 넣음, 가르친 자세 | 3 | +0.8 ~ +1.3 | -0.5 | -0.02 ~ -0.03 |
 
 읽는 법:
 
 1. **미끄러짐은 거의 영향이 없다.** 바퀴 odom 이 옆으로 10 % 틀려도 marker 를 끝까지 보며 닫힌 제어를 하므로 앞뒤 1 mm 안팎에 선다.
-2. **고정 오차는 로봇이 스스로 보지 못한다.** E1 에서 로봇은 서서 재고 "앞뒤 1 mm, 옆 0.5 mm 안" 이라고 판단했지만 참값은 옆 10 mm, 1.5° 였다. 같은 틀린 TF 로 재기 때문이다. 다시 재기와 고치기는 무작위 오차와 실행 오차(미끄러짐, 데드밴드, 늦음)를 지울 뿐, 보정 오차는 지우지 못한다. 실제 로봇의 정밀도는 반드시 **영상이 아닌 기준**으로 재야 한다 (8-4).
-3. **가르친 자세가 고정 오차를 지운다** (E2: 옆 0.4 mm, 방향 0.01° 안). 넣은 TF 오차와 크기 오차가 그대로 있는데도 그렇다.
-4. E0 의 +1 mm, -0.5 mm 도 고정 오차다 (카메라 높이 1 cm, 서브픽셀 편향). 가르치면 지워진다.
+2. **고정 오차는 로봇이 스스로 보지 못한다.** E1 에서 로봇은 서서 재고 "앞뒤 1 mm, 옆 0.5 mm 안" 이라고 판단했지만 참값은 옆 7 mm, 1.5° 였다. 같은 틀린 TF 로 재기 때문이다. 다시 재기와 고치기는 무작위 오차와 실행 오차(미끄러짐, 데드밴드, 늦음)를 지울 뿐, 보정 오차는 지우지 못한다. 실제 로봇의 정밀도는 반드시 **영상이 아닌 기준**으로 재야 한다 (8-4).
+3. **가르친 자세가 고정 오차를 지운다** (E2: 옆 0.5 mm, 방향 0.03° 안). 넣은 TF 오차와 크기 오차가 그대로 있는데도 그렇다.
+4. E0 의 옆 -0.5 mm 도 고정 오차다 (서브픽셀 모서리 편향). 가르치면 지워진다. E2 의 앞뒤 +1 mm 는 서서 고치기의 허용오차(1.5 mm) 안에서 멈춘 것이다.
 5. E1, E2 에서 접근 초반에 필터가 한 번씩 다시 잡았다(`re-initialized`). 틀린 TF 의 오차가 거리마다 달라 멀리서 잡은 자리와 가까이서 본 자리가 공분산보다 크게 다르기 때문이다. 다시 잡은 뒤에는 그대로 들어갔다.
 
 시뮬레이션이 보여 주지 못한 것: 영상의 흔들림과 모션 블러, 노출과 조명, 카메라와 odom 의 시각 어긋남, 접점의 기계적 접촉, 바닥에 따라 바뀌는 미끄러짐. 8장의 순서로 실제 로봇에서 재고 맞춘다.
@@ -270,7 +328,7 @@ staging 서너 곳(정면 0.55 ~ 0.75 m, 옆 ±0.3 m, ±20°)에서 `dock:dock_a
 
 | 차이 | 마지막 자세에 주는 영향 | 줄이는 법 | 실제 로봇에서 재는 법 |
 |---|---|---|---|
-| 카메라 TF (extrinsic) | yaw 1° → 옆 7 mm. 높이, pitch 는 MAP 이 견딘다 (3-3) | **가르친 자세**. URDF 도 줄자/각도기로 맞춘다 | dock 가까이서 `/dock/aruco` 의 `tilt_deg`, `height_offset` 이 늘 0 근처인가. `aruco_teach.py` 의 `robot_in_dock` 과 줄자 비교 |
+| 카메라 TF (extrinsic) | yaw 1° → 옆 8 mm. 높이, pitch 는 MAP 이 견딘다 (3-3) | **가르친 자세**. URDF 도 줄자/각도기로 맞춘다 | dock 가까이서 `/dock/aruco` 의 `tilt_deg`, `height_offset` 이 늘 0 근처인가. `aruco_teach.py` 의 `robot_in_dock` 과 줄자 비교 |
 | 카메라 내부값, 왜곡 | 가장자리에서 각 오차 | RealSense 공장 보정값(camera_info). 의심되면 체커보드로 다시 | 재투영 오차 < 0.3 px. 디버그 영상의 rms 가 0.5 px 넘게 오르면 의심 |
 | marker 크기, 인쇄, 평평함 | 1 % → 앞뒤 2.5 mm | 인쇄 후 캘리퍼로 재서 yaml 의 size 를 고친다. 폼보드/아크릴에 붙인다. 무광 인쇄. 남은 것은 가르친 자세가 지운다 | marker 한 변을 캘리퍼로 |
 | 메카넘 미끄러짐, 데드밴드 | 명령한 만큼 안 감. 바퀴 odom 오차 | 끝까지 영상, 서서 고치기, 축마다 최소 속도와 명령 배율, 필터의 `odom_slip` | 8-2 |
@@ -312,15 +370,20 @@ staging 서너 곳(정면 0.55 ~ 0.75 m, 옆 ±0.3 m, ±20°)에서 `dock:dock_a
 
 ## 9. 파라미터
 
-`task.xml` 의 Dock 트리에 적힌 값이 시뮬레이션의 waffle 기준이다.
+`task.xml` 의 Dock 트리에 적힌 값이 시뮬레이션의 4바퀴 메카넘 기준이다.
 
 | 노드 | 포트 | 기본값 | 트리 | 뜻 |
 |---|---|---|---|---|
 | DetectArucoDock | `target` | "" | `{target}` | dock 이름 (`aruco_docks.yaml`) |
-| | `min_detections`, `timeout` | 10, 5 s | | 서서 합칠 측정 수 |
-| | `docked_distance` | 0.10 m | | 도면 값의 설 곳 (접점 면 앞) |
+| | `settle_time`, `look_time` | 0.5 s, 3 s | | 서서 기다리기, 한 방향에서 보는 시간 |
+| | `min_detections`, `min_found` | 8, 3 | | 이만큼 보면 끝 / look_time 이 지나도 이만큼이면 끝 |
+| | `search_angles` | "30;-30;60;-60" | find_marker 같음, look_again "" | 안 보이면 돌아 볼 방향 [°] (처음 방향에서). 비우면 돌지 않는다 |
+| | `search_wz`, `turn_radius`, `clearance`, `scan_topic` | 0.5 rad/s, 0.22 m, 0.05 m, scan | | 제자리 회전과 그 원 안의 레이저 확인 |
+| | `timeout` | 40 s | | |
+| | `docked_distance` | 0.17 m | | 도면 값의 설 곳 (접점 면 앞) |
 | | `taught_file`, `taught_dir`, `use_taught` | "", ~/.ros/aruco_taught, true | | 가르친 자세 |
 | ArucoServo | `standoff` | 0 | 0.25 / 0 | 설 곳보다 이만큼 앞에서 선다 |
+| | `hold_if_closer` | false | approach true | dock 에서 멀어지는 쪽으로 가지 않는다. 이미 더 가까우면 바로 성공 |
 | | `max_vx`, `max_vy`, `max_wz` | 0.15, 0.10 m/s, 0.4 rad/s | approach 0.15/0.10, insert 0.05/0.03 | |
 | | `min_vx`, `min_vy`, `min_wz` | 0.010, 0.015 m/s, 0.03 rad/s | | 데드밴드 |
 | | `accel_x`, `accel_y`, `accel_wz` | 0.3, 0.2 m/s², 1.0 rad/s² | insert 0.1, 0.1 | |
@@ -362,9 +425,11 @@ bt_navigator/
     └── doc/dock.png                              BT 그림
 
 simple_line/simple_line_bringup/
+├── robots/make_mecanum.py, mecanum.urdf, mecanum.model   4바퀴 메카넘 로봇 (치수 하나에서 URDF 와 Gazebo 모델)
+├── scripts/wheel_joint_publisher.py              odom 의 속도로 바퀴 넷의 각 (RViz 의 바퀴)
 ├── models/aruco_dock/                            접점 면 0.3 m 뒤에 marker 를 세운 충전대 (make_aruco_dock.py)
 ├── scripts/mecanum_slip_sim.py                   메카넘 미끄러짐과 바퀴 odom 흉내 (mecanum_slip:=True)
-└── launch/simple_line.launch.py                  dock:=True, mecanum_slip, camera_tf_error
+└── launch/simple_line.launch.py                  robot:=mecanum, dock:=True, mecanum_slip, camera_tf_error
 ```
 
 ## 참고 자료

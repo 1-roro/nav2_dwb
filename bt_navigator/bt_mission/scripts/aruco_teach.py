@@ -98,7 +98,7 @@ def main():
         'dock': dock,
         'base_frame': samples[0][0],
         'dock_in_base': {'x': float(q[0]), 'y': float(q[1]), 'yaw_deg': float(math.degrees(q[2]))},
-        # 확인용: 로봇이 dock 좌표계에서 어디 있나 (도면 값, 예: 0.10 m 앞과 다르면 그만큼이 도면/TF 와 실제의 차이)
+        # 확인용: 로봇이 dock 좌표계에서 어디 있나 (도면 값, 예: 0.17 m 앞과 다르면 그만큼이 도면/TF 와 실제의 차이)
         'robot_in_dock': {'x': float(robot[0]), 'y': float(robot[1]), 'yaw_deg': float(math.degrees(robot[2]))},
         'samples': len(samples),
         'used': used,

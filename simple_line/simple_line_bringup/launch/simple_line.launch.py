@@ -1,13 +1,13 @@
 """
-시뮬레이션: Gazebo + TurtleBot3 waffle + 내비게이션(navigation.launch.py) + RViz.
+시뮬레이션: Gazebo + 로봇 (TurtleBot3 waffle 또는 4바퀴 메카넘) + 내비게이션(navigation.launch.py) + RViz.
 
   ros2 launch simple_line_bringup simple_line.launch.py                          # 빈 방, 저장된 지도로 주행
   ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse slam:=True   # 창고 지도 만들기
   ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse         # 창고 지도로 주행
-  # ArUco 도킹 (bt_navigator/DOCKING.md): 메카넘처럼 옆으로도 가는 로봇 + 카메라, 창고 벽에 ArUco dock
-  ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse robot:=holonomic dock:=True
+  # ArUco 도킹 (bt_navigator/DOCKING.md): 4바퀴 메카넘 로봇 + 카메라, 창고 벽에 ArUco dock
+  ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse robot:=mecanum dock:=True
   # 실제 로봇과의 차이를 일부러 넣어 보기
-  ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse robot:=holonomic dock:=True \
+  ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse robot:=mecanum dock:=True \
       mecanum_slip:=True camera_tf_error:=1.5,0.0,0.01
 
 실제 로봇이면 이 파일 대신 로봇 드라이버(속도 명령, odom, 레이저, robot_state_publisher)를 띄우고
@@ -16,13 +16,16 @@ navigation.launch.py 를 띄운다. 이 파일에서 시뮬레이션만의 부�
 world 에 이름만 주면 worlds/<이름>.world 를 쓰고, map 을 비우면 maps/<이름>.yaml 을 쓴다.
 스폰 위치를 비우면 월드마다 정해 둔 곳에 놓고, AMCL 초기 위치도 같은 값으로 준다.
 
-robot   waffle    TurtleBot3 waffle (차동 구동, nav2_bringup 의 waffle.model)
-        holonomic 같은 몸체에 옆으로도 가는 구동(planar_move)과 RealSense 컬러 카메라 (robots/waffle_holonomic.model).
-                  내비게이션에도 holonomic:=True 를 넘긴다 (params/holonomic.yaml)
+robot   waffle    TurtleBot3 waffle (차동 구동, 바퀴 2개 + 캐스터. nav2_bringup 의 waffle.model)
+        mecanum   4바퀴 메카넘 로봇 (robots/mecanum.urdf, mecanum.model. robots/make_mecanum.py 가 만든다):
+                  몸체 0.32 x 0.30 m, 45 도 롤러 바퀴 넷, 앞쪽 RealSense, 위 라이다. Gazebo 에서는 planar_move 가
+                  vx, vy, wz 를 그대로 몸체 속도로 준다. 내비게이션에 holonomic:=True 를 넘긴다 (params/holonomic.yaml).
+                  holonomic 이라고 써도 같다 (예전 이름)
 camera_depth:=True  컬러에 맞춘 깊이 카메라도 켠다 (기본은 끈다: ArUco 도킹은 쓰지 않고, 렌더링과 점구름 계산이 무겁다)
 dock:=True        월드마다 정해 둔 곳에 ArUco marker 가 붙은 dock (models/aruco_dock, tools/make_aruco_dock.py)을
-                  놓는다. 지도에는 없는 물체다
-실제 로봇과의 차이를 일부러 넣기 (robot:=holonomic, bt_navigator/DOCKING.md 7장)
+                  놓는다. 지도에는 없는 물체다. robot:=mecanum 이면 marker 검출 노드(bt_mission 의
+                  aruco_detector.launch.py)도 같이 띄운다 (aruco_detector:=False 이면 띄우지 않는다: 따로 띄울 때)
+실제 로봇과의 차이를 일부러 넣기 (robot:=mecanum, bt_navigator/DOCKING.md 7장)
   mecanum_slip:=True       몸체가 명령보다 덜 가고(옆 90 %), 옆으로 가면 조금 돈다. odom 은 바퀴 odom 처럼 명령을
                            적분해서 그만큼 틀린다 (scripts/mecanum_slip_sim.py)
   camera_tf_error:=dyaw_deg,dx,dy
@@ -46,7 +49,7 @@ import tempfile
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (AppendEnvironmentVariable, DeclareLaunchArgument, ExecuteProcess,
-                            IncludeLaunchDescription, OpaqueFunction, SetEnvironmentVariable)
+                            IncludeLaunchDescription, LogInfo, OpaqueFunction, SetEnvironmentVariable)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -90,7 +93,7 @@ def holonomic_model(model_file, slip, depth):
                          '', sdf, flags=re.S)
         if n != 1:
             raise RuntimeError('depth camera not found in the holonomic model')
-    out = tempfile.NamedTemporaryFile(mode='w', prefix='waffle_holonomic_', suffix='.model', delete=False)
+    out = tempfile.NamedTemporaryFile(mode='w', prefix='mecanum_', suffix='.model', delete=False)
     out.write(sdf)
     out.close()
     return out.name
@@ -116,20 +119,21 @@ def launch_setup(context):
     y = float(arg('y_pose') or y)
     yaw = float(arg('yaw') or yaw)
 
-    with open(os.path.join(nav2_bringup, 'urdf', 'turtlebot3_waffle.urdf')) as f:
+    robot_type = arg('robot')
+    if robot_type not in ('waffle', 'mecanum', 'holonomic'):
+        raise RuntimeError(f'robot:={robot_type} 는 없다 (waffle | mecanum)')
+    holonomic = robot_type in ('mecanum', 'holonomic')
+    urdf = (os.path.join(here, 'robots', 'mecanum.urdf') if holonomic
+            else os.path.join(nav2_bringup, 'urdf', 'turtlebot3_waffle.urdf'))
+    with open(urdf) as f:
         robot_description = f.read()
     if arg('camera_tf_error'):
         robot_description = perturb_camera(robot_description, arg('camera_tf_error'))
-
-    robot_type = arg('robot')
-    if robot_type not in ('waffle', 'holonomic'):
-        raise RuntimeError(f'robot:={robot_type} 는 없다 (waffle | holonomic)')
-    holonomic = robot_type == 'holonomic'
-    model = (os.path.join(here, 'robots', 'waffle_holonomic.model') if holonomic
+    model = (os.path.join(here, 'robots', 'mecanum.model') if holonomic
              else os.path.join(nav2_bringup, 'worlds', 'waffle.model'))
     slip = arg('mecanum_slip').lower() == 'true'
     if slip and not holonomic:
-        raise RuntimeError('mecanum_slip:=True needs robot:=holonomic')
+        raise RuntimeError('mecanum_slip:=True needs robot:=mecanum')
     if holonomic:
         model = holonomic_model(model, slip, arg('camera_depth').lower() == 'true')
     model_paths = [os.path.join(here, 'models')]
@@ -159,6 +163,17 @@ def launch_setup(context):
             package='gazebo_ros', executable='spawn_entity.py', name='spawn_dock', output='screen',
             arguments=['-entity', 'aruco_dock', '-file', os.path.join(here, 'models', 'aruco_dock', 'model.sdf'),
                        '-x', str(dx), '-y', str(dy), '-z', '0', '-Y', str(dyaw)]))
+    if holonomic and arg('dock').lower() == 'true' and arg('aruco_detector').lower() == 'true':
+        # 도킹 BT 가 받는 dock/aruco. bt_mission 이 이 패키지에 기대므로 패키지 의존은 두지 않고, 있을 때만 띄운다
+        try:
+            detector = os.path.join(get_package_share_directory('bt_mission'), 'launch', 'aruco_detector.launch.py')
+            robot.append(IncludeLaunchDescription(PythonLaunchDescriptionSource(detector),
+                                                  launch_arguments={'use_sim_time': 'True'}.items()))
+        except Exception:  # noqa: BLE001
+            robot.append(LogInfo(msg='bt_mission is not built: start the ArUco detector yourself'))
+    if holonomic:                           # 바퀴 넷의 각 (RViz 의 바퀴, 바퀴 TF)
+        robot.append(Node(package='simple_line_bringup', executable='wheel_joint_publisher.py', output='screen',
+                          parameters=[{'use_sim_time': True}]))
     if slip:
         robot.append(Node(package='simple_line_bringup', executable='mecanum_slip_sim.py', output='screen',
                           parameters=[{'use_sim_time': True}]))
@@ -200,13 +215,15 @@ def generate_launch_description():
                               description='True: Gazebo 창을 띄우지 않는다'),
         DeclareLaunchArgument('use_rviz', default_value='True'),
         DeclareLaunchArgument('robot', default_value='waffle',
-                              description='waffle (차동) | holonomic (옆으로도 가는 구동 + 컬러 카메라)'),
+                              description='waffle (차동, 바퀴 2개) | mecanum (4바퀴 메카넘 + 컬러 카메라)'),
         DeclareLaunchArgument('dock', default_value='False',
                               description='True: ArUco marker 가 붙은 dock 을 월드에 놓는다'),
+        DeclareLaunchArgument('aruco_detector', default_value='True',
+                              description='dock:=True robot:=mecanum 일 때 marker 검출 노드도 띄운다'),
         DeclareLaunchArgument('camera_depth', default_value='False',
-                              description='True: 깊이 카메라도 켠다 (robot:=holonomic)'),
+                              description='True: 깊이 카메라도 켠다 (robot:=mecanum)'),
         DeclareLaunchArgument('mecanum_slip', default_value='False',
-                              description='True: 메카넘 미끄러짐과 바퀴 odom 오차를 흉내 낸다 (robot:=holonomic)'),
+                              description='True: 메카넘 미끄러짐과 바퀴 odom 오차를 흉내 낸다 (robot:=mecanum)'),
         DeclareLaunchArgument('camera_tf_error', default_value='',
                               description='dyaw_deg,dx,dy: TF 의 카메라 자리를 실제(Gazebo)와 다르게'),
         OpaqueFunction(function=launch_setup),

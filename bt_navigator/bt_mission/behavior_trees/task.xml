@@ -74,20 +74,24 @@
 
   카메라 영상의 marker 는 aruco_detector.py 가 찾아 dock/aruco 로 보낸다 (바닥 위 자세 후보 + 공분산).
   marker 는 충전 접점 면보다 0.3 m 뒤에 세워 두어, 로봇이 붙을 때까지 카메라가 본다 (odom 만으로 가는 구간이 없다).
-  설 곳: ~/.ros/aruco_taught/<dock>.yaml (aruco_teach.py 로 가르친 자세) 이 있으면 그것, 없으면 접점 면 앞 0.10 m.
+  설 곳: ~/.ros/aruco_taught/<dock>.yaml (aruco_teach.py 로 가르친 자세) 이 있으면 그것, 없으면 접점 면 앞 0.17 m (시뮬레이션의 메카넘: 앞면이 중심에서 0.16 m).
   허용오차: 다가가기 앞뒤 3 mm, 옆 2 mm, 방향 0.29 도 (MecanumParams 기본값), 서서 고치기 1.5 mm, 1.5 mm, 0.2 도.
   -->
   <BehaviorTree ID="Dock">
     <Sequence name="dock">
-      <!-- 실패하면 물러나(뒤는 레이저로 확인) 처음(marker 찾기)부터 다시. 3번 해서 안 되면 작업 실패 -->
+      <!-- 지금 자리(staging)에서 marker 를 찾는다. 안 보이면 레이저로 주변을 확인하고 제자리에서 ±30, ±60 도 돌며 찾는다.
+           dock 의 자리(odom)와 설 곳을 잡는다. 여기서 못 찾으면 작업 실패 (로그에 이유) -->
+      <DetectArucoDock name="find_marker" target="{target}" state="{aruco_dock}" search_angles="30;-30;60;-60"/>
+      <!-- 들어가다 실패하면(marker 를 놓침 등) 뒤로 물러나지 않는다 (뒤에 무엇이 있을지 모른다).
+           그 자리에 서서 marker 를 다시 보고, 지금 자리에서 이어서 들어간다. 3번까지 -->
       <RetryUntilSuccessful num_attempts="3">
-        <Fallback name="dock_or_retreat">
+        <Fallback name="dock_or_look_again">
           <Sequence name="dock_attempt">
-            <!-- 서서 marker 를 10번 보고 dock 의 자리(odom)를 잡는다. 설 곳도 정한다 -->
-            <DetectArucoDock name="find_marker" target="{target}" state="{aruco_dock}" timeout="5"/>
-            <!-- 설 곳 0.25 m 앞까지. 옆과 방향을 깔때기 안으로 맞춘다. collision_monitor 는 켠 채 -->
+            <!-- 설 곳 0.25 m 앞까지. 옆과 방향을 깔때기 안으로 맞춘다. collision_monitor 는 켠 채.
+                 다시 시도할 때 이미 그보다 가까우면 뒤로 가지 않고 넘어간다 -->
             <ArucoServo name="approach" state="{aruco_dock}" standoff="0.25" max_vx="0.15" max_vy="0.10"
-                        tol_along="0.01" tol_lat="0.005" tol_yaw="1.0" lost_timeout="1.0" timeout="30"/>
+                        tol_along="0.01" tol_lat="0.005" tol_yaw="1.0" lost_timeout="1.0" timeout="30"
+                        hold_if_closer="true"/>
             <!-- dock 은 붙어야 하는 물체라 collision_monitor 를 끄고 -->
             <MuteCollisionMonitor name="mute_safety" polygon="Footprint">
               <Sequence name="insert_refine">
@@ -100,10 +104,9 @@
               </Sequence>
             </MuteCollisionMonitor>
           </Sequence>
+          <!-- 그 자리에 서서 다시 본다 (돌지 않는다: dock 가까이일 수 있다). 그리고 다음 시도 -->
           <ForceFailure>
-            <MuteCollisionMonitor name="mute_safety_retreat" polygon="Footprint">
-              <BackOff name="retreat" distance="0.4" speed="0.1" fail_when_blocked="false"/>
-            </MuteCollisionMonitor>
+            <DetectArucoDock name="look_again" target="{target}" state="{aruco_dock}" search_angles=""/>
           </ForceFailure>
         </Fallback>
       </RetryUntilSuccessful>

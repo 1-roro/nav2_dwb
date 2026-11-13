@@ -108,6 +108,18 @@ struct Point2
   double y{0.0};
 };
 
+// 로봇 좌표계의 점 중에서 로봇 중심에서 radius 안에 있는 것의 수 (제자리에서 돌 때 몸이 쓸고 가는 원)
+inline int pointsInCircle(const std::vector<Point2> & points, double radius)
+{
+  int count = 0;
+  for (const auto & p : points) {
+    if (std::hypot(p.x, p.y) <= radius) {
+      ++count;
+    }
+  }
+  return count;
+}
+
 inline int pointsBehind(
   const std::vector<Point2> & points, double rear, double half_width, double distance, double clearance)
 {
