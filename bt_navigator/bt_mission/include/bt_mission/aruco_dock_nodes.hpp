@@ -13,6 +13,7 @@
 #include "bt_mission/aruco_dock_control.hpp"
 #include "bt_mission/dock_nodes.hpp"
 #include "bt_mission_msgs/msg/aruco_detection.hpp"
+#include "sensor_msgs/msg/laser_scan.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -49,7 +50,15 @@ using ArucoDockStatePtr = std::shared_ptr<ArucoDockState>;
 aruco_dock::Hypotheses arucoMeasurements(
   const tf2_ros::Buffer & tf, const bt_mission_msgs::msg::ArucoDetection & d, const std::string & global);
 
-// 정지해서 marker 를 min_detections 번 보고 dock 의 자리를 잡는다 -> state (filter 를 초기화)
+// 지금 자리에서 marker 를 찾아 dock 의 자리를 잡는다 -> state (filter 를 초기화). 설 곳(target)도 정한다.
+// 뒤로 물러나지 않는다 (뒤에 무엇이 있을지 모른다):
+//   1. 서서(settle_time) look_time 동안 본다. min_detections 번 보면 끝, look_time 이 지나도 min_found 번 이상이면 끝
+//   2. 못 찾으면 search_angles (처음 방향에서 [deg]) 로 차례로 제자리 회전해서 다시 본다 (메카넘은 제자리에서 돈다).
+//      돌기 전에, 그리고 도는 동안 레이저로 몸이 쓸고 갈 원(turn_radius + clearance) 안을 본다. 무엇이 있으면 돌지 않는다.
+//      앞선 시도에서 dock 의 자리를 알고 dock 이 그 원 가까이 있으면 돌지 않는다 (충전대는 낮아서 레이저에 안 보인다).
+//      도는 중에 marker 가 보이면 그 자리에 서서 본다
+//   3. 그래도 못 찾으면 FAILURE. 로그에 이유: detector 가 아무것도 안 보냈는지, 다른 dock 만 보였는지, TF 가 없었는지,
+//      너무 적게 보였는지, 돌 수 없었는지
 class DetectArucoDock : public BT::StatefulActionNode
 {
 public:
@@ -59,8 +68,17 @@ public:
   {
     return {
       BT::InputPort<std::string>("target", "", "dock name in aruco_docks.yaml (empty: the first one seen)"),
-      BT::InputPort<double>("timeout", 5.0, "[s]"),
-      BT::InputPort<int>("min_detections", 10, ""),
+      BT::InputPort<double>("settle_time", 0.5, "stand still this long before looking [s]"),
+      BT::InputPort<double>("look_time", 3.0, "look this long at each heading [s]"),
+      BT::InputPort<int>("min_detections", 8, "done as soon as this many are seen"),
+      BT::InputPort<int>("min_found", 3, "after look_time, enough if at least this many"),
+      BT::InputPort<std::string>("search_angles", "30;-30;60;-60",
+        "headings to turn to in place when not seen, from the start heading [deg], ';' separated. empty: no turning"),
+      BT::InputPort<double>("search_wz", 0.5, "turning speed [rad/s]"),
+      BT::InputPort<double>("turn_radius", 0.22, "robot center to its farthest corner [m]"),
+      BT::InputPort<double>("clearance", 0.05, "free margin around the turning circle [m]"),
+      BT::InputPort<std::string>("scan_topic", "scan", "laser to check the turning circle. empty: never turn"),
+      BT::InputPort<double>("timeout", 40.0, "[s]"),
       BT::InputPort<double>("docked_distance", 0.17, "geometric target: robot center in front of the contact face [m]"),
       BT::InputPort<std::string>("taught_file", "", "yaml from aruco_teach.py (empty: <taught_dir>/<dock>.yaml)"),
       BT::InputPort<std::string>("taught_dir", "~/.ros/aruco_taught", "where aruco_teach.py saves by default"),
@@ -68,7 +86,8 @@ public:
       BT::InputPort<std::string>("detection_topic", "dock/aruco", ""),
       BT::InputPort<std::string>("global_frame", "odom", ""),
       BT::InputPort<std::string>("robot_frame", "base_footprint", ""),
-      BT::OutputPort<ArucoDockStatePtr>("state", "shared with ArucoServo, ArucoRefine"),
+      BT::InputPort<std::string>("cmd_vel_topic", "cmd_vel_nav", ""),
+      BT::BidirectionalPort<ArucoDockStatePtr>("state", "shared with ArucoServo, ArucoRefine (a retry reads the last one)"),
       BT::OutputPort<geometry_msgs::msg::PoseStamped>("dock_pose", "dock frame origin in the global frame"),
     };
   }
@@ -78,15 +97,36 @@ public:
   void onHalted() override;
 
 private:
+  enum class Phase {Settle, Look, Turn};
+  void enter(Phase phase);
+  void collect(bool keep);              // inbox -> seen_ (keep false: 세기만)
+  bool tryFinish();                     // seen_ 으로 dock 의 자리를 잡는다
+  bool startNextTurn();                 // 다음 search 방향으로. 돌 수 없거나 남은 방향이 없으면 false
+  bool turningIsSafe(std::string * why);
+  BT::NodeStatus fail(const std::string & why);
   std::optional<dock::Pose2> taughtTarget(const std::string & file, std::string * why);
-  bool chooseTarget();                  // dock 을 안 뒤에 설 곳을 정한다
+  void chooseTarget();                  // dock 을 안 뒤에 설 곳을 정한다
 
   DockRos ros_;
   rclcpp::Subscription<bt_mission_msgs::msg::ArucoDetection>::SharedPtr sub_;
+  rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
+  rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
+  sensor_msgs::msg::LaserScan::SharedPtr scan_;
+  std::chrono::steady_clock::time_point scan_time_;
   std::deque<bt_mission_msgs::msg::ArucoDetection> inbox_;
   std::vector<aruco_dock::Hypotheses> seen_;
   ArucoDockStatePtr state_;
-  std::chrono::steady_clock::time_point start_;
+  std::optional<dock::Pose2> last_dock_;   // 앞선 시도가 잡은 dock 의 자리 (있으면)
+  Phase phase_{Phase::Settle};
+  std::vector<double> search_;             // [rad]
+  size_t next_search_{0};
+  double start_yaw_{0.0}, turn_to_{0.0};
+  double settle_time_{0.5}, look_time_{3.0}, search_wz_{0.5}, turn_radius_{0.22}, clearance_{0.05}, timeout_{40.0};
+  int min_detections_{8}, min_found_{3};
+  int received_{0}, no_tf_{0}, turns_{0};
+  std::vector<std::string> other_docks_;
+  std::string turn_blocked_;
+  std::chrono::steady_clock::time_point start_, phase_start_, last_cmd_time_;
 };
 
 // 공통: 메카넘 파라미터 포트
@@ -104,6 +144,8 @@ public:
     BT::PortsList ports = mecanumPorts();
     ports.insert(BT::InputPort<ArucoDockStatePtr>("state", ""));
     ports.insert(BT::InputPort<double>("standoff", 0.0, "stop this far before the target, along the dock normal [m]"));
+    ports.insert(BT::InputPort<bool>("hold_if_closer", false,
+      "true: never move away from the dock. Already closer than the goal (a retry near the dock): succeed at once"));
     ports.insert(BT::InputPort<double>("lost_timeout", 1.0, "fail if no detection is accepted this long, 0: never [s]"));
     ports.insert(BT::InputPort<double>("settle", 0.3, "stay within tolerance this long [s]"));
     ports.insert(BT::InputPort<double>("timeout", 40.0, "[s]"));
@@ -134,6 +176,7 @@ private:
   dock::Pose2 goal_;                    // target + standoff (D)
   double lost_timeout_{1.0}, settle_{0.3}, timeout_{40.0}, drift_{0.002};
   double slip_{0.10}, yaw_per_m_{0.05}, turn_slip_{0.05};
+  bool hold_if_closer_{false};
   std::optional<dock::Pose2> last_robot_;   // 지난 예측 때 로봇의 odom 자세 (움직인 만큼 불확실도를 키운다)
   int accepted_{0}, rejected_{0};
   std::chrono::steady_clock::time_point start_, last_seen_, last_cmd_time_, last_predict_;

@@ -23,6 +23,8 @@ Gazebo 결과 (참값, 10회 모두 성공):
 - [3. 자세 추정: marker 하나에서 dock 의 자세까지](#3-자세-추정-marker-하나에서-dock-의-자세까지)
 - [4. dock 의 자리: 후보 고르기와 Kalman 필터](#4-dock-의-자리-후보-고르기와-kalman-필터)
 - [5. 제어: dock 좌표계, 깔때기, 서서 재고 고치기](#5-제어-dock-좌표계-깔때기-서서-재고-고치기)
+  - [5-4. 안 보일 때, 놓쳤을 때: 뒤로 가지 않고 그 자리에서](#5-4-안-보일-때-놓쳤을-때-뒤로-가지-않고-그-자리에서)
+  - [5-5. find_marker 가 실패할 때](#5-5-find_marker-가-실패할-때)
 - [6. 가르친 자세: 고정 오차 지우기](#6-가르친-자세-고정-오차-지우기)
 - [7. 시뮬레이션 실험](#7-시뮬레이션-실험)
 - [8. 실제 로봇에서 정밀도 높이기 (sim-to-real)](#8-실제-로봇에서-정밀도-높이기-sim-to-real)
@@ -36,12 +38,11 @@ Gazebo 결과 (참값, 10회 모두 성공):
 
 ```bash
 # 터미널 1: 창고 + 4바퀴 메카넘 로봇(컬러 카메라) + 동쪽 벽의 ArUco dock (접점 면 x = 4.55, y = 1.0)
+#          + marker 검출 노드 (aruco_detector.launch.py 를 같이 띄운다. 따로 띄우려면 aruco_detector:=False)
 ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse robot:=mecanum dock:=True
 # 터미널 2
 ros2 run bt_mission task_server
-# 터미널 3: marker 검출 (dock/aruco)
-ros2 launch bt_mission aruco_detector.launch.py use_sim_time:=True
-# 터미널 4
+# 터미널 3
 ros2 run bt_mission task_client.py
 task> dock:dock_a 3.85,-2.5 3.85,1.0,0    # 마지막 점 = dock 앞 staging 자리 (planner 가 직선이라 한 점을 거친다)
 task> undock
@@ -52,7 +53,7 @@ task> dock:dock_a 3.85,1.25,-15           # 옆 0.25 m, 비스듬히 15 도에�
 
 ```bash
 ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse robot:=mecanum dock:=True \
-    mecanum_slip:=True camera_tf_error:=1.5,0.0,0.01
+    mecanum_slip:=True camera_tf_error:=1.5,0.0,0.01 aruco_detector:=False
 ros2 launch bt_mission aruco_detector.launch.py use_sim_time:=True marker_scale:=1.02
 ```
 
@@ -178,9 +179,13 @@ detector 는 base 에서 본 자세를 낸다. BT 는 영상을 **찍은 시각*
 ![Dock BT](bt_mission/doc/dock.png)
 
 ```
-DetectArucoDock (서서 10장)  →  ArucoServo approach (설 곳 0.25 m 앞까지, 0.15 m/s, collision_monitor 켠 채)
-  →  [collision_monitor 끔]  ArucoServo insert (마지막 0.25 m, 0.05 m/s)  →  ArucoRefine (서서 재고 고치기)
-실패하면 BackOff 0.4 m (뒤는 레이저로 확인) 하고 처음부터, 3번까지.  끝에 CheckCharging (충전 신호, 선택)
+find_marker   DetectArucoDock: 그 자리에서 보고, 안 보이면 제자리에서 돌며 찾는다 (5-4). 못 찾으면 작업 실패
+3번까지:
+  approach    ArucoServo: 설 곳 0.25 m 앞까지, 0.15 m/s, collision_monitor 켠 채. 이미 더 가까우면 건너뛴다
+  insert      [collision_monitor 끔] ArucoServo: 마지막 0.25 m, 0.05 m/s
+  refine      ArucoRefine: 서서 재고 고치기
+  실패하면    look_again: 그 자리에 서서 다시 본다 (돌지 않는다, 뒤로 가지 않는다) → 지금 자리에서 다음 시도
+CheckCharging (충전 신호, 선택)
 ```
 
 ### 5-1. dock 좌표계의 오차와 깔때기 (`mecanumStep`)
@@ -222,6 +227,55 @@ gate (깔때기): 옆 오차가 폭 w(d) = 4 mm + 0.15 · d 안이면 1, 그 두
 ```
 
 미끄러져 덜 가면 다음 측정이 잡아서 다시 고친다. odom 의 정확도와 상관없이 마지막 몇 mm 를 맞춘다. 한 장의 σ 는 붙은 자리에서 옆 1 ~ 5 mm (보수적인 0.5 px 기준) 이지만 15장을 합치면 1/4 쯤이 된다.
+
+### 5-4. 안 보일 때, 놓쳤을 때: 뒤로 가지 않고 그 자리에서
+
+예전 트리는 실패하면 `BackOff` 로 0.4 m 물러나서 처음부터 다시 했다. 뒤를 레이저로 보긴 하지만, 레이저(높이 0.16 m)보다 낮은 물건이나 사람의 발은 못 본다. 그리고 물러나도 더 잘 보이는 것이 아니다: 못 찾는 이유는 대개 **방향**(staging 에 섰을 때 AMCL 방향 오차로 marker 가 화면 밖)이거나 **잠깐 가려짐**이다. 그래서 물러나지 않고 그 자리에서 해결한다.
+
+**처음 찾기 (`find_marker`, DetectArucoDock)**
+
+```
+서기 0.5 s → 3 s 동안 본다 → 8장 보면 끝 (3 s 가 지나도 3장 이상이면 끝)
+안 보이면: detector 가 아예 없으면(토픽에 publisher 없음) 바로 실패. 돌아 봐야 소용없다
+           있으면 처음 방향에서 +30°, -30°, +60°, -60° 로 차례로 제자리 회전 → 서서 다시 본다
+           (카메라 화각 69° 라 처음 방향 ±95° 를 덮는다)
+           도는 중에 marker 가 보이면 그 자리에 서서 본다
+돌기 전과 도는 동안 매 주기: 레이저로 몸이 쓸고 갈 원 (turn_radius 0.22 m + 여유 0.05 m) 안을 본다
+           점이 3개 넘게 있으면 돌지 않는다 (이미 돌던 중이면 그 자리에 선다)
+```
+
+- 메카넘은 제자리에서 돌므로(중심 = 네 바퀴 가운데) 쓸고 가는 곳이 반지름 0.22 m 원 하나뿐이다. 그 안만 비어 있으면 안전하다.
+- dock 이 원 가까이 있으면 돌지 않는다. 충전대는 높이 5 cm 라 레이저에 안 보이기 때문이다 (앞선 시도가 잡은 dock 자리로 판단).
+- 실패하면 로그에 이유를 남긴다 (5-5).
+
+**들어가다 놓쳤을 때 (`look_again`, 다시 시도)**
+
+- `ArucoServo` 가 1 초 동안 marker 를 못 보면(가려짐, 흔들림) 멈춘다. 그 자리에 서서 다시 본다. 돌지 않는다: dock 가까이일 수 있다.
+- 다음 시도의 `approach` 는 `hold_if_closer="true"` 다. 이미 그 단계의 목표(설 곳 0.25 m 앞)보다 가까우면 뒤로 가지 않고 넘어간다. 또 움직이는 동안에도 dock 에서 멀어지는 쪽 명령은 내지 않는다. `insert` 는 그 자리에서 이어서 들어간다.
+- 뒤로 가는 것은 `insert`, `refine` 이 목표를 mm 넘었을 때 그만큼 되돌리는 것뿐이다.
+- 물러나는 것은 `undock`(일부러 dock 에서 나올 때)만 남았다. 그것도 레이저로 뒤를 확인하고, 막혀 있으면 그 자리에 선다.
+
+Gazebo 에서 확인한 것 (4바퀴 메카넘, 참값):
+
+| 경우 | 결과 |
+|---|---|
+| detector 를 안 띄우고 dock 작업 | 3.5 s 만에 실패: "aruco_detector is not running ..." 돌지 않음, 움직임 0 |
+| staging 에서 dock 을 70° 비껴 봄 (marker 가 화면 밖) | +30, -30, +60, -60° 로 찾다가 도는 중에 보여 섰다 → 도킹. 앞뒤 +0.6 mm, 옆 -0.6 mm |
+| insert 중에 detector 를 2.5 s 끊음 (marker 놓침) | insert 실패 → 그 자리에서 다시 봄(1.8 s) → approach 건너뜀("already 240 mm closer") → insert, refine → 앞뒤 +0.3 mm, 옆 -0.5 mm. **dock 에서 멀어진 거리 0.0 mm** |
+| 로봇 옆 0.3 m 에 상자, marker 는 화면 밖 | "not turning to search: 20 laser points within 0.27 m" 돌지 않고 실패. 움직임 0 |
+
+### 5-5. find_marker 가 실패할 때
+
+`find_marker failed` 이면 task_server 로그의 `[aruco] dock '...' not found (...)` 줄이 이유를 말한다.
+
+| 로그 | 원인 | 할 일 |
+|---|---|---|
+| `aruco_detector is not running` | 검출 노드가 없다. 또는 띄웠지만 죽었다 | `simple_line.launch.py robot:=mecanum dock:=True` 는 같이 띄운다. 따로 띄웠다면 그 터미널의 에러를 본다: `bt_mission_msgs` 를 새로 빌드하지 않았거나(`colcon build --packages-select bt_mission_msgs bt_mission simple_line_bringup` 후 `source install/setup.bash`), OpenCV 에 aruco 가 없다(`pip` 의 `opencv-python` 이 apt 의 것을 가림. `pip uninstall opencv-python` 또는 `opencv-contrib-python`) |
+| `running but saw no marker` | 화면에 marker 가 없다 | `robot:=mecanum` 인가 (waffle 은 이 카메라가 없다). `ros2 topic hz /camera/color/image_raw`. staging 이 dock 앞 0.5 ~ 1.5 m 이고 dock 을 보는가. `/dock/aruco_debug` 를 RViz 로 |
+| `saw only other docks: 'dock_a'` | 작업의 dock 이름이 다르다 | `dock:dock_a` (예전 QR 예시의 `dock:DOCK_A` 가 아니다) |
+| `detections dropped: no TF odom <- base_footprint` | 영상 시각의 로봇 자리를 모른다 | TF 가 끊기지 않았는지, 시계가 섞이지 않았는지 (detector 는 `use_sim_time:=True`) |
+| `only N usable detections` | 너무 느리다 (느린 PC 의 Gazebo 카메라) | `ros2 topic hz /dock/aruco`. `look_time` 을 늘리거나 `min_found` 를 줄인다 |
+| `Did not turn to search: ...` | 옆에 무엇이 있어 돌지 않았다 | 그 이유를 치우거나 staging 자리를 옮긴다 |
 
 ## 6. 가르친 자세: 고정 오차 지우기
 
@@ -321,10 +375,15 @@ staging 서너 곳(로봇 중심이 접점 면 0.65 ~ 0.8 m 앞, 옆 ±0.3 m, ±
 | 노드 | 포트 | 기본값 | 트리 | 뜻 |
 |---|---|---|---|---|
 | DetectArucoDock | `target` | "" | `{target}` | dock 이름 (`aruco_docks.yaml`) |
-| | `min_detections`, `timeout` | 10, 5 s | | 서서 합칠 측정 수 |
+| | `settle_time`, `look_time` | 0.5 s, 3 s | | 서서 기다리기, 한 방향에서 보는 시간 |
+| | `min_detections`, `min_found` | 8, 3 | | 이만큼 보면 끝 / look_time 이 지나도 이만큼이면 끝 |
+| | `search_angles` | "30;-30;60;-60" | find_marker 같음, look_again "" | 안 보이면 돌아 볼 방향 [°] (처음 방향에서). 비우면 돌지 않는다 |
+| | `search_wz`, `turn_radius`, `clearance`, `scan_topic` | 0.5 rad/s, 0.22 m, 0.05 m, scan | | 제자리 회전과 그 원 안의 레이저 확인 |
+| | `timeout` | 40 s | | |
 | | `docked_distance` | 0.17 m | | 도면 값의 설 곳 (접점 면 앞) |
 | | `taught_file`, `taught_dir`, `use_taught` | "", ~/.ros/aruco_taught, true | | 가르친 자세 |
 | ArucoServo | `standoff` | 0 | 0.25 / 0 | 설 곳보다 이만큼 앞에서 선다 |
+| | `hold_if_closer` | false | approach true | dock 에서 멀어지는 쪽으로 가지 않는다. 이미 더 가까우면 바로 성공 |
 | | `max_vx`, `max_vy`, `max_wz` | 0.15, 0.10 m/s, 0.4 rad/s | approach 0.15/0.10, insert 0.05/0.03 | |
 | | `min_vx`, `min_vy`, `min_wz` | 0.010, 0.015 m/s, 0.03 rad/s | | 데드밴드 |
 | | `accel_x`, `accel_y`, `accel_wz` | 0.3, 0.2 m/s², 1.0 rad/s² | insert 0.1, 0.1 | |

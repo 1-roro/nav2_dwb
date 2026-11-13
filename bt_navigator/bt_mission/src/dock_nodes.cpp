@@ -144,13 +144,14 @@ BT::NodeStatus BackOff::stop(BT::NodeStatus status, const char * why)
   return status;
 }
 
-int BackOff::pointsBehind(const sensor_msgs::msg::LaserScan & scan, double distance)
+std::optional<std::vector<dock::Point2>> scanPoints(
+  const tf2_ros::Buffer & tf, const sensor_msgs::msg::LaserScan & scan, const std::string & robot_frame)
 {
   geometry_msgs::msg::TransformStamped mount;     // 레이저가 로봇에 달린 자리 (움직이지 않는다)
   try {
-    mount = ros_.tf->lookupTransform(robot_frame_, scan.header.frame_id, tf2::TimePointZero);
+    mount = tf.lookupTransform(robot_frame, scan.header.frame_id, tf2::TimePointZero);
   } catch (const tf2::TransformException &) {
-    return -1;
+    return std::nullopt;
   }
   const double mx = mount.transform.translation.x, my = mount.transform.translation.y;
   const double myaw = tf2::getYaw(mount.transform.rotation);
@@ -163,7 +164,16 @@ int BackOff::pointsBehind(const sensor_msgs::msg::LaserScan & scan, double dista
     const double a = myaw + scan.angle_min + static_cast<double>(i) * scan.angle_increment;
     points.push_back({mx + r * std::cos(a), my + r * std::sin(a)});
   }
-  return dock::pointsBehind(points, rear_, half_width_, distance, clearance_);
+  return points;
+}
+
+int BackOff::pointsBehind(const sensor_msgs::msg::LaserScan & scan, double distance)
+{
+  const auto points = scanPoints(*ros_.tf, scan, robot_frame_);
+  if (!points) {
+    return -1;
+  }
+  return dock::pointsBehind(*points, rear_, half_width_, distance, clearance_);
 }
 
 BT::NodeStatus BackOff::onRunning()

@@ -204,7 +204,7 @@ std::optional<dock::Pose2> DetectArucoDock::taughtTarget(const std::string & fil
   return ad::inverse(dock_in_base);
 }
 
-bool DetectArucoDock::chooseTarget()
+void DetectArucoDock::chooseTarget()
 {
   std::string taught, taught_dir = "~/.ros/aruco_taught";
   bool use_taught = true;
@@ -219,13 +219,19 @@ bool DetectArucoDock::chooseTarget()
       taught = candidate;
     }
   }
+  std::optional<dock::Pose2> target;
   if (use_taught && !taught.empty()) {
     std::string why;
-    const auto target = taughtTarget(expandHome(taught), &why);
+    target = taughtTarget(expandHome(taught), &why);
     if (!target) {
-      RCLCPP_ERROR(ros_.node->get_logger(), "[aruco] taught target: %s", why.c_str());
-      return false;
+      // 예전 형식이거나 다른 dock 의 파일: 도킹을 멈추지 않고 도면 값으로 (다시 가르치라고 알린다)
+      RCLCPP_WARN(
+        ros_.node->get_logger(), "[aruco] taught target not used (%s): using the geometric target. "
+        "Re-teach with aruco_teach.py", why.c_str());
+      taught.clear();
     }
+  }
+  if (target) {
     state_->target = *target;
     state_->target_source = "taught";
   } else {
@@ -236,82 +242,310 @@ bool DetectArucoDock::chooseTarget()
     ros_.node->get_logger(), "[aruco] target (%s%s%s): robot %.1f mm in front of the contact face, %+.1f mm, %.2f deg",
     state_->target_source.c_str(), taught.empty() ? "" : " ", taught.c_str(), state_->target.x * 1000.0,
     state_->target.y * 1000.0, deg(state_->target.yaw));
-  return true;
 }
+
+namespace
+{
+
+std::vector<double> parseAngles(const std::string & text)
+{
+  std::vector<double> out;
+  std::string item;
+  for (const char c : text + ";") {
+    if (c == ';' || c == ',') {
+      if (item.find_first_not_of(" \t") != std::string::npos) {
+        out.push_back(std::stod(item) * M_PI / 180.0);
+      }
+      item.clear();
+    } else {
+      item += c;
+    }
+  }
+  return out;
+}
+
+}  // namespace
 
 BT::NodeStatus DetectArucoDock::onStart()
 {
+  ArucoDockStatePtr previous;
+  last_dock_.reset();
+  if (getInput("state", previous) && previous && previous->filter.initialized()) {
+    last_dock_ = previous->filter.mean();             // 다시 시도: 앞선 시도가 잡은 dock 의 자리
+  }
   state_ = std::make_shared<ArucoDockState>();
-  std::string topic = "dock/aruco";
+  std::string topic = "dock/aruco", cmd_topic = "cmd_vel_nav", scan_topic = "scan", angles = "30;-30;60;-60";
   getInput("target", state_->dock);
   getInput("global_frame", state_->global_frame);
   getInput("robot_frame", state_->robot_frame);
   getInput("detection_topic", topic);
-  inbox_.clear();
-  seen_.clear();
+  getInput("cmd_vel_topic", cmd_topic);
+  getInput("scan_topic", scan_topic);
+  getInput("search_angles", angles);
+  getInput("settle_time", settle_time_);
+  getInput("look_time", look_time_);
+  getInput("min_detections", min_detections_);
+  getInput("min_found", min_found_);
+  getInput("search_wz", search_wz_);
+  getInput("turn_radius", turn_radius_);
+  getInput("clearance", clearance_);
+  getInput("timeout", timeout_);
+  try {
+    search_ = parseAngles(angles);
+  } catch (const std::exception &) {
+    RCLCPP_ERROR(ros_.node->get_logger(), "[aruco] bad search_angles '%s'", angles.c_str());
+    return BT::NodeStatus::FAILURE;
+  }
+  if (!cmd_pub_) {
+    cmd_pub_ = ros_.node->create_publisher<geometry_msgs::msg::Twist>(cmd_topic, rclcpp::QoS(10));
+  }
   rclcpp::SubscriptionOptions options;
   options.callback_group = ros_.group;
+  inbox_.clear();
+  seen_.clear();
+  other_docks_.clear();
+  turn_blocked_.clear();
+  received_ = no_tf_ = turns_ = 0;
+  next_search_ = 0;
   sub_ = ros_.node->create_subscription<bt_mission_msgs::msg::ArucoDetection>(
     topic, rclcpp::QoS(10),
     [this](bt_mission_msgs::msg::ArucoDetection::SharedPtr msg) {inbox_.push_back(*msg);}, options);
-  start_ = std::chrono::steady_clock::now();
+  scan_.reset();
+  scan_sub_.reset();
+  if (!scan_topic.empty() && !search_.empty()) {
+    scan_sub_ = ros_.node->create_subscription<sensor_msgs::msg::LaserScan>(
+      scan_topic, rclcpp::SensorDataQoS(),
+      [this](sensor_msgs::msg::LaserScan::SharedPtr msg) {
+        scan_ = msg;
+        scan_time_ = std::chrono::steady_clock::now();
+      }, options);
+  }
+  const auto robot = ros_.robotPose(state_->global_frame, state_->robot_frame);
+  start_yaw_ = robot ? robot->yaw : 0.0;
+  start_ = last_cmd_time_ = std::chrono::steady_clock::now();
+  enter(Phase::Settle);
   RCLCPP_INFO(
-    ros_.node->get_logger(), "[aruco] looking for dock '%s'", state_->dock.empty() ? "(any)" : state_->dock.c_str());
+    ros_.node->get_logger(), "[aruco] looking for dock '%s' from here%s", state_->dock.empty() ? "(any)" : state_->dock.c_str(),
+    last_dock_ ? " (retry)" : "");
   return BT::NodeStatus::RUNNING;
+}
+
+void DetectArucoDock::enter(Phase phase)
+{
+  phase_ = phase;
+  phase_start_ = std::chrono::steady_clock::now();
+  cmd_pub_->publish(toTwist(dock::Cmd{}));
+}
+
+void DetectArucoDock::collect(bool keep)
+{
+  for (const auto & d : inbox_) {
+    ++received_;
+    if (state_->dock.empty()) {
+      state_->dock = d.dock;                          // 처음 보인 dock 으로 정한다
+    }
+    if (d.dock != state_->dock) {
+      if (std::find(other_docks_.begin(), other_docks_.end(), d.dock) == other_docks_.end()) {
+        other_docks_.push_back(d.dock);
+      }
+      continue;
+    }
+    const auto hs = arucoMeasurements(*ros_.tf, d, state_->global_frame);
+    if (hs.empty()) {
+      ++no_tf_;
+      continue;
+    }
+    if (keep) {
+      seen_.push_back(hs);
+    } else {
+      seen_.push_back({});                            // 도는 중: 보였다는 것만 (흔들린 영상은 쓰지 않는다)
+    }
+  }
+  inbox_.clear();
+}
+
+bool DetectArucoDock::tryFinish()
+{
+  int used = 0;
+  const auto fused = ad::fuseDetections(seen_, kGate, &used);
+  if (!fused || used < std::max(min_found_, static_cast<int>(seen_.size()) / 2)) {
+    return false;
+  }
+  chooseTarget();
+  state_->filter.reset(fused->pose, fused->cov);
+  setOutput("state", state_);
+  setOutput("dock_pose", toPoseStamped(fused->pose, state_->global_frame));
+  RCLCPP_INFO(
+    ros_.node->get_logger(), "[aruco] found '%s' at (%.3f, %.3f), facing %.2f deg, %s (%d of %zu, %d turn(s), %.1f s)",
+    state_->dock.c_str(), fused->pose.x, fused->pose.y, deg(fused->pose.yaw), sigmas(fused->cov).c_str(), used,
+    seen_.size(), turns_, secondsSince(start_));
+  sub_.reset();
+  scan_sub_.reset();
+  return true;
+}
+
+bool DetectArucoDock::turningIsSafe(std::string * why)
+{
+  if (!scan_sub_) {
+    *why = "no laser to check around the robot (scan_topic empty)";
+    return false;
+  }
+  if (last_dock_) {
+    const auto robot = ros_.robotPose(state_->global_frame, state_->robot_frame);
+    if (robot && std::hypot(robot->x - last_dock_->x, robot->y - last_dock_->y) < turn_radius_ + clearance_ + 0.10) {
+      *why = "too close to the dock to turn in place (the charger is too low for the laser)";
+      return false;
+    }
+  }
+  if (!scan_ || secondsSince(scan_time_) > 1.0) {
+    *why = "no recent laser scan";
+    return false;
+  }
+  const auto points = scanPoints(*ros_.tf, *scan_, state_->robot_frame);
+  if (!points) {
+    *why = "no transform for the laser";
+    return false;
+  }
+  const int inside = dock::pointsInCircle(*points, turn_radius_ + clearance_);
+  if (inside > 3) {
+    char text[120];
+    std::snprintf(text, sizeof(text), "%d laser points within %.2f m: something is next to the robot", inside,
+      turn_radius_ + clearance_);
+    *why = text;
+    return false;
+  }
+  return true;
+}
+
+bool DetectArucoDock::startNextTurn()
+{
+  if (next_search_ >= search_.size() || !turn_blocked_.empty()) {
+    return false;
+  }
+  std::string why;
+  if (!turningIsSafe(&why)) {
+    turn_blocked_ = why;
+    RCLCPP_WARN(ros_.node->get_logger(), "[aruco] not turning to search: %s", why.c_str());
+    return false;
+  }
+  turn_to_ = ad::normalizeAngle(start_yaw_ + search_[next_search_++]);
+  ++turns_;
+  RCLCPP_INFO(
+    ros_.node->get_logger(), "[aruco] not seen: turning in place to %+.0f deg from the start heading",
+    deg(search_[next_search_ - 1]));
+  enter(Phase::Turn);
+  return true;
+}
+
+BT::NodeStatus DetectArucoDock::fail(const std::string & why)
+{
+  cmd_pub_->publish(toTwist(dock::Cmd{}));
+  std::string hint;
+  if (received_ == 0 && sub_ && sub_->get_publisher_count() == 0) {
+    hint = "aruco_detector is not running (simple_line.launch.py robot:=mecanum dock:=True starts it, or "
+      "ros2 launch bt_mission aruco_detector.launch.py use_sim_time:=True). If it was started, look at its "
+      "terminal for an error (e.g. bt_mission_msgs not rebuilt and re-sourced, OpenCV without aruco)";
+  } else if (received_ == 0) {
+    hint = "aruco_detector is running but saw no marker: the marker is not in the camera view from here "
+      "(is the staging pose in front of the dock, 0.5 - 1.5 m, facing it?), or the camera is not publishing "
+      "(robot:=mecanum; ros2 topic hz /camera/color/image_raw)";
+  } else if (!other_docks_.empty() && seen_.empty()) {
+    hint = "saw only other docks:";
+    for (const auto & d : other_docks_) {
+      hint += " '" + d + "'";
+    }
+    hint += ". Check the dock name in the task (dock:<name>) and aruco_docks.yaml";
+  } else if (no_tf_ > 0 && seen_.empty()) {
+    hint = std::to_string(no_tf_) + " detections dropped: no TF " + state_->global_frame + " <- " +
+      state_->robot_frame + " at the image time";
+  } else {
+    hint = "only " + std::to_string(seen_.size()) + " usable detections (camera or detector too slow? "
+      "check ros2 topic hz /dock/aruco)";
+  }
+  if (!turn_blocked_.empty()) {
+    hint += ". Did not turn to search: " + turn_blocked_;
+  }
+  sub_.reset();
+  scan_sub_.reset();
+  RCLCPP_WARN(
+    ros_.node->get_logger(), "[aruco] dock '%s' not found (%s) after %.1f s, %d turn(s): %s",
+    state_->dock.empty() ? "(any)" : state_->dock.c_str(), why.c_str(), secondsSince(start_), turns_, hint.c_str());
+  return BT::NodeStatus::FAILURE;
 }
 
 BT::NodeStatus DetectArucoDock::onRunning()
 {
-  double timeout = 5.0;
-  int min_detections = 10;
-  getInput("timeout", timeout);
-  getInput("min_detections", min_detections);
   ros_.spin();
-  for (const auto & d : inbox_) {
-    if (state_->dock.empty()) {
-      state_->dock = d.dock;
-    }
-    if (d.dock != state_->dock) {
-      continue;
-    }
-    const auto hs = arucoMeasurements(*ros_.tf, d, state_->global_frame);
-    if (!hs.empty()) {
-      seen_.push_back(hs);
-    }
+  if (secondsSince(start_) > timeout_) {
+    return fail("timed out");
   }
-  inbox_.clear();
-  if (static_cast<int>(seen_.size()) >= min_detections) {
-    int used = 0;
-    const auto fused = ad::fuseDetections(seen_, kGate, &used);
-    if (fused && used >= (min_detections + 1) / 2) {
-      sub_.reset();
-      if (!chooseTarget()) {
-        return BT::NodeStatus::FAILURE;
+  if (phase_ == Phase::Settle) {
+    inbox_.clear();                                   // 서는 동안의 영상은 버린다
+    if (secondsSince(phase_start_) >= settle_time_) {
+      seen_.clear();
+      enter(Phase::Look);
+    }
+    return BT::NodeStatus::RUNNING;
+  }
+  if (phase_ == Phase::Look) {
+    collect(true);
+    const int n = static_cast<int>(seen_.size());
+    if (n >= min_detections_ || (secondsSince(phase_start_) >= look_time_ && n >= min_found_)) {
+      if (tryFinish()) {
+        return BT::NodeStatus::SUCCESS;
       }
-      state_->filter.reset(fused->pose, fused->cov);
-      setOutput("state", state_);
-      setOutput("dock_pose", toPoseStamped(fused->pose, state_->global_frame));
-      RCLCPP_INFO(
-        ros_.node->get_logger(), "[aruco] found '%s' at (%.3f, %.3f), facing %.2f deg, %s (%d of %zu)",
-        state_->dock.c_str(), fused->pose.x, fused->pose.y, deg(fused->pose.yaw), sigmas(fused->cov).c_str(),
-        used, seen_.size());
-      sub_.reset();
-      return BT::NodeStatus::SUCCESS;
+      seen_.clear();                                  // 서로 맞지 않는다: 다른 방향에서 다시
+    } else if (secondsSince(phase_start_) < look_time_) {
+      return BT::NodeStatus::RUNNING;
     }
+    if (received_ == 0 && sub_->get_publisher_count() == 0) {
+      return fail("nobody publishes " + std::string(sub_->get_topic_name()));   // 돌아 봐야 소용없다
+    }
+    if (startNextTurn()) {
+      return BT::NodeStatus::RUNNING;
+    }
+    return fail(next_search_ >= search_.size() || !turn_blocked_.empty() ? "looked everywhere it could" : "not seen");
   }
-  if (secondsSince(start_) > timeout) {
-    RCLCPP_WARN(
-      ros_.node->get_logger(), "[aruco] dock '%s' not found in %.1f s (%zu detections)",
-      state_->dock.empty() ? "(any)" : state_->dock.c_str(), timeout, seen_.size());
-    sub_.reset();
-    return BT::NodeStatus::FAILURE;
+  // Phase::Turn: 제자리 회전. marker 가 보이면 그 자리에 선다
+  seen_.clear();
+  collect(false);
+  if (!seen_.empty()) {
+    seen_.clear();
+    RCLCPP_INFO(ros_.node->get_logger(), "[aruco] marker seen while turning: stopping here to look");
+    enter(Phase::Settle);
+    return BT::NodeStatus::RUNNING;
   }
+  const double dt = secondsSince(last_cmd_time_);
+  if (dt < kControlPeriod) {
+    return BT::NodeStatus::RUNNING;
+  }
+  last_cmd_time_ = std::chrono::steady_clock::now();
+  std::string why;
+  if (!turningIsSafe(&why)) {
+    turn_blocked_ = why;
+    RCLCPP_WARN(ros_.node->get_logger(), "[aruco] stopped turning: %s", why.c_str());
+    enter(Phase::Settle);                             // 여기서 마지막으로 한 번 더 본다
+    return BT::NodeStatus::RUNNING;
+  }
+  const auto robot = ros_.robotPose(state_->global_frame, state_->robot_frame);
+  const double error = robot ? ad::normalizeAngle(turn_to_ - robot->yaw) : 0.0;
+  if (!robot || std::fabs(error) < 2.0 * M_PI / 180.0 || secondsSince(phase_start_) > 15.0) {
+    enter(Phase::Settle);
+    return BT::NodeStatus::RUNNING;
+  }
+  dock::Cmd cmd;
+  cmd.wz = std::copysign(std::clamp(1.5 * std::fabs(error), 0.1, search_wz_), error);
+  cmd_pub_->publish(toTwist(cmd));
   return BT::NodeStatus::RUNNING;
 }
 
 void DetectArucoDock::onHalted()
 {
+  if (cmd_pub_) {
+    cmd_pub_->publish(toTwist(dock::Cmd{}));
+  }
   sub_.reset();
+  scan_sub_.reset();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -338,6 +572,7 @@ BT::NodeStatus ArucoServo::onStart()
   getInput("odom_slip", slip_);
   getInput("odom_yaw_per_m", yaw_per_m_);
   getInput("odom_turn_slip", turn_slip_);
+  getInput("hold_if_closer", hold_if_closer_);
   last_robot_ = ros_.robotPose(state_->global_frame, state_->robot_frame);
   getInput("detection_topic", topic);
   getInput("cmd_vel_topic", cmd_topic);
@@ -355,6 +590,17 @@ BT::NodeStatus ArucoServo::onStart()
   last_cmd_ = dock::Cmd{};
   accepted_ = rejected_ = 0;
   settled_since_.reset();
+  if (hold_if_closer_ && last_robot_) {
+    const ad::DockErrors e = ad::dockErrors(ad::relative(state_->filter.mean(), *last_robot_), goal_);
+    if (e.along < -params_.tol_along) {
+      // 다시 시도하는 중에 이미 이 단계의 목표보다 dock 가까이 있다: 뒤로 가지 않고 다음 단계(들어가기)로
+      RCLCPP_INFO(
+        ros_.node->get_logger(), "[aruco] %s: already %.0f mm closer than its goal, not backing up", name().c_str(),
+        -e.along * 1000.0);
+      sub_.reset();
+      return BT::NodeStatus::SUCCESS;
+    }
+  }
   start_ = last_seen_ = last_cmd_time_ = last_predict_ = std::chrono::steady_clock::now();
   RCLCPP_INFO(
     ros_.node->get_logger(), "[aruco] %s: to %.0f mm in front of the contact face (%s target%s), up to %.2f/%.2f m/s",
@@ -435,7 +681,10 @@ BT::NodeStatus ArucoServo::onRunning()
     return BT::NodeStatus::RUNNING;
   }
   const dock::Pose2 in_dock = ad::relative(state_->filter.mean(), *robot);
-  const ad::DockErrors e = ad::dockErrors(in_dock, goal_);
+  ad::DockErrors e = ad::dockErrors(in_dock, goal_);
+  if (hold_if_closer_) {
+    e.along = std::max(e.along, 0.0);              // dock 에서 멀어지는 쪽으로는 가지 않는다
+  }
   if (ad::withinTolerance(e, params_)) {
     last_cmd_ = dock::Cmd{};
     cmd_pub_->publish(toTwist(last_cmd_));

@@ -52,6 +52,14 @@ TEST(DockControl, MinimumSpeedOutsideToleranceAndZeroInside)
   EXPECT_EQ(cmd.wz, 0.0);
 }
 
+TEST(DockControl, PointsInTheTurningCircle)
+{
+  // 제자리에서 돌 때 쓸고 가는 원 (반지름 0.27 m) 안의 점만 센다
+  const std::vector<dock::Point2> points{{0.2, 0.0}, {0.0, -0.26}, {0.2, 0.2}, {-0.5, 0.0}};
+  EXPECT_EQ(dock::pointsInCircle(points, 0.27), 2);
+  EXPECT_EQ(dock::pointsInCircle({}, 0.27), 0);
+}
+
 TEST(DockControl, PointsBehindAreThoseInTheSweptRectangle)
 {
   // 뒤 끝 0.2 m, 폭 ±0.16 m 인 로봇이 0.2 m 물러날 때: x -0.2 ~ -0.45, y ±0.21 (여유 0.05)

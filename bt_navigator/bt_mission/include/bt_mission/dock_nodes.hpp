@@ -49,6 +49,10 @@ struct DockRos
 };
 
 geometry_msgs::msg::PoseStamped toPoseStamped(const dock::Pose2 & pose, const std::string & frame);
+
+// 레이저 점들을 로봇 좌표계(robot_frame)로. 레이저의 TF 가 없으면 없음
+std::optional<std::vector<dock::Point2>> scanPoints(
+  const tf2_ros::Buffer & tf, const sensor_msgs::msg::LaserScan & scan, const std::string & robot_frame);
 dock::Pose2 toPose2(const geometry_msgs::msg::PoseStamped & pose);
 
 // 지금 방향 그대로 distance 만큼 곧게 뒤로 간다 (옆으로 밀리거나 돌면 vy, wz 로 바로잡는다).

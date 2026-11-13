@@ -23,7 +23,8 @@ robot   waffle    TurtleBot3 waffle (차동 구동, 바퀴 2개 + 캐스터. nav
                   holonomic 이라고 써도 같다 (예전 이름)
 camera_depth:=True  컬러에 맞춘 깊이 카메라도 켠다 (기본은 끈다: ArUco 도킹은 쓰지 않고, 렌더링과 점구름 계산이 무겁다)
 dock:=True        월드마다 정해 둔 곳에 ArUco marker 가 붙은 dock (models/aruco_dock, tools/make_aruco_dock.py)을
-                  놓는다. 지도에는 없는 물체다
+                  놓는다. 지도에는 없는 물체다. robot:=mecanum 이면 marker 검출 노드(bt_mission 의
+                  aruco_detector.launch.py)도 같이 띄운다 (aruco_detector:=False 이면 띄우지 않는다: 따로 띄울 때)
 실제 로봇과의 차이를 일부러 넣기 (robot:=mecanum, bt_navigator/DOCKING.md 7장)
   mecanum_slip:=True       몸체가 명령보다 덜 가고(옆 90 %), 옆으로 가면 조금 돈다. odom 은 바퀴 odom 처럼 명령을
                            적분해서 그만큼 틀린다 (scripts/mecanum_slip_sim.py)
@@ -48,7 +49,7 @@ import tempfile
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (AppendEnvironmentVariable, DeclareLaunchArgument, ExecuteProcess,
-                            IncludeLaunchDescription, OpaqueFunction, SetEnvironmentVariable)
+                            IncludeLaunchDescription, LogInfo, OpaqueFunction, SetEnvironmentVariable)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -162,6 +163,14 @@ def launch_setup(context):
             package='gazebo_ros', executable='spawn_entity.py', name='spawn_dock', output='screen',
             arguments=['-entity', 'aruco_dock', '-file', os.path.join(here, 'models', 'aruco_dock', 'model.sdf'),
                        '-x', str(dx), '-y', str(dy), '-z', '0', '-Y', str(dyaw)]))
+    if holonomic and arg('dock').lower() == 'true' and arg('aruco_detector').lower() == 'true':
+        # 도킹 BT 가 받는 dock/aruco. bt_mission 이 이 패키지에 기대므로 패키지 의존은 두지 않고, 있을 때만 띄운다
+        try:
+            detector = os.path.join(get_package_share_directory('bt_mission'), 'launch', 'aruco_detector.launch.py')
+            robot.append(IncludeLaunchDescription(PythonLaunchDescriptionSource(detector),
+                                                  launch_arguments={'use_sim_time': 'True'}.items()))
+        except Exception:  # noqa: BLE001
+            robot.append(LogInfo(msg='bt_mission is not built: start the ArUco detector yourself'))
     if holonomic:                           # 바퀴 넷의 각 (RViz 의 바퀴, 바퀴 TF)
         robot.append(Node(package='simple_line_bringup', executable='wheel_joint_publisher.py', output='screen',
                           parameters=[{'use_sim_time': True}]))
@@ -209,6 +218,8 @@ def generate_launch_description():
                               description='waffle (차동, 바퀴 2개) | mecanum (4바퀴 메카넘 + 컬러 카메라)'),
         DeclareLaunchArgument('dock', default_value='False',
                               description='True: ArUco marker 가 붙은 dock 을 월드에 놓는다'),
+        DeclareLaunchArgument('aruco_detector', default_value='True',
+                              description='dock:=True robot:=mecanum 일 때 marker 검출 노드도 띄운다'),
         DeclareLaunchArgument('camera_depth', default_value='False',
                               description='True: 깊이 카메라도 켠다 (robot:=mecanum)'),
         DeclareLaunchArgument('mecanum_slip', default_value='False',
