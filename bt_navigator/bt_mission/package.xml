@@ -3,7 +3,7 @@
 <package format="3">
   <name>bt_mission</name>
   <version>0.1.0</version>
-  <description>Mission BT on Nav2 Humble that takes tasks at run time through the ExecuteTask action: action servers (plain and nav2_behavior_tree::BtActionServer versions), BT nodes (per-waypoint navigation, QR docking for a holonomic base), a QR detector, and a task client.</description>
+  <description>Mission BT on Nav2 Humble that takes tasks at run time through the ExecuteTask action: action servers (plain and nav2_behavior_tree::BtActionServer versions), BT nodes (per-waypoint navigation, single ArUco marker precision docking for a mecanum base), an ArUco dock detector, and a task client.</description>
   <maintainer email="user@example.com">nav2_dwb</maintainer>
   <license>Apache-2.0</license>
 

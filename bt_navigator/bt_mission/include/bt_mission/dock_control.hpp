@@ -5,7 +5,8 @@
 #include <cmath>
 #include <vector>
 
-// 도킹 제어식 (ROS 와 무관한 계산만. dock_nodes.cpp 가 쓰고, test_dock_control.cpp 가 시험한다)
+// 도킹에 같이 쓰는 계산 (ROS 와 무관한 계산만. dock_nodes.cpp (BackOff) 와 aruco_dock_control.hpp 가 쓰고,
+// test_dock_control.cpp 가 시험한다)
 //
 // 메카넘(홀로노믹) 로봇은 앞뒤(vx), 옆(vy), 회전(wz)을 한꺼번에 낼 수 있다. 그래서 차동 구동처럼
 // "돌고 → 가고 → 돌기" 를 하지 않고, 목표 자세까지의 오차를 세 축에서 동시에 줄인다.
@@ -72,14 +73,6 @@ inline bool withinTolerance(const Pose2 & error, const ControlParams & p)
   return std::hypot(error.x, error.y) <= p.xy_tolerance && std::fabs(error.yaw) <= p.yaw_tolerance;
 }
 
-// QR 의 자세(위치 = QR 중심, yaw = QR 앞으로 나오는 법선의 방향) → 도킹했을 때의 로봇 자세.
-// 로봇 중심(base_footprint)이 QR 면에서 법선 방향으로 distance 만큼 떨어져 QR 을 바라본다
-inline Pose2 dockedPose(const Pose2 & qr, double distance)
-{
-  return {qr.x + distance * std::cos(qr.yaw), qr.y + distance * std::sin(qr.yaw),
-    normalizeAngle(qr.yaw + M_PI)};
-}
-
 // 한 주기(dt) 의 명령
 inline Cmd holonomicStep(const Pose2 & error, const Cmd & last, const ControlParams & p, double dt)
 {
@@ -104,53 +97,6 @@ inline double median(std::vector<double> v)
 {
   std::nth_element(v.begin(), v.begin() + static_cast<long>(v.size() / 2), v.end());
   return v[v.size() / 2];
-}
-
-// 여러 번 본 dock 자세의 대표값. 위치는 중앙값에서 max_spread 안, 방향은 중앙값에서 max_yaw_spread 안에
-// 드는 것(inlier)만 평균한다. QR 네 모서리(PnP)로 구한 법선은 가끔 시선 둘레로 뒤집혀 10~20 도 튀는데,
-// 그냥 평균하면 그쪽으로 끌려가고, 처음 값에서 먼 것을 버리면 처음 값이 틀렸을 때 바른 측정을 다 버린다.
-// 중앙값은 절반이 안 되는 튀는 값에 흔들리지 않는다
-struct Average
-{
-  Pose2 pose;
-  int inliers{0};
-};
-
-inline Average robustAverage(const std::vector<Pose2> & poses, double max_spread, double max_yaw_spread)
-{
-  Average out;
-  if (poses.empty()) {
-    return out;
-  }
-  std::vector<double> xs, ys, offsets;
-  double sin_sum = 0.0, cos_sum = 0.0;
-  for (const auto & p : poses) {
-    xs.push_back(p.x);
-    ys.push_back(p.y);
-    sin_sum += std::sin(p.yaw);
-    cos_sum += std::cos(p.yaw);
-  }
-  const double reference = std::atan2(sin_sum, cos_sum);    // 각도의 중앙값은 이 근처에서 잰다 (±pi 넘김)
-  for (const auto & p : poses) {
-    offsets.push_back(normalizeAngle(p.yaw - reference));
-  }
-  const Pose2 mid{median(xs), median(ys), normalizeAngle(reference + median(offsets))};
-  double sx = 0.0, sy = 0.0, syaw = 0.0;
-  for (const auto & p : poses) {
-    const double dyaw = normalizeAngle(p.yaw - mid.yaw);
-    if (std::hypot(p.x - mid.x, p.y - mid.y) <= max_spread && std::fabs(dyaw) <= max_yaw_spread) {
-      sx += p.x;
-      sy += p.y;
-      syaw += dyaw;
-      ++out.inliers;
-    }
-  }
-  if (out.inliers > 0) {
-    out.pose = {sx / out.inliers, sy / out.inliers, normalizeAngle(mid.yaw + syaw / out.inliers)};
-  } else {
-    out.pose = mid;
-  }
-  return out;
 }
 
 // 로봇 좌표계의 점 중에서, 뒤로 distance 만큼 갈 때 몸이 쓸고 가는 사각형 안에 있는 것의 수.

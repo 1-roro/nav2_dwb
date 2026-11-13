@@ -1,0 +1,18 @@
+# ArUco dock (aruco_detector.py, aruco_teach.py, tools/make_aruco_dock.py 가 읽는다). dock 하나에 marker 하나.
+#
+# dock 좌표계 D: 원점 = 바닥에서 충전 접점 면의 가운데, x = dock 에서 방 쪽으로 (로봇이 다가오는 쪽),
+#               z = 위, y = z x x (로봇이 dock 을 바라보면 오른쪽).
+#   marker_id  이 dock 의 marker (dictionary 안의 번호). 다른 dock 은 다른 번호
+#   size       검은 테두리 바깥 한 변 [m]. 인쇄한 뒤 자로 재서 고친다 (1 % 틀리면 거리가 1 % 틀린다)
+#   offset     marker 면이 충전 접점 면보다 뒤로 [m]. 로봇이 붙은 뒤에도 카메라가 marker 를 보게 하려는 것
+#              (시뮬레이션의 waffle: 붙었을 때 카메라 ↔ marker 0.33 m)
+#   height     marker 중심의 바닥에서 높이 [m]. 3자유도 자세(바닥 위 x, y, yaw)를 풀 때 쓴다
+#   lateral    marker 중심이 접점 가운데에서 옆으로 (+y_D) [m]
+dictionary: DICT_4X4_50
+docks:
+  dock_a:
+    marker_id: 0
+    size: 0.12
+    offset: 0.30
+    height: 0.155
+    lateral: 0.0

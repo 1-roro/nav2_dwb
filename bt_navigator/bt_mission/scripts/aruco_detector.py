@@ -1,27 +1,32 @@
 #!/usr/bin/env python3
 """
-카메라 영상에서 ArUco dock board 를 찾아, 카메라에서 본 dock 좌표계 D 의 자세와 그 불확실도(공분산)를
-dock/aruco (bt_mission_msgs/ArucoDetection) 로 발행한다. ArUco 도킹 BT 노드(DetectArucoDock, ArucoServo,
-ArucoRefine)가 이것을 받는다 (ARUCO_DOCKING.md).
+카메라 영상에서 dock 의 ArUco marker (dock 하나에 하나) 를 찾아, 로봇(base) 좌표계에서 본 dock 의 자세
+(바닥 위 x, y, yaw) 와 그 불확실도(공분산)를 dock/aruco (bt_mission_msgs/ArucoDetection) 로 발행한다.
+도킹 BT 노드(DetectArucoDock, ArucoServo, ArucoRefine)가 이것을 받는다 (DOCKING.md).
 
   ros2 launch bt_mission aruco_detector.launch.py use_sim_time:=True              # 시뮬레이션
   ros2 launch bt_mission aruco_detector.launch.py camera:=/camera/camera          # RealSense (realsense-ros 4.x)
 
-1. OpenCV ArucoDetector 로 marker 를 찾는다. 모서리는 서브픽셀로 다듬는다 (CORNER_REFINE_SUBPIX).
-   영상 끝에 걸린 marker 는 모서리를 믿을 수 없으므로 버린다.
-2. 한 board 의 marker 가 몇 개든 그 모서리를 모두 모아 PnP 를 한 번에 푼다 (marker 4개면 점 16개).
-   - 점들이 한 평면에 있으므로 SOLVEPNP_IPPE 로 두 해를 구해 재투영 오차가 작은 쪽을 고르고, LM 으로 다듬는다.
-   - 두 해의 오차 비(ambiguity)도 낸다. 점이 넓게 퍼질수록 틀린 해의 오차가 커져서 뒤집힘이 사라진다
-     (QR 하나, marker 하나일 때의 법선 뒤집힘이 여기서 줄어든다).
-   - marker 가 하나만 보이면 그 정사각형으로 SOLVEPNP_IPPE_SQUARE.
-3. 공분산: 모서리 위치의 잡음(pixel_sigma, 재투영 오차가 더 크면 그것)을 PnP 의 Jacobian 으로 자세로 옮긴다
-   (Σ = σ² (JᵀJ)⁻¹). 멀리서 작게 보이면 크고, 가까이서 크게 보이면 작다. BT 의 필터가 이것으로 측정마다
+1. marker 찾기: OpenCV ArUco. 모서리는 서브픽셀로 다듬는다 (CORNER_REFINE_SUBPIX).
+   영상 끝에 걸린 것, 너무 작은 것은 모서리를 믿을 수 없어 버린다.
+2. 6자유도 PnP (IPPE_SQUARE): 정사각형 하나의 PnP 는 해가 둘이다. 비스듬히 보거나 멀면 두 해의 재투영 오차가
+   비슷해서, 오차가 작은 쪽을 고르면 가끔 반대쪽(법선이 시선 둘레로 뒤집힌 것)을 고른다. 또 marker 면의 기울기
+   (법선) 는 네 모서리만으로는 잘 정해지지 않아서, 0.3 m 앞의 접점 자리로 옮기면 옆 오차가 몇 mm ~ 몇 cm 가 된다.
+3. 바닥 사전분포를 둔 6자유도 MAP (이 노드의 핵심): dock 은 바닥에 서 있고, 카메라가 로봇 어디에 달렸는지(TF),
+   marker 의 높이는 안다. 그렇다고 "기울기 0, 높이 0" 을 못박으면(3자유도) 카메라 높이가 1 cm, pitch 가 1 도만
+   틀려도 옆 오차가 수 cm 가 된다 (test_aruco_detector.py). 그래서 base 에서 본 D 의 6자유도
+   p = (x, y, yaw, z, roll, pitch) 를 풀되, z, roll, pitch 에 사전분포 N(0, σ_z²), N(0, σ_tilt²) 를 둔다:
+     p* = argmin_p  Σ‖π(K, T_cam_base · T_base_D(p) · c_i) − u_i‖² / σ_px²  +  z²/σ_z² + roll²/σ_tilt² + pitch²/σ_tilt²
+   (Levenberg-Marquardt, IPPE 두 해에서 시작). 영상이 기울기를 잘 말해 주면(가까이) 영상을 따르고, 잘 말해 주지
+   못하면(멀리, 정면) 사전분포가 뒤집힌 해와 기울기-방향 섞임을 막는다. 두 시작점이 같은 자리로 모이면 후보 하나,
+   다른 자리로 모이면 둘 다 낸다(비용 순). 고르는 것은 BT 의 필터가 한다 (지금까지의 추정에 가까운 쪽).
+4. 공분산: 정보 행렬 JᵀJ (영상 8 + 사전 3 행) 의 역에서 (x, y, yaw) 부분 (나머지는 marginalize).
+   σ_px = max(pixel_sigma, 재투영 RMS). 멀거나 비스듬하면 크고, 가까우면 작다. BT 의 필터가 이것으로 측정마다
    무게를 다르게 준다.
-4. depth_topic 을 주면 판 위 깊이 점들에 평면을 맞춰 판의 기울기(법선)를 바꾼다 (qr_detector.py 와 같은 방법).
-   판이 넓어 PnP 만으로도 법선이 좋으므로 기본은 쓰지 않는다.
+5. 진단: 추정한 dock 의 기울기(tilt_deg)와 바닥 높이(height_offset). 가까이서 늘 2 ~ 3 도, 1 cm 를 넘으면
+   카메라 TF(특히 pitch, 높이), marker 높이가 config 와 다르다는 뜻이다 (경고를 낸다).
 
-board 는 config/aruco_boards.yaml 에 dock 좌표계로 적는다. board_scale 은 그 크기와 자리 전체에 곱한다
-(인쇄가 1 % 크게 나왔으면 1.01. 시뮬레이션에서 크기 오차를 일부러 넣을 때도 쓴다).
+OpenCV 4.5 (Ubuntu 22.04 의 python3-opencv) 와 4.7 이상(ArucoDetector) 을 모두 쓴다.
 """
 
 import math
@@ -32,170 +37,274 @@ import numpy as np
 import yaml
 
 SIDE_MARGIN = 6          # 영상 끝에서 이 px 안에 모서리가 있는 marker 는 버린다
+DISTINCT_XY = 0.005      # 두 해가 이보다 가까우면 [m] (그리고 DISTINCT_YAW 안이면) 같은 해로 본다
+DISTINCT_YAW = math.radians(0.5)
 
 
 # ---------------------------------------------------------------------------------------------
-# board
+# OpenCV 판 차이 (4.5/4.6: 함수, 4.7+: ArucoDetector 클래스)
 
-class Board:
-    """dock 좌표계 D 와 board 좌표계 B.
-    B: 원점 = D 의 (-board_offset, 0, 0), x_B = +y_D (영상에서 오른쪽), y_B = +z_D (위), z_B = +x_D (카메라 쪽).
-    OpenCV ArUco 의 marker 좌표계(x 오른쪽, y 위, z 앞)와 같은 방향이라 marker 모서리를 (y, z, 0) 으로 적는다."""
+def aruco_dictionary(name):
+    if not hasattr(cv2, 'aruco'):
+        raise RuntimeError('this OpenCV has no aruco module: apt install python3-opencv '
+                           '(or pip install opencv-contrib-python)')
+    return cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, name))
 
-    R_D_B = np.array([[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])   # 열: x_B, y_B, z_B 를 D 에서 본 것
+
+def marker_image(dictionary, marker_id, side):
+    if hasattr(cv2.aruco, 'generateImageMarker'):
+        return cv2.aruco.generateImageMarker(dictionary, marker_id, side)
+    return cv2.aruco.drawMarker(dictionary, marker_id, side)
+
+
+class MarkerDetector:
+
+    def __init__(self, dictionary):
+        if hasattr(cv2.aruco, 'ArucoDetector'):
+            params = cv2.aruco.DetectorParameters()
+        else:
+            params = cv2.aruco.DetectorParameters_create()
+        params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+        params.cornerRefinementWinSize = 5
+        params.cornerRefinementMaxIterations = 50
+        params.cornerRefinementMinAccuracy = 0.01
+        # 기본값 3 이면, 붙은 자리(0.33 m)에서 크게 보이는 marker 를 OpenCV 가 후보에서 빼 버리는 일이 있었다
+        # (Gazebo 영상, test/data/gazebo_docked.jpg). 영상 끝에 걸린 marker 는 usable() 이 따로 거른다
+        params.minDistanceToBorder = 0
+        self.dictionary, self.params = dictionary, params
+        self.detector = cv2.aruco.ArucoDetector(dictionary, params) if hasattr(cv2.aruco, 'ArucoDetector') else None
+
+    def detect(self, gray):
+        """-> {marker id: 4 x 2 모서리 (왼위, 오른위, 오른아래, 왼아래)}"""
+        if self.detector is not None:
+            corners, ids, _ = self.detector.detectMarkers(gray)
+        else:
+            corners, ids, _ = cv2.aruco.detectMarkers(gray, self.dictionary, parameters=self.params)
+        if ids is None:
+            return {}
+        return {int(i): c.reshape(4, 2).astype(np.float64) for c, i in zip(corners, ids.reshape(-1))}
+
+
+# ---------------------------------------------------------------------------------------------
+# dock 과 marker
+
+def rot_z(a):
+    c, s = math.cos(a), math.sin(a)
+    return np.array([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
+
+
+class DockMarker:
+    """dock 좌표계 D 의 marker. 모서리는 로봇이 dock 을 바라볼 때의 OpenCV 순서 (영상 오른쪽 = +y_D, 위 = +z_D)"""
+
+    R_D_M = np.array([[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])   # marker 좌표계 (x 오른쪽, y 위, z 앞)
 
     def __init__(self, name, cfg, scale=1.0):
         self.name = name
-        self.offset = cfg['board_offset'] * scale
-        self.markers = {m['id']: (m['y'] * scale, m['z'] * scale, m['size'] * scale) for m in cfg['markers']}
-
-    def corners(self, marker_id):
-        """marker 모서리 4개 (B 좌표, OpenCV 순서: 왼위, 오른위, 오른아래, 왼아래)"""
-        y, z, s = self.markers[marker_id]
-        h = s / 2.0
-        return np.array([[y - h, z + h, 0.0], [y + h, z + h, 0.0], [y + h, z - h, 0.0], [y - h, z - h, 0.0]])
-
-    def dock_from_board(self, R_cam_B, t_cam_B):
-        """T_cam_B -> T_cam_D"""
-        R_cam_D = R_cam_B @ self.R_D_B.T
-        t_cam_D = t_cam_B.reshape(3) + R_cam_D @ np.array([self.offset, 0.0, 0.0])
-        return R_cam_D, t_cam_D
+        self.marker_id = int(cfg['marker_id'])
+        self.size = cfg['size'] * scale
+        self.offset = cfg['offset']
+        self.height = cfg['height']
+        self.lateral = cfg.get('lateral', 0.0)
+        h = self.size / 2.0
+        x, y, z = -self.offset, self.lateral, self.height
+        self.corners_D = np.array([[x, y - h, z + h], [x, y + h, z + h], [x, y + h, z - h], [x, y - h, z - h]])
+        self.t_D_M = np.array([x, y, z])
 
 
-def load_boards(path, scale=1.0):
+def load_docks(path, scale=1.0):
     with open(path) as f:
         cfg = yaml.safe_load(f)
-    dictionary = cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, cfg['dictionary']))
-    return dictionary, {name: Board(name, b, scale) for name, b in cfg['boards'].items()}
+    return cfg['dictionary'], {name: DockMarker(name, d, scale) for name, d in cfg['docks'].items()}
 
 
 # ---------------------------------------------------------------------------------------------
-# PnP
+# 자세
 
-def solve_board(obj, img, camera_matrix, dist_coeffs, square_size=None):
-    """board 점들 -> (rvec, tvec, 재투영 RMS px, ambiguity). 실패하면 None.
-    square_size: marker 하나만 보일 때 그 한 변 (obj 는 그 marker 의 모서리 4개)"""
-    obj = np.asarray(obj, np.float64).reshape(-1, 3)
-    img = np.asarray(img, np.float64).reshape(-1, 1, 2)
-    if square_size is not None:
-        # IPPE_SQUARE 는 원점이 가운데인 정사각형만 받는다: marker 자리로 풀고 B 로 옮긴다
-        center = obj.mean(axis=0)
-        ok, rvecs, tvecs, errors = cv2.solvePnPGeneric(obj - center, img, camera_matrix, dist_coeffs,
-                                                        flags=cv2.SOLVEPNP_IPPE_SQUARE)
-        if not ok:
+class Camera:
+    """내부값과 로봇에 달린 자리 (T_base_cam: optical frame -> base)"""
+
+    def __init__(self, K, dist, R_base_cam, t_base_cam):
+        self.K = np.asarray(K, np.float64).reshape(3, 3)
+        self.dist = np.asarray(dist, np.float64).reshape(-1) if dist is not None and len(dist) else np.zeros(5)
+        self.R_base_cam = np.asarray(R_base_cam, np.float64)
+        self.t_base_cam = np.asarray(t_base_cam, np.float64).reshape(3)
+        self.R_cam_base = self.R_base_cam.T
+        self.t_cam_base = -self.R_cam_base @ self.t_base_cam
+
+    def project(self, points_base):
+        p = points_base @ self.R_cam_base.T + self.t_cam_base
+        if (p[:, 2] < 0.01).any():
             return None
-        rvecs = list(rvecs)
-        tvecs = [t.reshape(3) - cv2.Rodrigues(r)[0] @ center for r, t in zip(rvecs, tvecs)]
-    else:
-        ok, rvecs, tvecs, errors = cv2.solvePnPGeneric(obj, img, camera_matrix, dist_coeffs, flags=cv2.SOLVEPNP_IPPE)
-        if not ok:
-            return None
+        image, _ = cv2.projectPoints(p, np.zeros(3), np.zeros(3), self.K, self.dist)
+        return image.reshape(-1, 2)
+
+
+def project_dock(q, marker, camera):
+    """base 에서 본 D 의 자세 q = (x, y, yaw) -> marker 모서리 4개의 영상 좌표"""
+    p = marker.corners_D @ rot_z(q[2]).T + np.array([q[0], q[1], 0.0])
+    return camera.project(p)
+
+
+def ippe(corners, marker, camera):
+    """6자유도 PnP 의 두 해 -> [(T_cam_M 의 R, t, 재투영 RMS)]"""
+    h = marker.size / 2.0
+    obj = np.array([[-h, h, 0.0], [h, h, 0.0], [h, -h, 0.0], [-h, -h, 0.0]])
+    ok, rvecs, tvecs, errors = cv2.solvePnPGeneric(
+        obj, corners.reshape(4, 1, 2), camera.K, camera.dist, flags=cv2.SOLVEPNP_IPPE_SQUARE)
+    if not ok:
+        return []
     errors = np.asarray(errors).reshape(-1)
-    order = np.argsort(errors)
-    rvec, tvec = np.asarray(rvecs[order[0]], np.float64).reshape(3, 1), np.asarray(tvecs[order[0]], np.float64).reshape(3, 1)
-    ambiguity = float(errors[order[1]] / max(errors[order[0]], 1e-9)) if len(errors) > 1 else 0.0
-    if square_size is None:
-        rvec, tvec = cv2.solvePnPRefineLM(obj, img, camera_matrix, dist_coeffs, rvec, tvec)
-    projected, _ = cv2.projectPoints(obj, rvec, tvec, camera_matrix, dist_coeffs)
-    rms = float(np.sqrt(np.mean(np.sum((projected.reshape(-1, 2) - img.reshape(-1, 2)) ** 2, axis=1))))
-    return rvec, tvec, rms, ambiguity
+    return [(cv2.Rodrigues(r)[0], np.asarray(t).reshape(3), float(e)) for r, t, e in zip(rvecs, tvecs, errors)]
 
 
-def small_rotation(R, R0):
-    """R = exp([phi]) R0 의 phi (카메라 축 둘레의 작은 각). 아주 작은 각은 Rodrigues(acos)로 구하면 0 이 되므로
-    반대칭 부분으로 구한다"""
-    d = R @ R0.T
-    return 0.5 * np.array([d[2, 1] - d[1, 2], d[0, 2] - d[2, 0], d[1, 0] - d[0, 1]])
+def dock_from_marker(R_cam_M, t_cam_M, marker, camera):
+    """6자유도 해 (카메라에서 본 marker) -> base 에서 본 D 의 (x, y, yaw) (높이와 기울기는 버린다)"""
+    R_base_M = camera.R_base_cam @ R_cam_M
+    t_base_M = camera.R_base_cam @ t_cam_M + camera.t_base_cam
+    R_base_D = R_base_M @ marker.R_D_M.T
+    t_base_D = t_base_M - R_base_D @ marker.t_D_M
+    return np.array([t_base_D[0], t_base_D[1], math.atan2(R_base_D[1, 0], R_base_D[0, 0])])
 
 
-def pose_covariance(board, obj, rvec, tvec, camera_matrix, dist_coeffs, sigma_px):
-    """모서리 잡음 sigma_px -> D 의 [위치 x y z, 작은 회전 rx ry rz] (카메라 frame) 의 6x6 공분산"""
-    _, jac = cv2.projectPoints(np.asarray(obj, np.float64).reshape(-1, 3), rvec, tvec, camera_matrix, dist_coeffs)
-    J = jac[:, :6]                                        # d(영상 점) / d(rvec, tvec)
-    info = J.T @ J / (sigma_px ** 2)
-    cov_params = np.linalg.inv(info + np.eye(6) * 1e-12)
-
-    def output(params):
-        R_B = cv2.Rodrigues(params[:3].reshape(3, 1))[0]
-        R_D, t_D = board.dock_from_board(R_B, params[3:])
-        return R_D, t_D
-
-    p0 = np.concatenate([rvec.reshape(3), tvec.reshape(3)])
-    R0, t0 = output(p0)
-    A = np.zeros((6, 6))
-    eps = 1e-6
-    for i in range(6):
-        p = p0.copy()
-        p[i] += eps
-        R, t = output(p)
-        A[:3, i] = (t - t0) / eps
-        A[3:, i] = small_rotation(R, R0) / eps
-    return A @ cov_params @ A.T
+def angle(a):
+    return math.atan2(math.sin(a), math.cos(a))
 
 
-# ---------------------------------------------------------------------------------------------
-# 깊이 평면 (qr_detector.py 와 같은 방법: 1/z 를 x', y' 의 일차식으로)
-
-def fit_plane(points):
-    """N x 3 점 (카메라 optical frame) -> (단위 법선, 잔차 RMS). 깊이 잡음은 시선을 따라 생기므로 1/z 로 맞춘다"""
-    for _ in range(2):
-        a = np.column_stack([points[:, 0] / points[:, 2], points[:, 1] / points[:, 2], np.ones(len(points))])
-        coef, *_ = np.linalg.lstsq(a, 1.0 / points[:, 2], rcond=None)
-        scale = np.linalg.norm(coef)
-        normal, d = coef / scale, 1.0 / scale
-        residual = np.abs(points @ normal - d)
-        keep = residual < max(3.0 * float(np.median(residual)), 0.002)
-        if keep.all() or keep.sum() < 30:
-            break
-        points = points[keep]
-    return normal, float(np.sqrt(np.mean((points @ normal - d) ** 2))), points
+def rot_x(a):
+    c, s = math.cos(a), math.sin(a)
+    return np.array([[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]])
 
 
-def depth_points(depth, polygon, scale, camera_matrix, shrink=0.9, max_points=4000):
-    """컬러 영상의 다각형(볼록 껍질) 안쪽의 깊이 점들 -> N x 3"""
-    hull = cv2.convexHull(polygon.astype(np.float32)).reshape(-1, 2)
-    center = hull.mean(axis=0)
-    inner = (center + (hull - center) * shrink) * scale
-    mask = np.zeros(depth.shape[:2], np.uint8)
-    cv2.fillConvexPoly(mask, np.round(inner).astype(np.int32), 1)
-    v, u = np.nonzero(mask)
-    if len(v) > max_points:
-        pick = np.linspace(0, len(v) - 1, max_points).astype(int)
-        v, u = v[pick], u[pick]
-    z = depth[v, u].astype(np.float64)
-    ok = np.isfinite(z) & (z > 0.05)
-    u, v, z = u[ok], v[ok], z[ok]
-    fx, fy = camera_matrix[0, 0] * scale, camera_matrix[1, 1] * scale
-    cx, cy = camera_matrix[0, 2] * scale, camera_matrix[1, 2] * scale
-    return np.stack([(u - cx) / fx * z, (v - cy) / fy * z, z], axis=1)
+def rot_y(a):
+    c, s = math.cos(a), math.sin(a)
+    return np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]])
 
 
-def apply_depth_normal(R_cam_B, points, cov_rot):
-    """판의 z 축(법선)을 깊이 평면의 법선으로 바꾼다 (x 는 PnP 의 x 를 평면에 투영). 기울기 두 축의 분산은
-    평면 맞춤에서, 판 안에서 도는 축의 분산은 PnP 에서 -> (R_cam_B, 3x3 회전 공분산, 잔차 RMS)"""
-    normal, rms, used = fit_plane(points)
-    if normal @ used.mean(axis=0) > 0:              # z_B 는 카메라 쪽
-        normal = -normal
-    x = R_cam_B[:, 0] - (R_cam_B[:, 0] @ normal) * normal
-    x /= np.linalg.norm(x)
-    R_new = np.column_stack([x, np.cross(normal, x), normal])
-    centered = used - used.mean(axis=0)
-    spread = math.sqrt(max(float(np.mean(np.sum(centered ** 2, axis=1))), 1e-6))
-    sigma_tilt = max(rms, 0.0005) / (spread * math.sqrt(len(used) / 2.0))
-    z = R_new[:, 2]
-    var_inplane = float(z @ cov_rot @ z)
-    cov = R_new @ np.diag([sigma_tilt ** 2, sigma_tilt ** 2, var_inplane]) @ R_new.T
-    return R_new, cov, rms
+def dock_rotation(p):
+    """p = (x, y, yaw, z, roll, pitch) -> R_base_D"""
+    return rot_z(p[2]) @ rot_y(p[5]) @ rot_x(p[4])
 
 
-def quaternion_from_matrix(R):
-    rvec, _ = cv2.Rodrigues(R)
-    angle = float(np.linalg.norm(rvec))
-    if angle < 1e-12:
-        return 0.0, 0.0, 0.0, 1.0
-    axis = rvec.reshape(3) / angle
-    s = math.sin(angle / 2.0)
-    return axis[0] * s, axis[1] * s, axis[2] * s, math.cos(angle / 2.0)
+def project_dock6(p, marker, camera):
+    return camera.project(marker.corners_D @ dock_rotation(p).T + np.array([p[0], p[1], p[3]]))
+
+
+def dock6_from_marker(R_cam_M, t_cam_M, marker, camera):
+    """6자유도 해 (카메라에서 본 marker) -> base 에서 본 D 의 p = (x, y, yaw, z, roll, pitch)"""
+    R_base_M = camera.R_base_cam @ R_cam_M
+    t_base_M = camera.R_base_cam @ t_cam_M + camera.t_base_cam
+    R = R_base_M @ marker.R_D_M.T
+    t = t_base_M - R @ marker.t_D_M
+    return np.array([t[0], t[1], math.atan2(R[1, 0], R[0, 0]), t[2], math.atan2(R[2, 1], R[2, 2]),
+                     math.asin(-max(-1.0, min(1.0, R[2, 0])))])
+
+
+class Prior:
+    """dock 이 바닥에 서 있다는 믿음의 세기. sigma_z [m], sigma_tilt [rad]"""
+
+    def __init__(self, sigma_z=0.01, sigma_tilt=math.radians(1.5)):
+        self.sigma = np.array([sigma_z, sigma_tilt, sigma_tilt])
+
+
+def refine_map(p0, corners, marker, camera, prior, sigma_px, iterations=30):
+    """바닥 사전분포를 둔 6자유도 Levenberg-Marquardt -> (p, 비용, 재투영 RMS px, 정규화 Jacobian 11x6). 실패하면 None"""
+    def residual(p):
+        image = project_dock6(p, marker, camera)
+        if image is None:
+            return None
+        return np.concatenate([(image - corners).reshape(-1) / sigma_px, p[3:] / prior.sigma])
+
+    def jacobian(p, r):
+        J = np.zeros((11, 6))
+        for i in range(6):
+            dp = np.zeros(6)
+            dp[i] = 1e-7
+            ri = residual(p + dp)
+            if ri is None:
+                return None
+            J[:, i] = (ri - r) / 1e-7
+        return J
+
+    p = np.array(p0, np.float64)
+    r = residual(p)
+    if r is None:
+        return None
+    lam = 1e-3
+    for _ in range(iterations):
+        J = jacobian(p, r)
+        if J is None:
+            return None
+        H = J.T @ J
+        try:
+            step = -np.linalg.solve(H + lam * np.diag(np.diag(H) + 1e-12), J.T @ r)
+        except np.linalg.LinAlgError:
+            return None
+        r_new = residual(p + step)
+        if r_new is not None and r_new @ r_new < r @ r:
+            p, r, lam = p + step, r_new, max(lam * 0.3, 1e-9)
+            if np.max(np.abs(step)) < 1e-10:
+                break
+        else:
+            lam *= 10.0
+            if lam > 1e6:
+                break
+    J = jacobian(p, r)
+    if J is None:
+        return None
+    p[2], p[4], p[5] = angle(p[2]), angle(p[4]), angle(p[5])
+    rms = float(math.sqrt(np.mean(r[:8] ** 2) * 2.0) * sigma_px)
+    return p, float(r @ r), rms, J
+
+
+def estimate(corners, marker, camera, pixel_sigma=0.5, prior=None):
+    """모서리 4개 -> dict(hypotheses=[(q=(x, y, yaw), 3x3 공분산, 재투영 rms)], ambiguity, tilt, height, distance).
+    실패하면 None"""
+    prior = prior or Prior()
+    solutions = ippe(corners, marker, camera)
+    if not solutions:
+        return None
+    refined = []
+    for R, t, _ in solutions:
+        out = refine_map(dock6_from_marker(R, t, marker, camera), corners, marker, camera, prior, pixel_sigma)
+        if out is not None:
+            refined.append(out)
+    if not refined:
+        return None
+    refined.sort(key=lambda o: o[1])
+    hypotheses, kept = [], []
+    for p, cost, rms, J in refined:
+        if any(np.hypot(*(p[:2] - k[0][:2])) < DISTINCT_XY and abs(angle(p[2] - k[0][2])) < DISTINCT_YAW for k in kept):
+            continue
+        # 재투영 오차가 pixel_sigma 보다 크면 그만큼 영상 행을 덜 믿는다
+        J = J.copy()
+        J[:8] *= pixel_sigma / max(pixel_sigma, rms)
+        try:
+            cov6 = np.linalg.inv(J.T @ J)
+        except np.linalg.LinAlgError:
+            continue
+        cov = cov6[:3, :3]
+        kept.append((p, cost))
+        hypotheses.append((p[:3].copy(), 0.5 * (cov + cov.T), rms))
+    if not hypotheses:
+        return None
+    best = kept[0][0]
+    ambiguity = kept[1][1] / max(kept[0][1], 1e-9) if len(kept) > 1 else 0.0
+    distance = float(np.linalg.norm(min(solutions, key=lambda s: s[2])[1]))
+    return {'hypotheses': hypotheses, 'ambiguity': ambiguity, 'tilt': float(math.hypot(best[4], best[5])),
+            'height': float(best[3]), 'distance': distance}
+
+
+def usable(corners, width, height, min_px):
+    side = float(np.mean(np.linalg.norm(corners - np.roll(corners, -1, axis=0), axis=1)))
+    inside = (corners.min() >= SIDE_MARGIN and (corners[:, 0] <= width - 1 - SIDE_MARGIN).all()
+              and (corners[:, 1] <= height - 1 - SIDE_MARGIN).all())
+    return inside and side >= min_px, side
+
+
+def matrix_from_quaternion(x, y, z, w):
+    return np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                     [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                     [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
 
 
 # ---------------------------------------------------------------------------------------------
@@ -203,73 +312,73 @@ def quaternion_from_matrix(R):
 
 def main():
     import rclpy
+    import tf2_ros
     from cv_bridge import CvBridge
     from rclpy.node import Node
     from rclpy.qos import qos_profile_sensor_data
     from sensor_msgs.msg import CameraInfo, Image
-    from bt_mission_msgs.msg import ArucoDetection
+    from bt_mission_msgs.msg import ArucoDetection, DockHypothesis
 
     class ArucoDetector(Node):
 
         def __init__(self):
             super().__init__('aruco_detector')
-            default_boards = ''
+            default_docks = ''
             try:
                 from ament_index_python.packages import get_package_share_directory
-                default_boards = os.path.join(get_package_share_directory('bt_mission'), 'config', 'aruco_boards.yaml')
+                default_docks = os.path.join(get_package_share_directory('bt_mission'), 'config', 'aruco_docks.yaml')
             except Exception:  # noqa: BLE001  (패키지 밖에서 돌릴 때)
                 pass
-            boards_file = self.declare_parameter('boards_file', default_boards).value
+            docks_file = self.declare_parameter('docks_file', default_docks).value
             image_topic = self.declare_parameter('image_topic', '/camera/color/image_raw').value
             info_topic = self.declare_parameter('camera_info_topic', '/camera/color/camera_info').value
-            depth_topic = self.declare_parameter('depth_topic', '').value
-            self.depth_scale = self.declare_parameter('depth_scale', 0.001).value
-            self.board_scale = self.declare_parameter('board_scale', 1.0).value
-            self.pixel_sigma = self.declare_parameter('pixel_sigma', 0.5).value
-            self.min_marker_px = self.declare_parameter('min_marker_px', 12.0).value
+            self.base_frame = self.declare_parameter('base_frame', 'base_footprint').value
             self.optical_frame = self.declare_parameter('optical_frame', '').value
+            self.marker_scale = self.declare_parameter('marker_scale', 1.0).value
+            self.pixel_sigma = self.declare_parameter('pixel_sigma', 0.5).value
+            self.min_marker_px = self.declare_parameter('min_marker_px', 16.0).value
+            self.prior = Prior(self.declare_parameter('prior_height_sigma', 0.01).value,
+                               math.radians(self.declare_parameter('prior_tilt_sigma_deg', 1.5).value))
+            self.tilt_warn = math.radians(self.declare_parameter('tilt_warn_deg', 3.0).value)
+            self.height_warn = self.declare_parameter('height_warn', 0.015).value
             self.publish_debug = self.declare_parameter('debug_image', True).value
 
-            dictionary, self.boards = load_boards(boards_file, self.board_scale)
-            params = cv2.aruco.DetectorParameters()
-            params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-            params.cornerRefinementWinSize = 5
-            params.cornerRefinementMaxIterations = 50
-            params.cornerRefinementMinAccuracy = 0.01
-            self.detector = cv2.aruco.ArucoDetector(dictionary, params)
+            dictionary_name, self.docks = load_docks(docks_file, self.marker_scale)
+            self.by_id = {d.marker_id: d for d in self.docks.values()}
+            self.detector = MarkerDetector(aruco_dictionary(dictionary_name))
             self.bridge = CvBridge()
-            self.camera_matrix = None
-            self.dist_coeffs = None
-            self.depth = None
+            self.info = None
+            self.camera = None
+            self.tf_buffer = tf2_ros.Buffer()
+            self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
             self.pub = self.create_publisher(ArucoDetection, 'dock/aruco', 10)
             self.debug_pub = self.create_publisher(Image, 'dock/aruco_debug', 1) if self.publish_debug else None
             self.create_subscription(CameraInfo, info_topic, self.on_info, qos_profile_sensor_data)
             self.create_subscription(Image, image_topic, self.on_image, qos_profile_sensor_data)
-            if depth_topic:
-                self.create_subscription(Image, depth_topic, lambda m: setattr(self, 'depth', m),
-                                         qos_profile_sensor_data)
-            self.msg_type = ArucoDetection
+            self.msg_types = ArucoDetection, DockHypothesis
             self.get_logger().info(
-                f'ArUco detector: {image_topic}, boards {list(self.boards)} from {boards_file} '
-                f'(scale {self.board_scale}), normal from {"depth " + depth_topic if depth_topic else "PnP"}')
+                f'ArUco detector (OpenCV {cv2.__version__}): {image_topic}, docks '
+                f'{ {n: d.marker_id for n, d in self.docks.items()} } from {docks_file} (size x {self.marker_scale}), '
+                f'poses in {self.base_frame}')
 
         def on_info(self, msg):
-            self.camera_matrix = np.array(msg.k, np.float64).reshape(3, 3)
-            self.dist_coeffs = np.array(msg.d, np.float64) if len(msg.d) else np.zeros(5)
+            self.info = msg
 
-        def depth_for(self, stamp, shape):
-            msg = self.depth
-            if msg is None:
+        def camera_for(self, frame):
+            """내부값 + TF (base <- camera optical). 로봇에 고정이라 한 번 찾으면 계속 쓴다"""
+            if self.camera is not None or self.info is None:
+                return self.camera
+            try:
+                t = self.tf_buffer.lookup_transform(self.base_frame, frame, rclpy.time.Time())
+            except tf2_ros.TransformException as e:
+                self.get_logger().warn(f'no TF {self.base_frame} <- {frame}: {e}', throttle_duration_sec=5.0)
                 return None
-            if abs((msg.header.stamp.sec - stamp.sec) + (msg.header.stamp.nanosec - stamp.nanosec) * 1e-9) > 0.1:
-                return None
-            depth = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
-            if depth.dtype == np.uint16:
-                depth = depth.astype(np.float32) * self.depth_scale
-            scale = depth.shape[1] / shape[1]
-            if abs(depth.shape[0] / shape[0] - scale) > 0.01:
-                return None
-            return depth, scale
+            q, p = t.transform.rotation, t.transform.translation
+            self.camera = Camera(np.array(self.info.k).reshape(3, 3), np.array(self.info.d),
+                                 matrix_from_quaternion(q.x, q.y, q.z, q.w), [p.x, p.y, p.z])
+            self.get_logger().info(
+                f'camera {frame} at ({p.x:.3f}, {p.y:.3f}, {p.z:.3f}) m in {self.base_frame}')
+            return self.camera
 
         def on_image(self, msg):
             try:
@@ -278,76 +387,73 @@ def main():
                 self.get_logger().warn(f'skipped a frame: {e}', throttle_duration_sec=5.0)
 
         def detect(self, msg):
-            if self.camera_matrix is None:
-                self.get_logger().warn('no camera_info yet', throttle_duration_sec=5.0)
+            camera = self.camera_for(self.optical_frame or msg.header.frame_id)
+            if camera is None:
                 return
+            ArucoDetection, DockHypothesis = self.msg_types
             image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             height, width = gray.shape
-            corners, ids, _ = self.detector.detectMarkers(gray)
-            found = {}
-            if ids is not None:
-                for c, i in zip(corners, ids.reshape(-1)):
-                    c = c.reshape(4, 2)
-                    side = float(np.mean(np.linalg.norm(c - np.roll(c, -1, axis=0), axis=1)))
-                    if (c.min() < SIDE_MARGIN or (c[:, 0] > width - 1 - SIDE_MARGIN).any()
-                            or (c[:, 1] > height - 1 - SIDE_MARGIN).any() or side < self.min_marker_px):
-                        continue
-                    found[int(i)] = c
-            depth = self.depth_for(msg.header.stamp, gray.shape) if found else None
-            for board in self.boards.values():
-                used = sorted(i for i in found if i in board.markers)
-                if not used:
+            found = self.detector.detect(gray)
+            for marker_id, corners in found.items():
+                marker = self.by_id.get(marker_id)
+                if marker is None:
                     continue
-                obj = np.vstack([board.corners(i) for i in used])
-                img = np.vstack([found[i] for i in used])
-                square = board.markers[used[0]][2] if len(used) == 1 else None
-                solved = solve_board(obj, img, self.camera_matrix, self.dist_coeffs, square)
-                if solved is None:
+                ok, side = usable(corners, width, height, self.min_marker_px)
+                if not ok:
                     continue
-                rvec, tvec, rms, ambiguity = solved
-                sigma = max(self.pixel_sigma, rms)
-                cov = pose_covariance(board, obj, rvec, tvec, self.camera_matrix, self.dist_coeffs, sigma)
-                R_B = cv2.Rodrigues(rvec)[0]
-                source, plane_rms = self.msg_type.NORMAL_PNP, 0.0
-                if depth is not None:
-                    points = depth_points(depth[0], img, depth[1], self.camera_matrix)
-                    if len(points) >= 200:
-                        R_B, cov_rot, plane_rms = apply_depth_normal(R_B, points, cov[3:, 3:])
-                        cov[3:, 3:] = cov_rot
-                        cov[:3, 3:] = cov[3:, :3] = 0.0
-                        source = self.msg_type.NORMAL_DEPTH
-                R_D, t_D = board.dock_from_board(R_B, tvec)
-                out = self.msg_type()
+                result = estimate(corners, marker, camera, self.pixel_sigma, self.prior)
+                if result is None:
+                    continue
+                if result['distance'] < 0.8 and (result['tilt'] > self.tilt_warn
+                                                 or abs(result['height']) > self.height_warn):
+                    self.get_logger().warn(
+                        f"{marker.name}: the dock looks tilted {math.degrees(result['tilt']):.1f} deg and "
+                        f"{result['height'] * 1000:+.0f} mm off the floor: check the camera TF (pitch, height), "
+                        'the marker height and size in the config', throttle_duration_sec=5.0)
+                out = ArucoDetection()
                 out.header.stamp = msg.header.stamp
-                out.header.frame_id = self.optical_frame or msg.header.frame_id
-                out.board = board.name
-                out.pose.pose.position.x, out.pose.pose.position.y, out.pose.pose.position.z = (float(v) for v in t_D)
-                (out.pose.pose.orientation.x, out.pose.pose.orientation.y, out.pose.pose.orientation.z,
-                 out.pose.pose.orientation.w) = quaternion_from_matrix(R_D)
-                out.pose.covariance = [float(v) for v in cov.reshape(-1)]
-                out.marker_ids = used
-                out.reprojection_error = rms
-                out.ambiguity = ambiguity
-                out.normal_source = source
-                out.plane_rms = plane_rms
+                out.header.frame_id = self.base_frame
+                out.dock = marker.name
+                out.marker_id = marker_id
+                out.marker_px = side
+                out.camera_distance = result['distance']
+                out.ambiguity = result['ambiguity']
+                out.tilt_deg = math.degrees(result['tilt'])
+                out.height_offset = result['height']
+                for q, cov, rms in result['hypotheses']:
+                    h = DockHypothesis()
+                    h.x, h.y, h.yaw = (float(v) for v in q)
+                    h.covariance = [float(v) for v in cov.reshape(-1)]
+                    h.reprojection_error = rms
+                    out.hypotheses.append(h)
                 self.pub.publish(out)
                 if self.debug_pub is not None:
-                    cv2.aruco.drawDetectedMarkers(image, [found[i].reshape(1, 4, 2) for i in used],
-                                                  np.array(used).reshape(-1, 1))
-                    # 축은 D 의 원점(접점 면, 카메라 바로 앞일 수도 있다) 대신 보인 marker 들의 가운데에 그린다
-                    center_B = np.mean([[board.markers[i][0], board.markers[i][1], 0.0] for i in used], axis=0)
-                    center = R_B @ center_B + tvec.reshape(3)
-                    cv2.drawFrameAxes(image, self.camera_matrix, self.dist_coeffs, cv2.Rodrigues(R_D)[0],
-                                      center.reshape(3, 1), 0.05, 2)
-                    sx, sy = math.sqrt(cov[0, 0]), math.sqrt(cov[2, 2])
-                    label = (f'{board.name} {len(used)} markers, board {float(np.linalg.norm(center)):.2f} m, '
-                             f'rms {rms:.2f}px, dock sigma x {sx * 1000:.1f} z {sy * 1000:.1f} mm, amb {ambiguity:.0f}')
-                    cv2.putText(image, label, (10, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2)
+                    self.draw(image, corners, marker, camera, result)
             if self.debug_pub is not None and self.debug_pub.get_subscription_count() > 0:
                 out = self.bridge.cv2_to_imgmsg(image, encoding='bgr8')
                 out.header = msg.header
                 self.debug_pub.publish(out)
+
+        def draw(self, image, corners, marker, camera, result):
+            q, cov, rms = result['hypotheses'][0]
+            cv2.polylines(image, [np.round(corners).astype(np.int32)], True, (0, 255, 0), 2)
+            # 바닥 위 자세(x, y, yaw)로 다시 그린 모서리 (빨강). 초록과 겹치면 config 와 TF 가 맞다
+            projected = project_dock(q, marker, camera)
+            if projected is not None:
+                for p in projected:
+                    cv2.circle(image, (int(round(p[0])), int(round(p[1]))), 3, (0, 0, 255), -1)
+            # 로봇이 dock 좌표계에서 어디 있나 (= q 의 역)
+            c, s = math.cos(q[2]), math.sin(q[2])
+            rx, ry = -(c * q[0] + s * q[1]), -(-s * q[0] + c * q[1])
+            lines = [f'{marker.name} id {marker.marker_id}: {result["distance"]:.2f} m, rms {rms:.2f}px, '
+                     f'tilt {math.degrees(result["tilt"]):.1f}deg z {result["height"] * 1000:+.0f}mm, '
+                     f'{len(result["hypotheses"])} hyp',
+                     f'robot in dock: x {rx * 1000:.0f} y {ry * 1000:+.0f} mm, yaw {math.degrees(angle(-q[2])):+.1f} deg',
+                     f'sigma x {math.sqrt(cov[0, 0]) * 1000:.1f} y {math.sqrt(cov[1, 1]) * 1000:.1f} mm '
+                     f'yaw {math.degrees(math.sqrt(cov[2, 2])):.2f} deg']
+            for i, line in enumerate(lines):
+                cv2.putText(image, line, (10, 22 + 22 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2)
 
     rclpy.init()
     node = ArucoDetector()

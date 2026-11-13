@@ -45,6 +45,19 @@ TEST(ArucoDockControl, FilterWeightsPreciseMeasurementsMore)
   EXPECT_LT(std::sqrt(f.cov()[0]), 0.001);
 }
 
+TEST(ArucoDockControl, UncertaintyGrowsWithTheDistanceMoved)
+{
+  // 메카넘이 옆으로 0.3 m 가면 바퀴 odom 은 3 cm 틀릴 수 있다 (10 %). 그 뒤의 바른 측정을 버리지 않는다
+  ad::DockFilter f;
+  f.reset({4.55, 1.0, M_PI}, ad::diag3(1e-6, 1e-6, 1e-5));
+  const auto r = ad::diag3(1e-6, 1e-6, 1e-5);
+  ad::DockFilter still = f;
+  f.predictMotion(0.3, 0.0, 0.10, 0.05, 0.05);
+  EXPECT_NEAR(std::sqrt(f.cov()[0]), std::sqrt(1e-6 + 0.03 * 0.03), 1e-9);
+  EXPECT_EQ(f.update({4.55, 1.025, M_PI + 0.01}, r, 16.3, 8), ad::DockFilter::Result::Accepted);
+  EXPECT_EQ(still.update({4.55, 1.025, M_PI + 0.01}, r, 16.3, 8), ad::DockFilter::Result::Rejected);
+}
+
 TEST(ArucoDockControl, FilterRejectsAnOutlierAndReinitializesAfterManyInARow)
 {
   ad::DockFilter f;
@@ -72,6 +85,42 @@ TEST(ArucoDockControl, FuseDropsAFlippedDetection)
   EXPECT_NEAR(m->pose.x, 4.5505, 0.0003);
   EXPECT_NEAR(std::fabs(m->pose.yaw), M_PI, 0.002);
   EXPECT_LT(m->cov[0], 1e-6);                        // 9개를 합쳐 하나보다 작다
+}
+
+// marker 하나의 후보 둘: 바른 자세와, 법선이 뒤집혀 방향이 12 도 틀리고 옆으로 밀린 자세
+ad::Hypotheses twoHypotheses(const Pose2 & truth, bool flipped_first, double noise)
+{
+  const ad::Measurement right{{truth.x + noise, truth.y - noise, truth.yaw + noise}, ad::diag3(4e-6, 4e-6, 3e-5)};
+  const ad::Measurement wrong{{truth.x + 0.01, truth.y + 0.06, ad::normalizeAngle(truth.yaw - 0.21)},
+    ad::diag3(4e-6, 4e-6, 3e-5)};
+  return flipped_first ? ad::Hypotheses{wrong, right} : ad::Hypotheses{right, wrong};
+}
+
+TEST(ArucoDockControl, FilterPicksTheHypothesisNextToItsEstimate)
+{
+  const Pose2 truth{4.55, 1.0, M_PI};
+  ad::DockFilter f;
+  EXPECT_EQ(ad::closestHypothesis(f, twoHypotheses(truth, true, 0.0)), 0u);   // 필터가 없으면 첫 후보
+  f.reset({4.552, 0.998, M_PI - 0.01}, ad::diag3(1e-5, 1e-5, 1e-4));
+  EXPECT_EQ(ad::closestHypothesis(f, twoHypotheses(truth, true, 0.0)), 1u);   // 뒤집힌 쪽이 첫 후보여도
+  EXPECT_EQ(ad::closestHypothesis(f, twoHypotheses(truth, false, 0.0)), 0u);
+}
+
+TEST(ArucoDockControl, FuseDetectionsVotesThenReassociates)
+{
+  // 10 장 중 4 장은 뒤집힌 쪽이 첫 후보. 다수결로 바른 자리를 잡고, 그 4 장도 바른 후보로 다시 골라 10 장을 다 쓴다
+  const Pose2 truth{4.55, 1.0, M_PI};
+  std::vector<ad::Hypotheses> detections;
+  for (int i = 0; i < 10; ++i) {
+    detections.push_back(twoHypotheses(truth, i % 5 < 2, 0.0005 * ((i % 3) - 1)));
+  }
+  int used = 0;
+  const auto m = ad::fuseDetections(detections, 16.3, &used);
+  ASSERT_TRUE(m);
+  EXPECT_EQ(used, 10);
+  EXPECT_NEAR(m->pose.x, truth.x, 0.001);
+  EXPECT_NEAR(m->pose.y, truth.y, 0.001);
+  EXPECT_NEAR(ad::normalizeAngle(m->pose.yaw - truth.yaw), 0.0, 0.002);
 }
 
 TEST(ArucoDockControl, FunnelHoldsTheApproachUntilAligned)

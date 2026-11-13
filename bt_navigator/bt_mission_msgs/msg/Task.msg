@@ -13,9 +13,9 @@ string ACTION_GO = "go"                   #   이동만
 string ACTION_INSPECT = "inspect"         #   마지막 점에 도착한 뒤 정지 상태로 duration 초 동안 작업
 string ACTION_SCAN = "scan"               #   이동하는 동안 0.5m 마다 스캔
 string ACTION_LOOK_AROUND = "look_around" #   마지막 점에 도착한 뒤 제자리에서 한 바퀴 회전
-string ACTION_DOCK = "dock"               #   마지막 점(dock 앞, QR 이 보이는 자리)에 간 뒤 QR 을 보고 도킹 (dock.xml)
+string ACTION_DOCK = "dock"               #   마지막 점(dock 앞, marker 가 보이는 staging 자리)에 간 뒤 ArUco marker 를 보고 도킹
+                                          #   (task.xml 의 Dock 트리, DOCKING.md)
 string ACTION_UNDOCK = "undock"           #   dock 에서 뒤로 빠져나온다 (Undock 트리)
-string ACTION_DOCK_ARUCO = "dock_aruco"   #   마지막 점에 간 뒤 ArUco board 를 보고 도킹 (DockAruco 트리, ARUCO_DOCKING.md)
 
 float64 duration                          # inspect 의 작업 시간 [s]
-string target                             # dock: 찾을 QR 의 내용, dock_aruco: board 이름 (비우면 처음 보이는 것)
+string target                             # dock: config/aruco_docks.yaml 의 dock 이름 (비우면 처음 보이는 것)

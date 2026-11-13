@@ -119,7 +119,7 @@ colcon build --symlink-install --packages-select simple_line_planner simple_line
 source install/setup.bash
 ```
 
-`--packages-select` 를 빼면 같은 저장소의 `straight_line/`, `bt_navigator/` 패키지들도 같이 빌드된다. 패키지 이름이 달라서 같이 빌드해도 충돌하지 않는다.
+`--packages-select` 를 빼면 같은 저장소의 `bt_navigator/` 패키지들도 같이 빌드된다. 패키지 이름이 달라서 같이 빌드해도 충돌하지 않는다.
 
 ## 실행
 
