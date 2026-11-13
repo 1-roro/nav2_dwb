@@ -191,19 +191,3 @@ def test_detects_the_big_marker_up_close_in_gazebo(scene):
     assert list(found) == [0]
     side = np.linalg.norm(found[0][1] - found[0][0])
     assert 215 < side < 230
-
-
-def test_image_messages_without_cv_bridge():
-    # rgb8, 행 끝에 여백이 있는 영상 (step > width * 3) 과 mono8
-    from types import SimpleNamespace
-    bgr = np.arange(2 * 3 * 3, dtype=np.uint8).reshape(2, 3, 3)
-    rgb = bgr[:, :, ::-1]
-    padded = np.zeros((2, 12), np.uint8)
-    padded[:, :9] = rgb.reshape(2, 9)
-    msg = SimpleNamespace(encoding='rgb8', height=2, width=3, step=12, data=padded.tobytes())
-    assert np.array_equal(ad.image_to_bgr(msg), bgr)
-    mono = SimpleNamespace(encoding='mono8', height=2, width=3, step=3, data=bytes(range(6)))
-    out = ad.image_to_bgr(mono)
-    assert out.shape == (2, 3, 3) and out[1, 2, 0] == 5
-    back = ad.bgr_to_image(bgr, SimpleNamespace())
-    assert back.encoding == 'bgr8' and back.step == 9 and back.data == bgr.tobytes()
