@@ -27,14 +27,28 @@
    카메라 TF(특히 pitch, 높이), marker 높이가 config 와 다르다는 뜻이다 (경고를 낸다).
 
 OpenCV 4.5 (Ubuntu 22.04 의 python3-opencv) 와 4.7 이상(ArucoDetector) 을 모두 쓴다.
+Ubuntu 22.04 + ROS Humble 의 기본 조합 (Python 3.10, numpy 1.21.5, OpenCV 4.5.4) 에서 시험했다.
+cv_bridge 를 쓰지 않는다 (영상 변환은 numpy 로): numpy 판에 묶인 C 확장을 하나 줄인다.
 """
 
 import math
 import os
+import sys
 
-import cv2
 import numpy as np
 import yaml
+
+try:
+    import cv2
+except ImportError as error:
+    # 흔한 원인: pip 가 numpy 2.x 를 깔았다. apt 의 OpenCV 4.5.4 (그리고 ROS Humble 의 cv_bridge) 는 numpy 1.x 로
+    # 빌드되어 numpy 2.x 에서는 불러오지 못한다
+    sys.exit(f'aruco_detector: cannot import OpenCV ({error}).\n'
+             f'  numpy {np.__version__} from {os.path.dirname(np.__file__)}\n'
+             '  If numpy is 2.x: the OpenCV from apt (python3-opencv 4.5.4) needs numpy 1.x. Remove the pip numpy so '
+             'the apt one (1.21.5) is used:\n'
+             '    pip3 uninstall numpy        (repeat until "not installed"; sudo if it is under /usr/local)\n'
+             '  or keep a 1.x one: pip3 install --user "numpy<2". See bt_navigator/DOCKING.md 5-5')
 
 SIDE_MARGIN = 6          # 영상 끝에서 이 px 안에 모서리가 있는 marker 는 버린다
 DISTINCT_XY = 0.005      # 두 해가 이보다 가까우면 [m] (그리고 DISTINCT_YAW 안이면) 같은 해로 본다
@@ -294,6 +308,38 @@ def estimate(corners, marker, camera, pixel_sigma=0.5, prior=None):
             'height': float(best[3]), 'distance': distance}
 
 
+# ---------------------------------------------------------------------------------------------
+# sensor_msgs/Image <-> numpy (cv_bridge 없이)
+
+CHANNELS = {'rgb8': 3, 'bgr8': 3, 'rgba8': 4, 'bgra8': 4, 'mono8': 1, '8uc1': 1, '8uc3': 3, '8uc4': 4}
+TO_BGR = {'rgb8': cv2.COLOR_RGB2BGR, 'rgba8': cv2.COLOR_RGBA2BGR, 'bgra8': cv2.COLOR_BGRA2BGR,
+          '8uc4': cv2.COLOR_BGRA2BGR, 'mono8': cv2.COLOR_GRAY2BGR, '8uc1': cv2.COLOR_GRAY2BGR}
+
+
+def image_to_bgr(msg):
+    """8 bit 컬러/흑백 영상 메시지 -> BGR (H x W x 3). 행 끝의 여백(step)도 처리한다"""
+    encoding = msg.encoding.lower()
+    channels = CHANNELS.get(encoding)
+    if channels is None:
+        raise ValueError(f'image encoding {msg.encoding} is not supported (8 bit color or mono)')
+    data = np.frombuffer(msg.data, dtype=np.uint8)
+    rows = data[:msg.height * msg.step].reshape(msg.height, msg.step)[:, :msg.width * channels]
+    image = rows.reshape(msg.height, msg.width, channels) if channels > 1 else rows.reshape(msg.height, msg.width)
+    if encoding in TO_BGR:
+        return cv2.cvtColor(image, TO_BGR[encoding])
+    return image.copy()
+
+
+def bgr_to_image(image, msg):
+    """BGR -> msg (sensor_msgs/Image, bgr8) 에 채운다"""
+    msg.height, msg.width = image.shape[:2]
+    msg.encoding = 'bgr8'
+    msg.is_bigendian = 0
+    msg.step = msg.width * 3
+    msg.data = np.ascontiguousarray(image, dtype=np.uint8).tobytes()
+    return msg
+
+
 def usable(corners, width, height, min_px):
     side = float(np.mean(np.linalg.norm(corners - np.roll(corners, -1, axis=0), axis=1)))
     inside = (corners.min() >= SIDE_MARGIN and (corners[:, 0] <= width - 1 - SIDE_MARGIN).all()
@@ -313,7 +359,6 @@ def matrix_from_quaternion(x, y, z, w):
 def main():
     import rclpy
     import tf2_ros
-    from cv_bridge import CvBridge
     from rclpy.node import Node
     from rclpy.qos import qos_profile_sensor_data
     from sensor_msgs.msg import CameraInfo, Image
@@ -346,7 +391,6 @@ def main():
             dictionary_name, self.docks = load_docks(docks_file, self.marker_scale)
             self.by_id = {d.marker_id: d for d in self.docks.values()}
             self.detector = MarkerDetector(aruco_dictionary(dictionary_name))
-            self.bridge = CvBridge()
             self.info = None
             self.camera = None
             self.tf_buffer = tf2_ros.Buffer()
@@ -357,7 +401,7 @@ def main():
             self.create_subscription(Image, image_topic, self.on_image, qos_profile_sensor_data)
             self.msg_types = ArucoDetection, DockHypothesis
             self.get_logger().info(
-                f'ArUco detector (OpenCV {cv2.__version__}): {image_topic}, docks '
+                f'ArUco detector (OpenCV {cv2.__version__}, numpy {np.__version__}): {image_topic}, docks '
                 f'{ {n: d.marker_id for n, d in self.docks.items()} } from {docks_file} (size x {self.marker_scale}), '
                 f'poses in {self.base_frame}')
 
@@ -391,7 +435,7 @@ def main():
             if camera is None:
                 return
             ArucoDetection, DockHypothesis = self.msg_types
-            image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+            image = image_to_bgr(msg)
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             height, width = gray.shape
             found = self.detector.detect(gray)
@@ -431,7 +475,7 @@ def main():
                 if self.debug_pub is not None:
                     self.draw(image, corners, marker, camera, result)
             if self.debug_pub is not None and self.debug_pub.get_subscription_count() > 0:
-                out = self.bridge.cv2_to_imgmsg(image, encoding='bgr8')
+                out = bgr_to_image(image, Image())
                 out.header = msg.header
                 self.debug_pub.publish(out)
 

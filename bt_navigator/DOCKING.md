@@ -148,7 +148,8 @@ cᵢ: D 에서 marker 모서리 (config 의 offset, 높이, 크기),  uᵢ: 검�
 - **공분산**: 영상 행은 σ_px = max(`pixel_sigma` 0.5 px, 재투영 RMS) 로, 사전 행은 σ_z, σ_tilt 로 나눈 Jacobian J (11 x 6) 의 정보 행렬 JᵀJ 를 뒤집어 (x, y, yaw) 부분을 꺼낸다. 이것이 z, roll, pitch 를 marginalize 한 공분산이다. 멀거나 비스듬하면 크고 가까우면 작다. 필터가 측정마다 무게를 다르게 주는 근거다.
 - **진단**: MAP 이 추정한 dock 의 기울기(`tilt_deg`)와 바닥 높이(`height_offset`). 가까이서(0.8 m 안) 늘 3°, 1.5 cm 를 넘으면 경고한다: 카메라 TF(pitch, 높이), config 의 marker 높이, base frame 의 높이 중 무엇이 틀렸다. 실제 로봇에서 TF 를 점검하는 값으로 쓴다 (8-1).
 - 영상 끝 6 px 안에 걸린 marker, 한 변 16 px 보다 작은 marker 는 버린다. OpenCV 의 `minDistanceToBorder` 는 0 으로 둔다: 기본값 3 이면 붙은 자리에서 크게 보이는 marker 를 후보에서 빼 버리는 일이 Gazebo 에서 있었다 (`test/data/gazebo_docked.jpg` 로 회귀 시험).
-- OpenCV 4.5 (Ubuntu 22.04 의 `python3-opencv`, `cv2.aruco.detectMarkers`) 와 4.7 이상(`ArucoDetector`) 을 모두 쓴다.
+- OpenCV 4.5 (Ubuntu 22.04 의 `python3-opencv`, `cv2.aruco.detectMarkers`) 와 4.7 이상(`ArucoDetector`) 을 모두 쓴다. Ubuntu 22.04 + ROS Humble 의 기본 조합 **Python 3.10, numpy 1.21.5, OpenCV 4.5.4** 에서 `test_aruco_detector.py` 를 돌려 확인했다 (numpy 2.x + OpenCV 5 에서도).
+- `cv_bridge` 를 쓰지 않는다. 영상 메시지는 numpy 로 바꾼다 (`image_to_bgr`: rgb8, bgr8, rgba8, bgra8, mono8, 행 끝 여백). numpy 판에 묶인 C 확장(cv_bridge)을 하나 줄여, numpy 판이 섞인 PC 에서 깨질 곳을 줄였다.
 
 ## 4. dock 의 자리: 후보 고르기와 Kalman 필터
 
@@ -271,11 +272,28 @@ Gazebo 에서 확인한 것 (4바퀴 메카넘, 참값):
 | 로그 | 원인 | 할 일 |
 |---|---|---|
 | `aruco_detector is not running` | 검출 노드가 없다. 또는 띄웠지만 죽었다 | `simple_line.launch.py robot:=mecanum dock:=True` 는 같이 띄운다. 따로 띄웠다면 그 터미널의 에러를 본다: `bt_mission_msgs` 를 새로 빌드하지 않았거나(`colcon build --packages-select bt_mission_msgs bt_mission simple_line_bringup` 후 `source install/setup.bash`), OpenCV 에 aruco 가 없다(`pip` 의 `opencv-python` 이 apt 의 것을 가림. `pip uninstall opencv-python` 또는 `opencv-contrib-python`) |
+| (detector 터미널) `aruco_detector: cannot import OpenCV (numpy.core.multiarray failed to import)`, `A module that was compiled using NumPy 1.x cannot be run in NumPy 2.x` | pip 가 numpy 2.x 를 깔았다. apt 의 OpenCV 4.5.4 와 ROS Humble 은 numpy 1.x 로 빌드되었다 | 아래 "numpy 2.x 가 깔렸을 때" |
 | `running but saw no marker` | 화면에 marker 가 없다 | `robot:=mecanum` 인가 (waffle 은 이 카메라가 없다). `ros2 topic hz /camera/color/image_raw`. staging 이 dock 앞 0.5 ~ 1.5 m 이고 dock 을 보는가. `/dock/aruco_debug` 를 RViz 로 |
 | `saw only other docks: 'dock_a'` | 작업의 dock 이름이 다르다 | `dock:dock_a` (예전 QR 예시의 `dock:DOCK_A` 가 아니다) |
 | `detections dropped: no TF odom <- base_footprint` | 영상 시각의 로봇 자리를 모른다 | TF 가 끊기지 않았는지, 시계가 섞이지 않았는지 (detector 는 `use_sim_time:=True`) |
 | `only N usable detections` | 너무 느리다 (느린 PC 의 Gazebo 카메라) | `ros2 topic hz /dock/aruco`. `look_time` 을 늘리거나 `min_found` 를 줄인다 |
 | `Did not turn to search: ...` | 옆에 무엇이 있어 돌지 않았다 | 그 이유를 치우거나 staging 자리를 옮긴다 |
+
+**numpy 2.x 가 깔렸을 때** (Ubuntu 22.04 + ROS Humble)
+
+Ubuntu 22.04 의 apt 패키지(python3-numpy 1.21.5, python3-opencv 4.5.4, ROS Humble 의 cv_bridge, rclpy 메시지)는 numpy 1.x 에 맞춰 빌드되었다. 다른 일로 `pip install` 을 하다가 numpy 2.x 가 따라 깔리면 그것이 apt 의 numpy 를 가리고 `import cv2` 부터 실패한다.
+
+```bash
+python3 -c "import numpy; print(numpy.__version__, numpy.__file__)"
+#   2.x 이고 ~/.local/... 또는 /usr/local/... 이면 pip 가 깐 것이다
+pip3 uninstall numpy              # "not installed" 가 나올 때까지 (sudo 로 깔았으면 sudo pip3 uninstall numpy)
+python3 -c "import numpy, cv2; print(numpy.__version__, cv2.__version__)"   # 1.21.5 4.5.4 가 나오면 된다
+pip3 list 2>/dev/null | grep -i opencv   # pip 의 opencv-python 이 있으면 지운다 (apt 것을 가리고, aruco 가 없을 수 있다)
+```
+
+- numpy 2.x 가 꼭 필요한 다른 일이 있으면 그 일만 가상환경(`python3 -m venv`)에서 한다. ROS Humble 쪽은 시스템의 numpy 1.x 로 둔다.
+- 1.x 중 더 새 판이 필요하면 `pip3 install --user "numpy<2"` (1.26 도 apt 의 OpenCV 4.5.4 와 맞는다. numpy 1.x 는 옛 판으로 빌드된 모듈을 그대로 쓴다).
+- 다시 깔리지 않게: 다른 패키지를 pip 로 깔 때 `pip3 install <패키지> "numpy<2"` 처럼 같이 묶는다.
 
 ## 6. 가르친 자세: 고정 오차 지우기
 
