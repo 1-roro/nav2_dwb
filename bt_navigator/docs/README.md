@@ -1,7 +1,7 @@
 # 시뮬레이션 기록
 
 - 창고 지도에서 웨이포인트 주행 중 장애물 stop & go (아래)
-- ArUco 도킹 (marker 하나): `aruco_results.png` (Gazebo 참값으로 잰 16회, 실제 로봇과의 차이를 넣은 실험), `aruco_marker.png` (인쇄용 marker, 101.6 dpi), `aruco_camera_debug.jpg` (dock 0.73 m 앞에서 본 검출 화면). 설명은 [DOCKING.md](../DOCKING.md)
+- ArUco 도킹 (marker 하나): `aruco_results.png` (4바퀴 메카넘 로봇, Gazebo 참값으로 잰 10회, 실제 로봇과의 차이를 넣은 실험), `aruco_marker.png` (인쇄용 marker, 101.6 dpi), `aruco_camera_debug.jpg` (marker 0.71 m 앞에서 본 검출 화면). 설명은 [DOCKING.md](../DOCKING.md)
 
 ## 창고 지도에서 웨이포인트 주행 중 장애물 stop & go
 

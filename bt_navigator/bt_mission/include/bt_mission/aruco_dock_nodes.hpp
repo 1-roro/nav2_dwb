@@ -61,7 +61,7 @@ public:
       BT::InputPort<std::string>("target", "", "dock name in aruco_docks.yaml (empty: the first one seen)"),
       BT::InputPort<double>("timeout", 5.0, "[s]"),
       BT::InputPort<int>("min_detections", 10, ""),
-      BT::InputPort<double>("docked_distance", 0.10, "geometric target: robot center in front of the contact face [m]"),
+      BT::InputPort<double>("docked_distance", 0.17, "geometric target: robot center in front of the contact face [m]"),
       BT::InputPort<std::string>("taught_file", "", "yaml from aruco_teach.py (empty: <taught_dir>/<dock>.yaml)"),
       BT::InputPort<std::string>("taught_dir", "~/.ros/aruco_taught", "where aruco_teach.py saves by default"),
       BT::InputPort<bool>("use_taught", true, "false: always the geometric target"),

@@ -134,6 +134,13 @@ ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse slam:=Tru
 
 - Gazebo + TurtleBot3 waffle + Nav2 + RViz 가 뜬다. 빈 방이면 로봇은 (-2.0, -1.0), 창고면 (-4.0, -2.5) 에서
   +x 를 보고 시작하고, AMCL 초기 자세도 같은 값으로 준다.
+- `robot:=mecanum` 이면 waffle(바퀴 2개 + 캐스터, 차동 구동) 대신 **4바퀴 메카넘 로봇**이 뜬다 (아래 그림). 45° 롤러 바퀴 넷,
+  앞쪽 RealSense 컬러 카메라, 위 라이다. 옆으로도 가고(vx, vy, wz), Nav2 는 `holonomic:=True` 설정을 쓴다.
+  모양과 센서 자리는 `simple_line_bringup/robots/make_mecanum.py` 한 곳에서 정하고, 그것이 URDF(TF, RViz)와
+  Gazebo 모델을 같이 만든다. Gazebo 에서는 `planar_move` 가 명령한 속도를 몸체에 그대로 주고(롤러 마찰을 물리로 풀지 않는다)
+  바퀴는 돌지 않는다. RViz 에서는 odom 의 속도로 바퀴가 돈다. 도킹은 [bt_navigator/DOCKING.md](../bt_navigator/DOCKING.md).
+
+  ![mecanum robot](doc/mecanum_robot.png)
 - RViz 의 **Nav2 Goal** 로 목표를 찍으면 된다. 1초마다 현재 위치에서 직선을 다시 긋는다.
 - 터미널에서 보낼 때:
   ```bash

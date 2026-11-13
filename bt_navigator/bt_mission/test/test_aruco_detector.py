@@ -28,12 +28,12 @@ ad = load('aruco_detector', os.path.join(HERE, '..', 'scripts', 'aruco_detector.
 W, H = 848, 480
 F = W / 2 / math.tan(1.211 / 2)                  # D435 컬러 848 x 480, 수평 화각 69.4 도
 K = np.array([[F, 0, (W - 1) / 2], [0, F, (H - 1) / 2], [0, 0, 1.0]])
-# 시뮬레이션의 waffle: 카메라가 base 앞 0.069, 오른쪽 0.047, 높이 0.127 m. optical: x 오른쪽, y 아래, z 앞
+# 시뮬레이션의 메카넘 (robots/make_mecanum.py): 카메라가 base 앞 0.15, 가운데, 높이 0.13 m. optical: x 오른쪽, y 아래, z 앞
 R_BASE_CAM = np.array([[0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]])
-T_BASE_CAM = np.array([0.069, -0.047, 0.127])
+T_BASE_CAM = np.array([0.15, 0.0, 0.13])
 PPM = 3000.0                                      # marker 그림의 해상도 [px/m]
 SS = 6                                            # 크게 그리는 배수
-DOCKED = (0.10, 0.0, math.pi)                     # 붙은 자리: 로봇 중심이 접점 면 0.10 m 앞, dock 을 본다
+DOCKED = (0.17, 0.0, math.pi)                     # 붙은 자리: 로봇 중심이 접점 면 0.17 m 앞, dock 을 본다
 
 
 @pytest.fixture(scope='module')
@@ -85,7 +85,7 @@ def solve(scene, robot, seed=0, camera=None):
 
 
 def lateral_error_at_docked(q, truth):
-    """추정으로 붙으면 로봇이 옆으로 얼마나 어긋나나 [m]: 붙은 자리(D 에서 0.10 m 앞)를 두 자세로 base 에 놓고 비교"""
+    """추정으로 붙으면 로봇이 옆으로 얼마나 어긋나나 [m]: 붙은 자리(D 에서 0.17 m 앞)를 두 자세로 base 에 놓고 비교"""
     def docked_point(p):
         return p[:2] + ad.rot_z(p[2])[:2, :2] @ np.array([DOCKED[0], 0.0])
     normal = np.array([-math.sin(truth[2]), math.cos(truth[2])])
@@ -121,10 +121,10 @@ def test_docked_pose_is_sub_millimetre(scene):
     assert abs(math.degrees(ad.angle(q[2] - truth[2]))) < 0.2
     assert abs(lateral_error_at_docked(q, truth)) < 0.001
     # 공분산이 말하는 "붙은 자리의 옆 오차" (영상 하나, pixel_sigma 0.5 px 로 보수적으로). marker 하나로는 방향(yaw)이
-    # 원근(사다리꼴)으로만 보여서 가장 약한 축이다: 0.4 m 지렛대(marker -> 붙은 자리)로 옆 오차가 된다.
+    # 원근(사다리꼴)으로만 보여서 가장 약한 축이다: 0.47 m 지렛대(marker -> 붙은 자리)로 옆 오차가 된다.
     # 그래서 마지막에는 서서 여러 장을 합친다 (ArucoRefine: 30 장이면 1/5.5)
     g = np.array([-math.sin(q[2]), math.cos(q[2]), DOCKED[0]])
-    assert math.sqrt(g @ cov @ g) < 0.005 and rms < 0.5
+    assert math.sqrt(g @ cov @ g) < 0.007 and rms < 0.5
     assert math.degrees(result['tilt']) < 0.5 and abs(result['height']) < 0.003
 
 
@@ -151,8 +151,8 @@ def errors(scene, robot, camera, frames=6):
 
 
 def test_floor_prior_stops_the_flip_far_away(scene):
-    # 1.6 m 정면: 6자유도 PnP 는 기울기와 방향이 섞여 1 도 넘게 틀린다. 바닥 사전분포가 그것을 줄인다
-    (map_yaw, map_lat), (free_yaw, free_lat) = errors(scene, (1.6, 0.0, math.pi), None)
+    # 1.3 m 정면: 6자유도 PnP 는 기울기와 방향이 섞여 몇 도 틀린다 (두 해가 비슷하다). 바닥 사전분포가 그것을 줄인다
+    (map_yaw, map_lat), (free_yaw, free_lat) = errors(scene, (1.3, 0.0, math.pi), None, frames=8)
     assert map_yaw < 0.8 * free_yaw and map_lat < 0.8 * free_lat
 
 
@@ -162,7 +162,7 @@ def test_wrong_camera_extrinsics_do_not_break_it(scene):
     low = ad.Camera(K, np.zeros(5), R_BASE_CAM, T_BASE_CAM - np.array([0.0, 0.0, 0.01]))
     pitched = ad.Camera(K, np.zeros(5), R_BASE_CAM @ rot_x(math.radians(1.0)), T_BASE_CAM)
     for camera in (low, pitched):
-        for robot in (DOCKED, (0.65, 0.05, math.pi)):
+        for robot in (DOCKED, (0.70, 0.05, math.pi)):
             (map_yaw, map_lat), _ = errors(scene, robot, camera, frames=3)
             assert math.degrees(map_yaw) < 0.3 and map_lat < 0.003, (robot, math.degrees(map_yaw), map_lat)
     # 가까이서는 진단이 그 오차를 드러낸다 (dock 이 바닥 아래로 1 cm 가라앉은 것처럼, 1 도 기운 것처럼 보인다)

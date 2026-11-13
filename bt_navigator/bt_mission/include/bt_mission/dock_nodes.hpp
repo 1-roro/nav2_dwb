@@ -68,7 +68,7 @@ public:
       BT::InputPort<double>("speed", 0.05, "[m/s]"),
       BT::InputPort<double>("timeout", 20.0, "[s]"),
       BT::InputPort<std::string>("scan_topic", "scan", "laser to check behind, empty: no check"),
-      BT::InputPort<double>("robot_rear", 0.20, "robot center to its rear edge [m]"),
+      BT::InputPort<double>("robot_rear", 0.17, "robot center to its rear edge [m]"),
       BT::InputPort<double>("robot_half_width", 0.16, "[m]"),
       BT::InputPort<double>("clearance", 0.05, "[m]"),
       BT::InputPort<bool>("fail_when_blocked", true, "false: stop where it is and succeed"),

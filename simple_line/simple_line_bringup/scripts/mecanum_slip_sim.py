@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-시뮬레이션에서 메카넘 바퀴의 미끄러짐을 흉내 낸다 (simple_line.launch.py robot:=holonomic mecanum_slip:=True).
+시뮬레이션에서 메카넘 바퀴의 미끄러짐을 흉내 낸다 (simple_line.launch.py robot:=mecanum mecanum_slip:=True).
 
 gazebo_ros_planar_move 는 명령한 속도대로 몸체를 정확히 움직이고, 그 참값을 odom 으로 낸다. 실제 메카넘 로봇은
   - 바퀴는 명령대로 돌지만 몸체는 덜 간다 (롤러가 미끄러진다. 옆으로 갈 때 특히: 흔히 80 ~ 95 %)

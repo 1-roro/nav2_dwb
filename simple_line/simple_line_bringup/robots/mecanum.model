@@ -1,0 +1,417 @@
+<?xml version="1.0"?>
+<!-- make_mecanum.py 가 만든 4바퀴 메카넘 로봇 (치수를 바꾸면 그것을 다시 돌린다).
+     몸 전체가 link 하나이고 gazebo_ros_planar_move 가 vx, vy, wz 를 그대로 몸체 속도로 준다.
+     바퀴 자리의 마찰 0 인 구 넷이 몸을 받친다 (base_footprint = 바닥). Gazebo 의 바퀴는 돌지 않는다 -->
+<sdf version="1.6">
+  <model name="mecanum">
+    <link name="base_footprint">
+      <inertial>
+        <pose>0 0 0.07 0 0 0</pose>
+        <mass>8.0</mass>
+        <inertia><ixx>0.04</ixx><ixy>0</ixy><ixz>0</ixz><iyy>0.08</iyy><iyz>0</iyz><izz>0.1</izz></inertia>
+      </inertial>
+      <collision name="body_collision">
+        <pose>0 0 0.07 0 0 0</pose>
+        <geometry><box><size>0.32 0.22 0.07</size></box></geometry>
+        <surface><friction><ode><mu>0.0</mu><mu2>0.0</mu2></ode></friction></surface>
+      </collision>
+      <visual name="body_visual">
+        <pose>0 0 0.07 0 0 0</pose>
+        <geometry><box><size>0.32 0.22 0.07</size></box></geometry>
+        <material><ambient>0.16 0.35 0.62 1</ambient><diffuse>0.16 0.35 0.62 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="lidar_visual">
+        <pose>0 0 0.1325 0 0 0</pose>
+        <geometry><cylinder><radius>0.035</radius><length>0.065</length></cylinder></geometry>
+        <material><ambient>0.15 0.15 0.17 1</ambient><diffuse>0.15 0.15 0.17 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="camera_visual">
+        <pose>0.1375 0 0.13 0 0 0</pose>
+        <geometry><box><size>0.025 0.09 0.025</size></box></geometry>
+        <material><ambient>0.15 0.15 0.17 1</ambient><diffuse>0.15 0.15 0.17 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="camera_mount_visual">
+        <pose>0.13 0 0.11125 0 0 0</pose>
+        <geometry><box><size>0.01 0.04 0.0125</size></box></geometry>
+        <material><ambient>0.15 0.15 0.17 1</ambient><diffuse>0.15 0.15 0.17 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <collision name="wheel_front_left_collision">
+        <pose>0.11 0.1325 0.04 0 0 0</pose>
+        <geometry><sphere><radius>0.04</radius></sphere></geometry>
+        <surface><friction><ode><mu>0.0</mu><mu2>0.0</mu2></ode></friction></surface>
+      </collision>
+      <visual name="wheel_front_left_hub">
+        <pose>0.11 0.1325 0.04 1.5708 0 0</pose>
+        <geometry><cylinder><radius>0.025</radius><length>0.035</length></cylinder></geometry>
+        <material><ambient>0.55 0.55 0.55 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_front_left_roller_0">
+        <pose>0.141 0.1325 0.04 -0.7854 0 0</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_front_left_roller_1">
+        <pose>0.13508 0.1325 0.05822 -0.7854 -0.62832 0</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_front_left_roller_2">
+        <pose>0.11958 0.1325 0.06948 -0.7854 -1.25664 0</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_front_left_roller_3">
+        <pose>0.10042 0.1325 0.06948 2.35619 -1.25664 3.14159</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_front_left_roller_4">
+        <pose>0.08492 0.1325 0.05822 2.35619 -0.62832 3.14159</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_front_left_roller_5">
+        <pose>0.079 0.1325 0.04 2.35619 0 3.14159</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_front_left_roller_6">
+        <pose>0.08492 0.1325 0.02178 2.35619 0.62832 3.14159</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_front_left_roller_7">
+        <pose>0.10042 0.1325 0.01052 2.35619 1.25664 3.14159</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_front_left_roller_8">
+        <pose>0.11958 0.1325 0.01052 -0.7854 1.25664 0</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_front_left_roller_9">
+        <pose>0.13508 0.1325 0.02178 -0.7854 0.62832 0</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <collision name="wheel_front_right_collision">
+        <pose>0.11 -0.1325 0.04 0 0 0</pose>
+        <geometry><sphere><radius>0.04</radius></sphere></geometry>
+        <surface><friction><ode><mu>0.0</mu><mu2>0.0</mu2></ode></friction></surface>
+      </collision>
+      <visual name="wheel_front_right_hub">
+        <pose>0.11 -0.1325 0.04 1.5708 0 0</pose>
+        <geometry><cylinder><radius>0.025</radius><length>0.035</length></cylinder></geometry>
+        <material><ambient>0.55 0.55 0.55 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_front_right_roller_0">
+        <pose>0.141 -0.1325 0.04 0.7854 0 0</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_front_right_roller_1">
+        <pose>0.13508 -0.1325 0.05822 0.7854 -0.62832 0</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_front_right_roller_2">
+        <pose>0.11958 -0.1325 0.06948 0.7854 -1.25664 0</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_front_right_roller_3">
+        <pose>0.10042 -0.1325 0.06948 -2.35619 -1.25664 3.14159</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_front_right_roller_4">
+        <pose>0.08492 -0.1325 0.05822 -2.35619 -0.62832 3.14159</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_front_right_roller_5">
+        <pose>0.079 -0.1325 0.04 -2.35619 0 3.14159</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_front_right_roller_6">
+        <pose>0.08492 -0.1325 0.02178 -2.35619 0.62832 3.14159</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_front_right_roller_7">
+        <pose>0.10042 -0.1325 0.01052 -2.35619 1.25664 3.14159</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_front_right_roller_8">
+        <pose>0.11958 -0.1325 0.01052 0.7854 1.25664 0</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_front_right_roller_9">
+        <pose>0.13508 -0.1325 0.02178 0.7854 0.62832 0</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <collision name="wheel_rear_left_collision">
+        <pose>-0.11 0.1325 0.04 0 0 0</pose>
+        <geometry><sphere><radius>0.04</radius></sphere></geometry>
+        <surface><friction><ode><mu>0.0</mu><mu2>0.0</mu2></ode></friction></surface>
+      </collision>
+      <visual name="wheel_rear_left_hub">
+        <pose>-0.11 0.1325 0.04 1.5708 0 0</pose>
+        <geometry><cylinder><radius>0.025</radius><length>0.035</length></cylinder></geometry>
+        <material><ambient>0.55 0.55 0.55 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_rear_left_roller_0">
+        <pose>-0.079 0.1325 0.04 0.7854 0 0</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_rear_left_roller_1">
+        <pose>-0.08492 0.1325 0.05822 0.7854 -0.62832 0</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_rear_left_roller_2">
+        <pose>-0.10042 0.1325 0.06948 0.7854 -1.25664 0</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_rear_left_roller_3">
+        <pose>-0.11958 0.1325 0.06948 -2.35619 -1.25664 3.14159</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_rear_left_roller_4">
+        <pose>-0.13508 0.1325 0.05822 -2.35619 -0.62832 3.14159</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_rear_left_roller_5">
+        <pose>-0.141 0.1325 0.04 -2.35619 0 3.14159</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_rear_left_roller_6">
+        <pose>-0.13508 0.1325 0.02178 -2.35619 0.62832 3.14159</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_rear_left_roller_7">
+        <pose>-0.11958 0.1325 0.01052 -2.35619 1.25664 3.14159</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_rear_left_roller_8">
+        <pose>-0.10042 0.1325 0.01052 0.7854 1.25664 0</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_rear_left_roller_9">
+        <pose>-0.08492 0.1325 0.02178 0.7854 0.62832 0</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <collision name="wheel_rear_right_collision">
+        <pose>-0.11 -0.1325 0.04 0 0 0</pose>
+        <geometry><sphere><radius>0.04</radius></sphere></geometry>
+        <surface><friction><ode><mu>0.0</mu><mu2>0.0</mu2></ode></friction></surface>
+      </collision>
+      <visual name="wheel_rear_right_hub">
+        <pose>-0.11 -0.1325 0.04 1.5708 0 0</pose>
+        <geometry><cylinder><radius>0.025</radius><length>0.035</length></cylinder></geometry>
+        <material><ambient>0.55 0.55 0.55 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_rear_right_roller_0">
+        <pose>-0.079 -0.1325 0.04 -0.7854 0 0</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_rear_right_roller_1">
+        <pose>-0.08492 -0.1325 0.05822 -0.7854 -0.62832 0</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_rear_right_roller_2">
+        <pose>-0.10042 -0.1325 0.06948 -0.7854 -1.25664 0</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_rear_right_roller_3">
+        <pose>-0.11958 -0.1325 0.06948 2.35619 -1.25664 3.14159</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_rear_right_roller_4">
+        <pose>-0.13508 -0.1325 0.05822 2.35619 -0.62832 3.14159</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_rear_right_roller_5">
+        <pose>-0.141 -0.1325 0.04 2.35619 0 3.14159</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_rear_right_roller_6">
+        <pose>-0.13508 -0.1325 0.02178 2.35619 0.62832 3.14159</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_rear_right_roller_7">
+        <pose>-0.11958 -0.1325 0.01052 2.35619 1.25664 3.14159</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_rear_right_roller_8">
+        <pose>-0.10042 -0.1325 0.01052 -0.7854 1.25664 0</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+      <visual name="wheel_rear_right_roller_9">
+        <pose>-0.08492 -0.1325 0.02178 -0.7854 0.62832 0</pose>
+        <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
+      </visual>
+
+      <sensor name="imu" type="imu">
+        <always_on>true</always_on>
+        <update_rate>200</update_rate>
+        <pose>0 0 0.07 0 0 0</pose>
+        <imu>
+          <angular_velocity>
+            <x><noise type="gaussian"><mean>0.0</mean><stddev>2e-4</stddev></noise></x>
+            <y><noise type="gaussian"><mean>0.0</mean><stddev>2e-4</stddev></noise></y>
+            <z><noise type="gaussian"><mean>0.0</mean><stddev>2e-4</stddev></noise></z>
+          </angular_velocity>
+          <linear_acceleration>
+            <x><noise type="gaussian"><mean>0.0</mean><stddev>1.7e-2</stddev></noise></x>
+            <y><noise type="gaussian"><mean>0.0</mean><stddev>1.7e-2</stddev></noise></y>
+            <z><noise type="gaussian"><mean>0.0</mean><stddev>1.7e-2</stddev></noise></z>
+          </linear_acceleration>
+        </imu>
+        <plugin name="imu_driver" filename="libgazebo_ros_imu_sensor.so">
+          <initial_orientation_as_reference>false</initial_orientation_as_reference>
+          <frame_name>imu_link</frame_name>
+          <ros><remapping>~/out:=imu</remapping></ros>
+        </plugin>
+      </sensor>
+
+      <!-- 2D 라이다 (몸체 위 가운데). 빛의 높이에 제 몸이 없으므로 가까운 것도 본다 -->
+      <sensor name="lidar" type="ray">
+        <always_on>true</always_on>
+        <visualize>false</visualize>
+        <pose>0 0 0.16 0 0 0</pose>
+        <update_rate>5</update_rate>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>360</samples>
+              <resolution>1.000000</resolution>
+              <min_angle>0.000000</min_angle>
+              <max_angle>6.280000</max_angle>
+            </horizontal>
+          </scan>
+          <range>
+            <min>0.12</min>
+            <max>20.0</max>
+            <resolution>0.015000</resolution>
+          </range>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.01</stddev>
+          </noise>
+        </ray>
+        <plugin name="lidar_driver" filename="libgazebo_ros_ray_sensor.so">
+          <ros><remapping>~/out:=scan</remapping></ros>
+          <output_type>sensor_msgs/LaserScan</output_type>
+          <frame_name>base_scan</frame_name>
+        </plugin>
+      </sensor>
+
+      <!-- RealSense 컬러 카메라 = URDF 의 camera_rgb_frame (base_footprint 에서 0.15, 0, 0.13) -->
+      <sensor name="realsense_color" type="camera">
+        <always_on>true</always_on>
+        <update_rate>15</update_rate>
+        <pose>0.15 0 0.13 0 0 0</pose>
+        <camera name="color">
+          <horizontal_fov>1.211</horizontal_fov>
+          <image>
+            <width>848</width>
+            <height>480</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.02</near>
+            <far>10.0</far>
+          </clip>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.007</stddev>
+          </noise>
+        </camera>
+        <plugin name="realsense_color_driver" filename="libgazebo_ros_camera.so">
+          <ros>
+            <namespace>camera</namespace>
+          </ros>
+          <camera_name>color</camera_name>
+          <frame_name>camera_rgb_optical_frame</frame_name>
+        </plugin>
+      </sensor>
+
+      <!-- 컬러와 같은 자리, 같은 화각의 깊이 = realsense-ros 의 aligned_depth_to_color (해상도만 절반) -->
+      <sensor name="realsense_depth" type="depth">
+        <always_on>true</always_on>
+        <update_rate>15</update_rate>
+        <pose>0.15 0 0.13 0 0 0</pose>
+        <camera name="depth">
+          <horizontal_fov>1.211</horizontal_fov>
+          <image>
+            <width>424</width>
+            <height>240</height>
+          </image>
+          <clip>
+            <near>0.1</near>
+            <far>5.0</far>
+          </clip>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.002</stddev>
+          </noise>
+        </camera>
+        <plugin name="realsense_depth_driver" filename="libgazebo_ros_camera.so">
+          <ros>
+            <namespace>camera</namespace>
+            <remapping>depth/depth/image_raw:=aligned_depth_to_color/image_raw</remapping>
+            <remapping>depth/depth/camera_info:=aligned_depth_to_color/camera_info</remapping>
+          </ros>
+          <camera_name>depth</camera_name>
+          <frame_name>camera_rgb_optical_frame</frame_name>
+          <min_depth>0.1</min_depth>
+          <max_depth>5.0</max_depth>
+        </plugin>
+      </sensor>
+    </link>
+
+    <!-- vx, vy, wz 를 그대로 몸체 속도로. odom 은 미끄러짐이 없는 참값 (mecanum_slip:=True 이면 odom_truth 로 옮긴다) -->
+    <plugin name="mecanum_drive" filename="libgazebo_ros_planar_move.so">
+      <ros>
+        <remapping>/tf:=tf</remapping>
+      </ros>
+      <update_rate>50</update_rate>
+      <publish_rate>30</publish_rate>
+      <publish_odom>true</publish_odom>
+      <publish_odom_tf>true</publish_odom_tf>
+      <odometry_frame>odom</odometry_frame>
+      <robot_base_frame>base_footprint</robot_base_frame>
+      <covariance_x>0.0001</covariance_x>
+      <covariance_y>0.0001</covariance_y>
+      <covariance_yaw>0.01</covariance_yaw>
+    </plugin>
+  </model>
+</sdf>

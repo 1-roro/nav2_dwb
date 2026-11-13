@@ -208,7 +208,7 @@ bool DetectArucoDock::chooseTarget()
 {
   std::string taught, taught_dir = "~/.ros/aruco_taught";
   bool use_taught = true;
-  double docked_distance = 0.10;
+  double docked_distance = 0.17;
   getInput("taught_file", taught);
   getInput("taught_dir", taught_dir);
   getInput("use_taught", use_taught);

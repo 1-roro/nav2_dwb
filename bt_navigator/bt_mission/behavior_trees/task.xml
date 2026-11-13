@@ -74,7 +74,7 @@
 
   카메라 영상의 marker 는 aruco_detector.py 가 찾아 dock/aruco 로 보낸다 (바닥 위 자세 후보 + 공분산).
   marker 는 충전 접점 면보다 0.3 m 뒤에 세워 두어, 로봇이 붙을 때까지 카메라가 본다 (odom 만으로 가는 구간이 없다).
-  설 곳: ~/.ros/aruco_taught/<dock>.yaml (aruco_teach.py 로 가르친 자세) 이 있으면 그것, 없으면 접점 면 앞 0.10 m.
+  설 곳: ~/.ros/aruco_taught/<dock>.yaml (aruco_teach.py 로 가르친 자세) 이 있으면 그것, 없으면 접점 면 앞 0.17 m (시뮬레이션의 메카넘: 앞면이 중심에서 0.16 m).
   허용오차: 다가가기 앞뒤 3 mm, 옆 2 mm, 방향 0.29 도 (MecanumParams 기본값), 서서 고치기 1.5 mm, 1.5 mm, 0.2 도.
   -->
   <BehaviorTree ID="Dock">

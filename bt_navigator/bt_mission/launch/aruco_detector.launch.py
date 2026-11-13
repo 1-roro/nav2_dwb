@@ -1,6 +1,6 @@
 """도킹에 쓰는 aruco_detector.py (카메라 영상 -> dock/aruco).
 
-  시뮬레이션 (simple_line_bringup robot:=holonomic dock:=True):
+  시뮬레이션 (simple_line_bringup robot:=mecanum dock:=True):
     ros2 launch bt_mission aruco_detector.launch.py use_sim_time:=True
   RealSense (realsense-ros 4.x 는 /camera/camera/...):
     ros2 launch bt_mission aruco_detector.launch.py camera:=/camera/camera docks_file:=$HOME/my_docks.yaml

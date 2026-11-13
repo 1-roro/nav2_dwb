@@ -1,0 +1,309 @@
+<?xml version="1.0"?>
+<!-- make_mecanum.py 가 만든 4바퀴 메카넘 로봇 (치수를 바꾸면 그것을 다시 돌린다). base_footprint = 네 바퀴의 가운데, 바닥 -->
+<robot name="mecanum">
+  <material name="dark"><color rgba="0.15 0.15 0.17 1"/></material>
+  <material name="blue"><color rgba="0.16 0.35 0.62 1"/></material>
+  <material name="grey"><color rgba="0.55 0.55 0.55 1"/></material>
+  <material name="black"><color rgba="0.05 0.05 0.05 1"/></material>
+  <link name="base_footprint"/>
+  <joint name="base_joint" type="fixed">
+    <parent link="base_footprint"/><child link="base_link"/>
+    <origin xyz="0 0 0.04" rpy="0 0 0"/>
+  </joint>
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0.03" rpy="0 0 0"/>
+      <geometry><box size="0.32 0.22 0.07"/></geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.03" rpy="0 0 0"/>
+      <geometry><box size="0.32 0.22 0.07"/></geometry>
+    </collision>
+  </link>
+  <joint name="wheel_front_left_joint" type="continuous">
+    <parent link="base_link"/><child link="wheel_front_left_link"/>
+    <origin xyz="0.11 0.1325 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+  <link name="wheel_front_left_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry><cylinder radius="0.025" length="0.035"/></geometry>
+      <material name="grey"/>
+    </visual>
+    <visual>
+      <origin xyz="0.031 0 0" rpy="-0.7854 0 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.02508 0 0.01822" rpy="-0.7854 -0.62832 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.00958 0 0.02948" rpy="-0.7854 -1.25664 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.00958 0 0.02948" rpy="2.35619 -1.25664 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.02508 0 0.01822" rpy="2.35619 -0.62832 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.031 0 0" rpy="2.35619 0 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.02508 0 -0.01822" rpy="2.35619 0.62832 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.00958 0 -0.02948" rpy="2.35619 1.25664 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.00958 0 -0.02948" rpy="-0.7854 1.25664 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.02508 0 -0.01822" rpy="-0.7854 0.62832 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+  </link>
+  <joint name="wheel_front_right_joint" type="continuous">
+    <parent link="base_link"/><child link="wheel_front_right_link"/>
+    <origin xyz="0.11 -0.1325 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+  <link name="wheel_front_right_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry><cylinder radius="0.025" length="0.035"/></geometry>
+      <material name="grey"/>
+    </visual>
+    <visual>
+      <origin xyz="0.031 0 0" rpy="0.7854 0 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.02508 0 0.01822" rpy="0.7854 -0.62832 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.00958 0 0.02948" rpy="0.7854 -1.25664 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.00958 0 0.02948" rpy="-2.35619 -1.25664 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.02508 0 0.01822" rpy="-2.35619 -0.62832 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.031 0 0" rpy="-2.35619 0 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.02508 0 -0.01822" rpy="-2.35619 0.62832 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.00958 0 -0.02948" rpy="-2.35619 1.25664 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.00958 0 -0.02948" rpy="0.7854 1.25664 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.02508 0 -0.01822" rpy="0.7854 0.62832 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+  </link>
+  <joint name="wheel_rear_left_joint" type="continuous">
+    <parent link="base_link"/><child link="wheel_rear_left_link"/>
+    <origin xyz="-0.11 0.1325 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+  <link name="wheel_rear_left_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry><cylinder radius="0.025" length="0.035"/></geometry>
+      <material name="grey"/>
+    </visual>
+    <visual>
+      <origin xyz="0.031 0 0" rpy="0.7854 0 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.02508 0 0.01822" rpy="0.7854 -0.62832 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.00958 0 0.02948" rpy="0.7854 -1.25664 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.00958 0 0.02948" rpy="-2.35619 -1.25664 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.02508 0 0.01822" rpy="-2.35619 -0.62832 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.031 0 0" rpy="-2.35619 0 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.02508 0 -0.01822" rpy="-2.35619 0.62832 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.00958 0 -0.02948" rpy="-2.35619 1.25664 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.00958 0 -0.02948" rpy="0.7854 1.25664 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.02508 0 -0.01822" rpy="0.7854 0.62832 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+  </link>
+  <joint name="wheel_rear_right_joint" type="continuous">
+    <parent link="base_link"/><child link="wheel_rear_right_link"/>
+    <origin xyz="-0.11 -0.1325 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+  <link name="wheel_rear_right_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry><cylinder radius="0.025" length="0.035"/></geometry>
+      <material name="grey"/>
+    </visual>
+    <visual>
+      <origin xyz="0.031 0 0" rpy="-0.7854 0 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.02508 0 0.01822" rpy="-0.7854 -0.62832 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.00958 0 0.02948" rpy="-0.7854 -1.25664 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.00958 0 0.02948" rpy="2.35619 -1.25664 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.02508 0 0.01822" rpy="2.35619 -0.62832 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.031 0 0" rpy="2.35619 0 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.02508 0 -0.01822" rpy="2.35619 0.62832 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.00958 0 -0.02948" rpy="2.35619 1.25664 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.00958 0 -0.02948" rpy="-0.7854 1.25664 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.02508 0 -0.01822" rpy="-0.7854 0.62832 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+  </link>
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/><child link="imu_link"/>
+    <origin xyz="0 0 0.03" rpy="0 0 0"/>
+  </joint>
+  <link name="imu_link"/>
+  <joint name="scan_joint" type="fixed">
+    <parent link="base_link"/><child link="base_scan"/>
+    <origin xyz="0 0 0.12" rpy="0 0 0"/>
+  </joint>
+  <link name="base_scan">
+    <visual>
+      <origin xyz="0 0 -0.0275" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.035" length="0.065"/></geometry>
+      <material name="dark"/>
+    </visual>
+  </link>
+  <joint name="camera_joint" type="fixed">
+    <origin xyz="0.15 0 0.09" rpy="0 0 0"/>
+    <parent link="base_link"/><child link="camera_link"/>
+  </joint>
+  <link name="camera_link">
+    <visual>
+      <origin xyz="-0.0125 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.025 0.09 0.025"/></geometry>
+      <material name="dark"/>
+    </visual>
+  </link>
+  <joint name="camera_rgb_joint" type="fixed">
+    <parent link="camera_link"/><child link="camera_rgb_frame"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+  <link name="camera_rgb_frame"/>
+  <joint name="camera_rgb_optical_joint" type="fixed">
+    <parent link="camera_rgb_frame"/><child link="camera_rgb_optical_frame"/>
+    <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
+  </joint>
+  <link name="camera_rgb_optical_frame"/>
+</robot>
