@@ -38,6 +38,9 @@ def generate_launch_description():
             executable='aruco_detector.py',
             name='aruco_detector',
             output='screen',
+            # 사용자 site-packages (~/.local/lib/python3.x/site-packages) 를 보지 않는다. pip install --user 로 깔린
+            # numpy 2.x 가 apt 의 numpy 1.21.5 를 가리면, numpy 1.x 로 빌드된 OpenCV 4.5.4 와 cv_bridge 를 못 불러온다
+            additional_env={'PYTHONNOUSERSITE': '1'},
             parameters=[{
                 'docks_file': LaunchConfiguration('docks_file'),
                 'base_frame': LaunchConfiguration('base_frame'),
