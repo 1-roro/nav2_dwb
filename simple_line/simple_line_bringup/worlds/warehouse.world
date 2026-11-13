@@ -18,13 +18,33 @@
 <sdf version="1.6">
   <world name="default">
 
-    <include>
-      <uri>model://ground_plane</uri>
-    </include>
+    <!-- 바닥과 해를 model:// 로 불러오지 않고 여기에 적는다. model:// 은 GAZEBO_MODEL_PATH 에 없으면 Gazebo 가
+         온라인 모델 저장소에서 받으려 하고, 그동안 시작이 수십 초 ~ 몇 분 멈춘다 (simple_line.launch.py 참고) -->
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><plane><normal>0 0 1</normal><size>100 100</size></plane></geometry>
+          <surface><friction><ode><mu>100</mu><mu2>50</mu2></ode></friction></surface>
+        </collision>
+        <visual name="visual">
+          <cast_shadows>false</cast_shadows>
+          <geometry><plane><normal>0 0 1</normal><size>100 100</size></plane></geometry>
+          <material>
+            <script><uri>file://media/materials/scripts/gazebo.material</uri><name>Gazebo/Grey</name></script>
+          </material>
+        </visual>
+      </link>
+    </model>
 
-    <include>
-      <uri>model://sun</uri>
-    </include>
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <attenuation><range>1000</range><constant>0.9</constant><linear>0.01</linear><quadratic>0.001</quadratic></attenuation>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
 
     <scene>
       <shadows>false</shadows>

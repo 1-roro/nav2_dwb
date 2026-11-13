@@ -4,10 +4,10 @@
   ros2 launch simple_line_bringup simple_line.launch.py                          # 빈 방, 저장된 지도로 주행
   ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse slam:=True   # 창고 지도 만들기
   ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse         # 창고 지도로 주행
-  # QR 도킹 (bt_navigator/DOCKING.md): 메카넘처럼 옆으로도 가는 로봇 + 카메라, 창고 벽에 QR 붙은 dock
+  # ArUco 도킹 (bt_navigator/DOCKING.md): 메카넘처럼 옆으로도 가는 로봇 + 카메라, 창고 벽에 ArUco dock
   ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse robot:=holonomic dock:=True
-  # ArUco 도킹 (bt_navigator/ARUCO_DOCKING.md). 실제 로봇과의 차이를 일부러 넣어 볼 수 있다
-  ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse robot:=holonomic dock:=aruco \
+  # 실제 로봇과의 차이를 일부러 넣어 보기
+  ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse robot:=holonomic dock:=True \
       mecanum_slip:=True camera_tf_error:=1.5,0.0,0.01
 
 실제 로봇이면 이 파일 대신 로봇 드라이버(속도 명령, odom, 레이저, robot_state_publisher)를 띄우고
@@ -19,15 +19,23 @@ world 에 이름만 주면 worlds/<이름>.world 를 쓰고, map 을 비우면 m
 robot   waffle    TurtleBot3 waffle (차동 구동, nav2_bringup 의 waffle.model)
         holonomic 같은 몸체에 옆으로도 가는 구동(planar_move)과 RealSense 컬러 카메라 (robots/waffle_holonomic.model).
                   내비게이션에도 holonomic:=True 를 넘긴다 (params/holonomic.yaml)
-dock              qr (True 와 같다) | aruco | both | False. 월드마다 정해 둔 곳에 dock 을 놓는다.
-                  qr: QR 이 붙은 dock (models/qr_dock, tools/make_qr.py), aruco: ArUco board 를 접점 면 0.3 m 뒤에
-                  세운 dock (models/aruco_dock, tools/make_aruco_dock.py). 지도에는 없는 물체다
-실제 로봇과의 차이를 일부러 넣기 (robot:=holonomic, ARUCO_DOCKING.md 6장)
+camera_depth:=True  컬러에 맞춘 깊이 카메라도 켠다 (기본은 끈다: ArUco 도킹은 쓰지 않고, 렌더링과 점구름 계산이 무겁다)
+dock:=True        월드마다 정해 둔 곳에 ArUco marker 가 붙은 dock (models/aruco_dock, tools/make_aruco_dock.py)을
+                  놓는다. 지도에는 없는 물체다
+실제 로봇과의 차이를 일부러 넣기 (robot:=holonomic, bt_navigator/DOCKING.md 7장)
   mecanum_slip:=True       몸체가 명령보다 덜 가고(옆 90 %), 옆으로 가면 조금 돈다. odom 은 바퀴 odom 처럼 명령을
                            적분해서 그만큼 틀린다 (scripts/mecanum_slip_sim.py)
   camera_tf_error:=dyaw_deg,dx,dy
                            TF(robot_state_publisher)의 카메라 자리를 Gazebo 의 실제 카메라와 다르게 둔다.
                            "카메라를 도면과 조금 다르게 달았다" 를 흉내 낸다
+
+Gazebo 가 늦게 뜨지 않게 (처음 실행이 몇 분씩 걸리던 원인)
+  - Gazebo 는 model:// 로 부른 모델을 GAZEBO_MODEL_PATH 에서 못 찾으면 온라인 모델 저장소
+    (GAZEBO_MODEL_DATABASE_URI, 기본 models.gazebosim.org)에서 받으려 하고, 그동안 서버 시작이 멈춘다.
+    지금 그 주소는 응답이 느리거나 없어서 연결 timeout 까지 기다린다.
+  - 그래서 이 launch 는 GAZEBO_MODEL_DATABASE_URI 를 비워 온라인 저장소를 쓰지 않고, 필요한 모델 경로
+    (이 패키지의 models, turtlebot3_gazebo 의 models)를 GAZEBO_MODEL_PATH 에 직접 더한다.
+    월드의 바닥과 해도 model:// 대신 월드 파일 안에 적었다.
 """
 
 import math
@@ -38,18 +46,16 @@ import tempfile
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (AppendEnvironmentVariable, DeclareLaunchArgument, ExecuteProcess,
-                            IncludeLaunchDescription, OpaqueFunction)
+                            IncludeLaunchDescription, OpaqueFunction, SetEnvironmentVariable)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 # 월드마다 로봇을 놓는 곳 (x [m], y [m], yaw [rad])
 SPAWN = {'empty_room': (-2.0, -1.0, 0.0), 'warehouse': (-4.0, -2.5, 0.0)}
-# 월드마다 dock 을 놓는 곳 (QR 면의 x, y, QR 이 보는 방향 yaw). 둘 다 동쪽 벽에 붙여 서쪽(방 안)을 본다.
-# 창고: staging (로봇이 QR 을 보고 서는 곳) 3.9,-2.8,0 둘레 0.5 m 안에 선반이 없는 자리
-DOCK = {'empty_room': (2.8, 0.0, math.pi), 'warehouse': (4.8, -2.8, math.pi)}
-# ArUco dock: 접점 면의 x, y, 방향. 판이 접점 면 0.3 m 뒤에 있으므로 벽에서 0.45 m 떨어뜨린다
-ARUCO_DOCK = {'empty_room': (2.65, 1.2, math.pi), 'warehouse': (4.55, 1.0, math.pi)}
+# 월드마다 ArUco dock 을 놓는 곳: 충전 접점 면의 x, y, 방향(방 쪽). 동쪽 벽에 붙여 서쪽을 본다.
+# marker 판이 접점 면 0.3 m 뒤에 있으므로 접점 면은 벽에서 0.45 m 떨어진다
+DOCK = {'empty_room': (2.65, 1.2, math.pi), 'warehouse': (4.55, 1.0, math.pi)}
 
 
 def perturb_camera(urdf, error):
@@ -64,17 +70,27 @@ def perturb_camera(urdf, error):
     return urdf[:m.start()] + new + urdf[m.end():]
 
 
-def slip_model(model_file):
-    """planar_move 가 cmd_vel_body 를 받고, 참값 odom 을 odom_truth 로 내고, TF 는 내지 않게 바꾼 모델 파일"""
+def holonomic_model(model_file, slip, depth):
+    """시뮬레이션 로봇 모델을 옵션에 맞게 고친 파일 (고칠 것이 없으면 원래 파일).
+    slip: planar_move 가 cmd_vel_body 를 받고, 참값 odom 을 odom_truth 로 내고, TF 는 내지 않게 (mecanum_slip_sim.py 가 낸다)
+    depth: False 면 깊이 카메라를 뺀다"""
+    if not slip and depth:
+        return model_file
     with open(model_file) as f:
         sdf = f.read()
-    old = '<remapping>/tf:=tf</remapping>'
-    if old not in sdf:
-        raise RuntimeError('unexpected holonomic model')
-    sdf = sdf.replace(old, old + '\n        <remapping>cmd_vel:=cmd_vel_body</remapping>'
-                      '\n        <remapping>odom:=odom_truth</remapping>', 1)
-    sdf = sdf.replace('<publish_odom_tf>true</publish_odom_tf>', '<publish_odom_tf>false</publish_odom_tf>', 1)
-    out = tempfile.NamedTemporaryFile(mode='w', prefix='waffle_holonomic_slip_', suffix='.model', delete=False)
+    if slip:
+        old = '<remapping>/tf:=tf</remapping>'
+        if old not in sdf:
+            raise RuntimeError('unexpected holonomic model')
+        sdf = sdf.replace(old, old + '\n        <remapping>cmd_vel:=cmd_vel_body</remapping>'
+                          '\n        <remapping>odom:=odom_truth</remapping>', 1)
+        sdf = sdf.replace('<publish_odom_tf>true</publish_odom_tf>', '<publish_odom_tf>false</publish_odom_tf>', 1)
+    if not depth:
+        sdf, n = re.subn(r'\s*<!--[^>]*aligned_depth_to_color[^>]*-->\s*<sensor name="realsense_depth".*?</sensor>',
+                         '', sdf, flags=re.S)
+        if n != 1:
+            raise RuntimeError('depth camera not found in the holonomic model')
+    out = tempfile.NamedTemporaryFile(mode='w', prefix='waffle_holonomic_', suffix='.model', delete=False)
     out.write(sdf)
     out.close()
     return out.name
@@ -114,13 +130,19 @@ def launch_setup(context):
     slip = arg('mecanum_slip').lower() == 'true'
     if slip and not holonomic:
         raise RuntimeError('mecanum_slip:=True needs robot:=holonomic')
-    if slip:
-        model = slip_model(model)
+    if holonomic:
+        model = holonomic_model(model, slip, arg('camera_depth').lower() == 'true')
+    model_paths = [os.path.join(here, 'models')]
+    try:                                    # 로봇 몸체의 mesh (model://turtlebot3_common)
+        model_paths.append(os.path.join(get_package_share_directory('turtlebot3_gazebo'), 'models'))
+    except Exception:  # noqa: BLE001
+        pass
 
     # ---- 로봇 (시뮬레이션). 실제 로봇에서는 로봇 드라이버가 이 자리에 온다
     robot = [
-        # dock 모델의 QR 그림(model://qr_dock/...)을 Gazebo 가 찾게
-        AppendEnvironmentVariable('GAZEBO_MODEL_PATH', os.path.join(here, 'models')),
+        # 온라인 모델 저장소를 쓰지 않는다 (없는 모델을 받으려다 시작이 멈추지 않게). 필요한 모델 경로는 직접 더한다
+        SetEnvironmentVariable('GAZEBO_MODEL_DATABASE_URI', ''),
+        *[AppendEnvironmentVariable('GAZEBO_MODEL_PATH', path) for path in model_paths],
         ExecuteProcess(cmd=['gzserver', '-s', 'libgazebo_ros_init.so',
                             '-s', 'libgazebo_ros_factory.so', world], output='screen'),
         Node(package='robot_state_publisher', executable='robot_state_publisher', output='screen',
@@ -129,17 +151,13 @@ def launch_setup(context):
              arguments=['-entity', 'turtlebot3_waffle', '-file', model,
                         '-x', str(x), '-y', str(y), '-z', '0.01', '-Y', str(yaw)]),
     ]
-    docks = {'true': ['qr'], 'qr': ['qr'], 'aruco': ['aruco'], 'both': ['qr', 'aruco'], 'false': [], '': []}
-    if arg('dock').lower() not in docks:
-        raise RuntimeError(f"dock:={arg('dock')} 는 없다 (qr | aruco | both | False)")
-    for kind in docks[arg('dock').lower()]:
-        places = DOCK if kind == 'qr' else ARUCO_DOCK
-        if name not in places:
-            raise RuntimeError(f'{name} 월드에는 {kind} dock 자리를 정해 두지 않았다')
-        dx, dy, dyaw = places[name]
+    if arg('dock').lower() == 'true':
+        if name not in DOCK:
+            raise RuntimeError(f'{name} 월드에는 dock 자리를 정해 두지 않았다 (DOCK)')
+        dx, dy, dyaw = DOCK[name]
         robot.append(Node(
-            package='gazebo_ros', executable='spawn_entity.py', name=f'spawn_{kind}_dock', output='screen',
-            arguments=['-entity', f'{kind}_dock', '-file', os.path.join(here, 'models', f'{kind}_dock', 'model.sdf'),
+            package='gazebo_ros', executable='spawn_entity.py', name='spawn_dock', output='screen',
+            arguments=['-entity', 'aruco_dock', '-file', os.path.join(here, 'models', 'aruco_dock', 'model.sdf'),
                        '-x', str(dx), '-y', str(dy), '-z', '0', '-Y', str(dyaw)]))
     if slip:
         robot.append(Node(package='simple_line_bringup', executable='mecanum_slip_sim.py', output='screen',
@@ -184,7 +202,9 @@ def generate_launch_description():
         DeclareLaunchArgument('robot', default_value='waffle',
                               description='waffle (차동) | holonomic (옆으로도 가는 구동 + 컬러 카메라)'),
         DeclareLaunchArgument('dock', default_value='False',
-                              description='qr (= True) | aruco | both | False: 월드에 놓을 dock'),
+                              description='True: ArUco marker 가 붙은 dock 을 월드에 놓는다'),
+        DeclareLaunchArgument('camera_depth', default_value='False',
+                              description='True: 깊이 카메라도 켠다 (robot:=holonomic)'),
         DeclareLaunchArgument('mecanum_slip', default_value='False',
                               description='True: 메카넘 미끄러짐과 바퀴 odom 오차를 흉내 낸다 (robot:=holonomic)'),
         DeclareLaunchArgument('camera_tf_error', default_value='',
