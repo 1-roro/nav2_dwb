@@ -42,7 +42,7 @@ set(dependencies
   bt_mission_msgs
 )
 
-# 이 패키지의 BT 노드들 (작업 노드, QR 도킹 노드, ArUco 도킹 노드)
+# 이 패키지의 BT 노드들 (작업 노드, 도킹 공통 노드, ArUco 도킹 노드)
 add_library(${PROJECT_NAME}_nodes SHARED src/mission_nodes.cpp src/dock_nodes.cpp src/aruco_dock_nodes.cpp)
 target_include_directories(${PROJECT_NAME}_nodes PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -83,8 +83,8 @@ install(
   RUNTIME DESTINATION bin
 )
 install(TARGETS task_server task_server_lifecycle DESTINATION lib/${PROJECT_NAME})
-install(PROGRAMS scripts/task_client.py scripts/qr_detector.py scripts/aruco_detector.py scripts/aruco_teach.py
-  tools/make_qr.py tools/make_aruco_dock.py DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS scripts/task_client.py scripts/aruco_detector.py scripts/aruco_teach.py
+  tools/make_aruco_dock.py DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY behavior_trees launch config DESTINATION share/${PROJECT_NAME})
 
@@ -95,7 +95,7 @@ if(BUILD_TESTING)
   target_compile_definitions(test_fake_nav2 PRIVATE BT_PLUGIN_EXPORT)
   ament_target_dependencies(test_fake_nav2 behaviortree_cpp_v3 geometry_msgs)
 
-  # 도킹 제어식 (ROS 없이)
+  # 도킹 계산 (ROS 없이)
   ament_add_gtest(test_dock_control test/test_dock_control.cpp)
   target_include_directories(test_dock_control PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   ament_add_gtest(test_aruco_dock_control test/test_aruco_dock_control.cpp)

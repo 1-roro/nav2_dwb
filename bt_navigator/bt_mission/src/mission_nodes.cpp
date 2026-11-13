@@ -213,8 +213,8 @@ void registerNodes(BT::BehaviorTreeFactory & factory)
   factory.registerNodeType<DoWork>("DoWork");
   factory.registerNodeType<ScanWhileMoving>("ScanWhileMoving");
   factory.registerNodeType<ForEachWaypoint>("ForEachWaypoint");
-  registerDockNodes(factory);    // Dock, Undock 트리의 노드 (dock_nodes.hpp)
-  registerArucoDockNodes(factory);   // DockAruco 트리의 노드 (aruco_dock_nodes.hpp)
+  registerDockNodes(factory);    // Dock, Undock 트리의 BackOff, MuteCollisionMonitor, CheckCharging (dock_nodes.hpp)
+  registerArucoDockNodes(factory);   // Dock 트리의 marker 노드 (aruco_dock_nodes.hpp)
 }
 
 }  // namespace bt_mission

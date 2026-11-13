@@ -1,4 +1,8 @@
-"""aruco_detector.py 의 계산(board, PnP, 공분산) 시험. 합성 영상: 판 그림을 알려진 카메라 자세로 영상에 그린다"""
+"""aruco_detector.py 의 계산 (marker 찾기, 6자유도 PnP, 바닥 사전분포를 둔 MAP, 공분산) 시험.
+
+합성 영상: marker 그림을 알려진 자세의 카메라로 영상에 그린다. 모서리가 화소 아래(서브픽셀)까지 맞게
+6배 크게 그린 뒤 줄인다 (그냥 그리면 테두리가 화소 격자에 붙어 0.3 px 쯤 틀린 모서리가 나온다).
+"""
 
 import importlib.util
 import math
@@ -7,10 +11,9 @@ import os
 import cv2
 import numpy as np
 import pytest
-import yaml
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-BOARDS = os.path.join(HERE, '..', 'config', 'aruco_boards.yaml')
+DOCKS = os.path.join(HERE, '..', 'config', 'aruco_docks.yaml')
 
 
 def load(name, path):
@@ -21,96 +24,170 @@ def load(name, path):
 
 
 ad = load('aruco_detector', os.path.join(HERE, '..', 'scripts', 'aruco_detector.py'))
-mk = load('make_aruco_dock', os.path.join(HERE, '..', 'tools', 'make_aruco_dock.py'))
 
 W, H = 848, 480
 F = W / 2 / math.tan(1.211 / 2)                  # D435 컬러 848 x 480, 수평 화각 69.4 도
-K = np.array([[F, 0, W / 2], [0, F, H / 2], [0, 0, 1.0]])
-DIST = np.zeros(5)
-PPM = 3000.0
+K = np.array([[F, 0, (W - 1) / 2], [0, F, (H - 1) / 2], [0, 0, 1.0]])
+# 시뮬레이션의 waffle: 카메라가 base 앞 0.069, 오른쪽 0.047, 높이 0.127 m. optical: x 오른쪽, y 아래, z 앞
+R_BASE_CAM = np.array([[0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]])
+T_BASE_CAM = np.array([0.069, -0.047, 0.127])
+PPM = 3000.0                                      # marker 그림의 해상도 [px/m]
+SS = 6                                            # 크게 그리는 배수
+DOCKED = (0.10, 0.0, math.pi)                     # 붙은 자리: 로봇 중심이 접점 면 0.10 m 앞, dock 을 본다
 
 
 @pytest.fixture(scope='module')
 def scene():
-    dictionary, boards = ad.load_boards(BOARDS)
-    with open(BOARDS) as f:
-        cfg = yaml.safe_load(f)['boards']['dock_a']
-    texture = mk.board_image(cfg, dictionary, PPM)
-    params = cv2.aruco.DetectorParameters()
-    params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-    return boards['dock_a'], cfg['plate'], texture, cv2.aruco.ArucoDetector(dictionary, params)
+    name, docks = ad.load_docks(DOCKS)
+    marker = docks['dock_a']
+    dictionary = ad.aruco_dictionary(name)
+    side = int(round(marker.size * PPM))
+    quiet = side // 4
+    texture = np.full((side + 2 * quiet, side + 2 * quiet), 255, np.uint8)
+    texture[quiet:quiet + side, quiet:quiet + side] = ad.marker_image(dictionary, marker.marker_id, side)
+    camera = ad.Camera(K, np.zeros(5), R_BASE_CAM, T_BASE_CAM)
+    return marker, texture, quiet, ad.MarkerDetector(dictionary), camera
 
 
-def camera_in_dock(x, y, z, yaw):
-    """dock 좌표계에서 (x, y, z) 에 있고 수평으로 yaw 쪽을 보는 카메라 -> (R_cam_D, t_cam_D)"""
-    view = np.array([math.cos(yaw), math.sin(yaw), 0.0])
-    right = np.array([math.sin(yaw), -math.cos(yaw), 0.0])
-    R_D_cam = np.column_stack([right, np.cross(view, right), view])
-    return R_D_cam.T, -R_D_cam.T @ np.array([x, y, z])
+def dock_in_base(robot):
+    """로봇 자세 (dock 좌표계에서 x, y, yaw) -> base 에서 본 dock (x, y, yaw)"""
+    x, y, yaw = robot
+    c, s = math.cos(yaw), math.sin(yaw)
+    return np.array([-(c * x + s * y), -(-s * x + c * y), ad.angle(-yaw)])
 
 
-def render_and_solve(scene, R_cam_D, t_cam_D, only=None, seed=0):
-    board, plate, texture, detector = scene
-    R_cam_B = R_cam_D @ ad.Board.R_D_B
-    t_cam_B = R_cam_D @ np.array([-board.offset, 0.0, 0.0]) + t_cam_D
-    S = np.array([[1 / PPM, 0, plate['y_min']], [0, -1 / PPM, plate['z_max']], [0, 0, 1.0]])
-    homography = K @ np.column_stack([R_cam_B[:, 0], R_cam_B[:, 1], t_cam_B]) @ S
-    image = cv2.warpPerspective(texture, homography, (W, H), flags=cv2.INTER_AREA, borderValue=110)
+def render(scene, robot, seed=0, blur=0.6, noise=2.0):
+    marker, texture, quiet, _, camera = scene
+    q = dock_in_base(robot)
+    R_cam_D = camera.R_cam_base @ ad.rot_z(q[2])
+    t_cam_D = camera.R_cam_base @ np.array([q[0], q[1], 0.0]) + camera.t_cam_base
+    # 그림의 화소 (u, v) (화소 중심 = 정수) -> D. marker 왼쪽 위 테두리가 u = v = quiet - 0.5
+    y0 = marker.lateral - marker.size / 2 - (quiet - 0.5) / PPM
+    z0 = marker.height + marker.size / 2 + (quiet - 0.5) / PPM
+    A = np.array([[0.0, 0.0, -marker.offset], [1 / PPM, 0.0, y0], [0.0, -1 / PPM, z0]])
+    homography = K @ (R_cam_D @ A + np.column_stack([np.zeros((3, 2)), t_cam_D]))
+    S = np.array([[SS, 0, (SS - 1) / 2], [0, SS, (SS - 1) / 2], [0, 0, 1.0]])
+    big = cv2.warpPerspective(texture, S @ homography, (W * SS, H * SS), flags=cv2.INTER_LINEAR, borderValue=110)
+    image = cv2.resize(big, (W, H), interpolation=cv2.INTER_AREA).astype(np.float32)
     rng = np.random.default_rng(seed)
-    image = np.clip(cv2.GaussianBlur(image, (0, 0), 0.6) + rng.normal(0, 3, image.shape), 0, 255).astype(np.uint8)
-    corners, ids, _ = detector.detectMarkers(image)
-    found = {int(i): c.reshape(4, 2) for c, i in zip(corners, ids.reshape(-1))}
-    used = sorted(i for i in found if i in board.markers and (only is None or i in only))
-    obj = np.vstack([board.corners(i) for i in used])
-    img = np.vstack([found[i] for i in used])
-    rvec, tvec, rms, ambiguity = ad.solve_board(obj, img, K, DIST, board.markers[used[0]][2] if len(used) == 1 else None)
-    R_D, t_D = board.dock_from_board(cv2.Rodrigues(rvec)[0], tvec)
-    cov = ad.pose_covariance(board, obj, rvec, tvec, K, DIST, max(0.5, rms))
-    # 오차를 실제 dock 좌표계로: 위치 (x, y), 방향 (D 의 x 축이 바닥에서 돈 각)
-    R_D_cam = R_cam_D.T
-    error = R_D_cam @ (t_D - t_cam_D)
-    x_axis = R_D_cam @ R_D[:, 0]
-    return used, error, math.degrees(math.atan2(x_axis[1], x_axis[0])), cov, R_D_cam
+    if blur > 0:
+        image = cv2.GaussianBlur(image, (0, 0), blur)
+    image = image + rng.normal(0, noise, image.shape)
+    return np.clip(image, 0, 255).astype(np.uint8)
 
 
-def test_board_frames(scene):
-    board = scene[0]
-    c = board.corners(0)                          # 큰 marker: 가운데 0.10 m, 높이 0.155 m
-    assert np.allclose(c[0], [-0.05, 0.205, 0.0]) and np.allclose(c[2], [0.05, 0.105, 0.0])
-    # 판 바로 앞에서 정면으로 본 카메라: D 의 원점은 판에서 board_offset 앞
-    R, t = board.dock_from_board(np.diag([1.0, -1.0, -1.0]), np.array([0.0, 0.0, 0.5]))
-    assert np.allclose(R[:, 0], [0, 0, -1])        # D 의 x (방 쪽) = 카메라 쪽 = 카메라 -z
-    assert np.allclose(t, [0, 0, 0.5 - board.offset])
+def solve(scene, robot, seed=0, camera=None):
+    marker, _, _, detector, true_camera = scene
+    found = detector.detect(render(scene, robot, seed))
+    assert marker.marker_id in found
+    corners = found[marker.marker_id]
+    return corners, ad.estimate(corners, marker, camera or true_camera)
+
+
+def lateral_error_at_docked(q, truth):
+    """추정으로 붙으면 로봇이 옆으로 얼마나 어긋나나 [m]: 붙은 자리(D 에서 0.10 m 앞)를 두 자세로 base 에 놓고 비교"""
+    def docked_point(p):
+        return p[:2] + ad.rot_z(p[2])[:2, :2] @ np.array([DOCKED[0], 0.0])
+    normal = np.array([-math.sin(truth[2]), math.cos(truth[2])])
+    return float((docked_point(q) - docked_point(truth)) @ normal)
+
+
+def test_marker_frame_and_projection(scene):
+    marker, _, _, _, camera = scene
+    # 모서리: 왼위가 -y_D (로봇이 dock 을 볼 때 왼쪽), 위
+    assert np.allclose(marker.corners_D[0], [-0.30, -0.06, 0.215])
+    assert np.allclose(marker.corners_D[2], [-0.30, 0.06, 0.095])
+    # 붙은 자리에서 marker 는 영상 가운데 근처에, 왼위 모서리가 왼쪽 위에
+    p = ad.project_dock(dock_in_base(DOCKED), marker, camera)
+    assert p[0, 0] < p[1, 0] and p[0, 1] < p[3, 1]
+    assert 0 < p[:, 0].min() and p[:, 0].max() < W and 0 < p[:, 1].min() and p[:, 1].max() < H
+
+
+def test_detector_works_on_this_opencv(scene):
+    marker, _, _, detector, _ = scene
+    image = np.full((200, 200), 255, np.uint8)
+    image[40:160, 40:160] = ad.marker_image(ad.aruco_dictionary('DICT_4X4_50'), marker.marker_id, 120)
+    found = detector.detect(image)
+    assert list(found) == [marker.marker_id]
+    assert np.allclose(found[marker.marker_id][0], [39.5, 39.5], atol=0.6)     # 왼위 모서리 (화소 경계)
 
 
 def test_docked_pose_is_sub_millimetre(scene):
-    # 붙은 자리: 카메라가 접점 면 0.031 m 앞, 옆 0.047 m, 높이 0.127 m (시뮬레이션의 waffle)
-    R, t = camera_in_dock(0.031, 0.047, 0.127, math.pi)
-    used, error, yaw, cov, R_D_cam = render_and_solve(scene, R, t)
-    assert used == [0, 1, 2, 3, 4]
-    assert abs(error[0]) < 0.001 and abs(error[1]) < 0.001
-    assert abs(yaw) < 0.1
-    assert math.sqrt((R_D_cam @ cov[:3, :3] @ R_D_cam.T)[1, 1]) < 0.002
+    truth = dock_in_base(DOCKED)
+    corners, result = solve(scene, DOCKED)
+    q, cov, rms = result['hypotheses'][0]
+    assert len(result['hypotheses']) == 1                   # 가까우면 두 해가 한 자리로 모인다
+    assert abs(q[0] - truth[0]) < 0.002 and abs(q[1] - truth[1]) < 0.001
+    assert abs(math.degrees(ad.angle(q[2] - truth[2]))) < 0.2
+    assert abs(lateral_error_at_docked(q, truth)) < 0.001
+    # 공분산이 말하는 "붙은 자리의 옆 오차" (영상 하나, pixel_sigma 0.5 px 로 보수적으로). marker 하나로는 방향(yaw)이
+    # 원근(사다리꼴)으로만 보여서 가장 약한 축이다: 0.4 m 지렛대(marker -> 붙은 자리)로 옆 오차가 된다.
+    # 그래서 마지막에는 서서 여러 장을 합친다 (ArucoRefine: 30 장이면 1/5.5)
+    g = np.array([-math.sin(q[2]), math.cos(q[2]), DOCKED[0]])
+    assert math.sqrt(g @ cov @ g) < 0.005 and rms < 0.5
+    assert math.degrees(result['tilt']) < 0.5 and abs(result['height']) < 0.003
 
 
-def test_oblique_view_and_covariance(scene):
-    R, t = camera_in_dock(0.70, 0.25, 0.127, math.radians(195))
-    used, error, yaw, cov, R_D_cam = render_and_solve(scene, R, t)
-    assert len(used) == 5
-    sigma = np.sqrt(np.diag(R_D_cam @ cov[:3, :3] @ R_D_cam.T))
-    assert abs(error[0]) < 3 * sigma[0] + 0.001 and abs(error[1]) < 3 * sigma[1] + 0.001
-    assert abs(yaw) < 1.5
-    near = render_and_solve(scene, *camera_in_dock(0.031, 0.047, 0.127, math.pi))[3]
-    assert near[1, 1] < cov[1, 1]                  # 가까울수록 공분산이 작다
+def rot_x(a):
+    return np.array([[1, 0, 0], [0, math.cos(a), -math.sin(a)], [0, math.sin(a), math.cos(a)]])
 
 
-def test_single_marker_is_honest_about_its_yaw(scene):
-    # marker 하나를 정면에서 보면 방향이 몇 도 틀린다 (평면 정사각형 PnP 의 약점, QR 과 같다).
-    # D 의 원점은 판에서 0.3 m 앞이라 그만큼 옆으로 틀리지만, 공분산이 그것을 말해 주어 필터가 덜 믿는다
-    R, t = camera_in_dock(0.40, 0.0, 0.127, math.pi)
-    used, error, yaw, cov, R_D_cam = render_and_solve(scene, R, t, only={0})
-    assert used == [0]
-    sigma_lat = math.sqrt((R_D_cam @ cov[:3, :3] @ R_D_cam.T)[1, 1])
-    assert abs(error[1]) < 3 * sigma_lat
-    board_lat = math.sqrt((R_D_cam @ render_and_solve(scene, R, t)[3][:3, :3] @ R_D_cam.T)[1, 1])
-    assert sigma_lat > 3 * board_lat               # 판 전체를 볼 때보다 훨씬 덜 믿는다
+def free_pose(scene, corners, camera):
+    """비교용: 6자유도 PnP 에서 오차가 작은 해를 그대로 바닥에 내린 것"""
+    R, t, _ = min(ad.ippe(corners, scene[0], camera), key=lambda s: s[2])
+    return ad.dock_from_marker(R, t, scene[0], camera)
+
+
+def errors(scene, robot, camera, frames=6):
+    """프레임마다 (MAP, 6자유도 PnP) 의 |방향 오차| [rad], |붙은 자리의 옆 오차| [m] 평균"""
+    truth = dock_in_base(robot)
+    out = []
+    for seed in range(frames):
+        corners, result = solve(scene, robot, seed, camera)
+        for q in (result['hypotheses'][0][0], free_pose(scene, corners, camera or scene[4])):
+            out.append((abs(ad.angle(q[2] - truth[2])), abs(lateral_error_at_docked(q, truth))))
+    out = np.array(out).reshape(frames, 2, 2).mean(axis=0)
+    return out[0], out[1]
+
+
+def test_floor_prior_stops_the_flip_far_away(scene):
+    # 1.6 m 정면: 6자유도 PnP 는 기울기와 방향이 섞여 1 도 넘게 틀린다. 바닥 사전분포가 그것을 줄인다
+    (map_yaw, map_lat), (free_yaw, free_lat) = errors(scene, (1.6, 0.0, math.pi), None)
+    assert map_yaw < 0.8 * free_yaw and map_lat < 0.8 * free_lat
+
+
+def test_wrong_camera_extrinsics_do_not_break_it(scene):
+    # 카메라가 TF 보다 1 cm 높거나, 1 도 숙여 있어도: "바닥 위 3자유도" 로 못박으면 옆으로 수 cm 틀리지만
+    # (기울기 0, 높이 0 을 맞추려고 방향을 비튼다) 사전분포로 두면 영상이 이긴다
+    low = ad.Camera(K, np.zeros(5), R_BASE_CAM, T_BASE_CAM - np.array([0.0, 0.0, 0.01]))
+    pitched = ad.Camera(K, np.zeros(5), R_BASE_CAM @ rot_x(math.radians(1.0)), T_BASE_CAM)
+    for camera in (low, pitched):
+        for robot in (DOCKED, (0.65, 0.05, math.pi)):
+            (map_yaw, map_lat), _ = errors(scene, robot, camera, frames=3)
+            assert math.degrees(map_yaw) < 0.3 and map_lat < 0.003, (robot, math.degrees(map_yaw), map_lat)
+    # 가까이서는 진단이 그 오차를 드러낸다 (dock 이 바닥 아래로 1 cm 가라앉은 것처럼, 1 도 기운 것처럼 보인다)
+    _, result = solve(scene, DOCKED, camera=low)
+    assert abs(result['height'] + 0.01) < 0.004
+    _, result = solve(scene, DOCKED, camera=pitched)
+    assert abs(math.degrees(result['tilt']) - 1.0) < 0.4
+
+
+def test_covariance_is_honest_and_grows_with_distance(scene):
+    robot = (1.0, 0.25, math.radians(195))                  # 비스듬히, 멀리
+    truth = dock_in_base(robot)
+    _, result = solve(scene, robot)
+    q, cov, _ = result['hypotheses'][0]
+    sigma = np.sqrt(np.diag(cov))
+    error = np.array([q[0] - truth[0], q[1] - truth[1], ad.angle(q[2] - truth[2])])
+    assert (np.abs(error) < 3 * sigma + np.array([0.002, 0.002, 0.002])).all()
+    near = solve(scene, DOCKED)[1]['hypotheses'][0][1]
+    assert cov[1, 1] > 10 * near[1, 1] and cov[2, 2] > 10 * near[2, 2]
+
+
+def test_detects_the_big_marker_up_close_in_gazebo(scene):
+    # Gazebo 에서 붙은 자리의 영상 (marker 한 변 222 px, 잘라서 JPEG). OpenCV 기본 minDistanceToBorder (3) 로는 못 찾았다
+    image = cv2.imread(os.path.join(HERE, 'data', 'gazebo_docked.jpg'), cv2.IMREAD_GRAYSCALE)
+    found = scene[3].detect(image)
+    assert list(found) == [0]
+    side = np.linalg.norm(found[0][1] - found[0][0])
+    assert 215 < side < 230

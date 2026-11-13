@@ -9,9 +9,7 @@
 #include <vector>
 
 #include "tf2/exceptions.h"
-#include "tf2/LinearMath/Matrix3x3.h"
 #include "tf2/LinearMath/Quaternion.h"
-#include "tf2/LinearMath/Transform.h"
 #include "tf2/utils.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "yaml-cpp/yaml.h"
@@ -77,62 +75,36 @@ std::string sigmas(const ad::Mat3 & cov)
   return text;
 }
 
-// 3x3 행렬 (행 우선 9개) 을 R 로 돌린다: R M Rᵀ
-std::array<double, 9> rotate(const tf2::Matrix3x3 & r, const std::array<double, 9> & m)
-{
-  std::array<double, 9> rm{}, out{};
-  for (int i = 0; i < 3; ++i) {
-    for (int j = 0; j < 3; ++j) {
-      for (int k = 0; k < 3; ++k) {
-        rm[i * 3 + j] += r[i][k] * m[k * 3 + j];
-      }
-    }
-  }
-  for (int i = 0; i < 3; ++i) {
-    for (int j = 0; j < 3; ++j) {
-      for (int k = 0; k < 3; ++k) {
-        out[i * 3 + j] += rm[i * 3 + k] * r[j][k];
-      }
-    }
-  }
-  return out;
-}
-
 }  // namespace
 
-std::optional<ad::Measurement> arucoMeasurement(
+ad::Hypotheses arucoMeasurements(
   const tf2_ros::Buffer & tf, const bt_mission_msgs::msg::ArucoDetection & d, const std::string & global)
 {
   geometry_msgs::msg::TransformStamped stamped;
   try {
     stamped = tf.lookupTransform(global, d.header.frame_id, d.header.stamp, tf2::durationFromSec(0.1));
   } catch (const tf2::TransformException &) {
-    return std::nullopt;                          // 영상을 찍은 시각의 로봇 자리
+    return {};                                    // 영상을 찍은 시각의 로봇 자리를 모른다
   }
-  tf2::Transform global_cam, cam_dock;
-  tf2::fromMsg(stamped.transform, global_cam);
-  tf2::fromMsg(d.pose.pose, cam_dock);
-  const tf2::Transform global_dock = global_cam * cam_dock;
-  const tf2::Vector3 x_axis = global_dock.getBasis().getColumn(0);
-  if (std::fabs(x_axis.z()) > 0.5) {
-    return std::nullopt;                          // 판이 서 있지 않다
+  const dock::Pose2 base{stamped.transform.translation.x, stamped.transform.translation.y,
+    tf2::getYaw(stamped.transform.rotation)};
+  const double c = std::cos(base.yaw), s = std::sin(base.yaw);
+  ad::Hypotheses out;
+  for (const auto & h : d.hypotheses) {
+    ad::Measurement m;
+    m.pose = ad::compose(base, {h.x, h.y, h.yaw});
+    // 공분산: base 의 (x, y) 를 global 로 돌린다 (yaw 는 그대로). C = R Σ Rᵀ, R = [[c, -s, 0], [s, c, 0], [0, 0, 1]]
+    const ad::Mat3 r{c, -s, 0.0, s, c, 0.0, 0.0, 0.0, 1.0};
+    const ad::Mat3 rt{c, s, 0.0, -s, c, 0.0, 0.0, 0.0, 1.0};
+    ad::Mat3 cov;
+    std::copy(h.covariance.begin(), h.covariance.end(), cov.begin());
+    m.cov = ad::mul(ad::mul(r, cov), rt);
+    m.cov[0] += 1e-10;
+    m.cov[4] += 1e-10;
+    m.cov[8] += 1e-10;
+    out.push_back(m);
   }
-  ad::Measurement m;
-  m.pose = {global_dock.getOrigin().x(), global_dock.getOrigin().y(), std::atan2(x_axis.y(), x_axis.x())};
-  // 공분산: 카메라 frame 의 [위치, 작은 회전] 을 global 로 돌려 (x, y, yaw) 만
-  const auto & c = d.pose.covariance;
-  std::array<double, 9> pos{}, rot{}, cross{};
-  for (int i = 0; i < 3; ++i) {
-    for (int j = 0; j < 3; ++j) {
-      pos[i * 3 + j] = c[i * 6 + j];
-      rot[i * 3 + j] = c[(i + 3) * 6 + (j + 3)];
-      cross[i * 3 + j] = c[i * 6 + (j + 3)];
-    }
-  }
-  const tf2::Matrix3x3 r = global_cam.getBasis();
-  const auto p = rotate(r, pos), q = rotate(r, rot), x = rotate(r, cross);
-  m.cov = {p[0] + 1e-10, p[1], x[2], p[3], p[4] + 1e-10, x[5], x[2], x[5], q[8] + 1e-10};
-  return m;
+  return out;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -209,8 +181,9 @@ DetectArucoDock::DetectArucoDock(const std::string & name, const BT::NodeConfigu
 
 std::optional<dock::Pose2> DetectArucoDock::taughtTarget(const std::string & file, std::string * why)
 {
-  // aruco_teach.py 가 남긴 것: 제대로 붙은 로봇의 카메라에서 본 D 의 자세. 지금의 카메라 TF(틀려도 된다)로
-  // 로봇 자리로 바꾼다. 같은 TF 로 dock 의 자리도 잡으므로, 끝에서 카메라가 같은 것을 보면 로봇은 가르친 자리에 있다
+  // aruco_teach.py 가 남긴 것: 제대로 붙은 로봇에서 aruco_detector.py 가 본 dock 의 자세 (base 에서, x y yaw).
+  // 설 곳 = 그 역 (dock 에서 본 로봇). 같은 detector (같은 카메라 TF, marker 크기, 내부값) 로 dock 의 자리도 잡으므로,
+  // 끝에서 detector 가 가르칠 때와 같은 것을 보면 로봇은 가르친 자리에 있다: 그 값들의 오차가 서로 지워진다
   YAML::Node y;
   try {
     y = YAML::LoadFile(file);
@@ -218,28 +191,16 @@ std::optional<dock::Pose2> DetectArucoDock::taughtTarget(const std::string & fil
     *why = std::string("cannot read ") + file + ": " + e.what();
     return std::nullopt;
   }
-  const auto p = y["position"], q = y["orientation"];
-  if (!p || !q || p.size() != 3 || q.size() != 4 || !y["camera_frame"]) {
-    *why = file + " needs camera_frame, position [3], orientation [4]";
+  const auto d = y["dock_in_base"];
+  if (!d || !d["x"] || !d["y"] || !d["yaw_deg"]) {
+    *why = file + " needs dock_in_base: {x, y, yaw_deg} (aruco_teach.py)";
     return std::nullopt;
   }
-  geometry_msgs::msg::TransformStamped base_cam_msg;
-  try {
-    base_cam_msg = ros_.tf->lookupTransform(
-      state_->robot_frame, y["camera_frame"].as<std::string>(), tf2::TimePointZero);
-  } catch (const tf2::TransformException & e) {
-    *why = std::string("no transform to the camera: ") + e.what();
+  if (y["dock"] && y["dock"].as<std::string>() != state_->dock) {
+    *why = file + " was taught for dock '" + y["dock"].as<std::string>() + "', not '" + state_->dock + "'";
     return std::nullopt;
   }
-  tf2::Transform base_cam;
-  tf2::fromMsg(base_cam_msg.transform, base_cam);
-  const tf2::Transform cam_dock(
-    tf2::Quaternion(q[0].as<double>(), q[1].as<double>(), q[2].as<double>(), q[3].as<double>()),
-    tf2::Vector3(p[0].as<double>(), p[1].as<double>(), p[2].as<double>()));
-  const tf2::Transform base_dock = base_cam * cam_dock;
-  const tf2::Vector3 x_axis = base_dock.getBasis().getColumn(0);
-  const dock::Pose2 dock_in_base{base_dock.getOrigin().x(), base_dock.getOrigin().y(),
-    std::atan2(x_axis.y(), x_axis.x())};
+  const dock::Pose2 dock_in_base{d["x"].as<double>(), d["y"].as<double>(), d["yaw_deg"].as<double>() * M_PI / 180.0};
   return ad::inverse(dock_in_base);
 }
 
@@ -253,7 +214,7 @@ bool DetectArucoDock::chooseTarget()
   getInput("use_taught", use_taught);
   getInput("docked_distance", docked_distance);
   if (taught.empty() && use_taught) {
-    const std::string candidate = expandHome(taught_dir) + "/" + state_->board + ".yaml";
+    const std::string candidate = expandHome(taught_dir) + "/" + state_->dock + ".yaml";
     if (fileExists(candidate)) {
       taught = candidate;
     }
@@ -282,7 +243,7 @@ BT::NodeStatus DetectArucoDock::onStart()
 {
   state_ = std::make_shared<ArucoDockState>();
   std::string topic = "dock/aruco";
-  getInput("target", state_->board);
+  getInput("target", state_->dock);
   getInput("global_frame", state_->global_frame);
   getInput("robot_frame", state_->robot_frame);
   getInput("detection_topic", topic);
@@ -295,7 +256,7 @@ BT::NodeStatus DetectArucoDock::onStart()
     [this](bt_mission_msgs::msg::ArucoDetection::SharedPtr msg) {inbox_.push_back(*msg);}, options);
   start_ = std::chrono::steady_clock::now();
   RCLCPP_INFO(
-    ros_.node->get_logger(), "[aruco] looking for board '%s'", state_->board.empty() ? "(any)" : state_->board.c_str());
+    ros_.node->get_logger(), "[aruco] looking for dock '%s'", state_->dock.empty() ? "(any)" : state_->dock.c_str());
   return BT::NodeStatus::RUNNING;
 }
 
@@ -307,20 +268,21 @@ BT::NodeStatus DetectArucoDock::onRunning()
   getInput("min_detections", min_detections);
   ros_.spin();
   for (const auto & d : inbox_) {
-    if (state_->board.empty()) {
-      state_->board = d.board;
+    if (state_->dock.empty()) {
+      state_->dock = d.dock;
     }
-    if (d.board != state_->board) {
+    if (d.dock != state_->dock) {
       continue;
     }
-    if (const auto m = arucoMeasurement(*ros_.tf, d, state_->global_frame)) {
-      seen_.push_back(*m);
+    const auto hs = arucoMeasurements(*ros_.tf, d, state_->global_frame);
+    if (!hs.empty()) {
+      seen_.push_back(hs);
     }
   }
   inbox_.clear();
   if (static_cast<int>(seen_.size()) >= min_detections) {
     int used = 0;
-    const auto fused = ad::fuse(seen_, kGate, &used);
+    const auto fused = ad::fuseDetections(seen_, kGate, &used);
     if (fused && used >= (min_detections + 1) / 2) {
       sub_.reset();
       if (!chooseTarget()) {
@@ -331,7 +293,7 @@ BT::NodeStatus DetectArucoDock::onRunning()
       setOutput("dock_pose", toPoseStamped(fused->pose, state_->global_frame));
       RCLCPP_INFO(
         ros_.node->get_logger(), "[aruco] found '%s' at (%.3f, %.3f), facing %.2f deg, %s (%d of %zu)",
-        state_->board.c_str(), fused->pose.x, fused->pose.y, deg(fused->pose.yaw), sigmas(fused->cov).c_str(),
+        state_->dock.c_str(), fused->pose.x, fused->pose.y, deg(fused->pose.yaw), sigmas(fused->cov).c_str(),
         used, seen_.size());
       sub_.reset();
       return BT::NodeStatus::SUCCESS;
@@ -339,8 +301,8 @@ BT::NodeStatus DetectArucoDock::onRunning()
   }
   if (secondsSince(start_) > timeout) {
     RCLCPP_WARN(
-      ros_.node->get_logger(), "[aruco] board '%s' not found in %.1f s (%zu detections)",
-      state_->board.empty() ? "(any)" : state_->board.c_str(), timeout, seen_.size());
+      ros_.node->get_logger(), "[aruco] dock '%s' not found in %.1f s (%zu detections)",
+      state_->dock.empty() ? "(any)" : state_->dock.c_str(), timeout, seen_.size());
     sub_.reset();
     return BT::NodeStatus::FAILURE;
   }
@@ -373,6 +335,10 @@ BT::NodeStatus ArucoServo::onStart()
   getInput("settle", settle_);
   getInput("timeout", timeout_);
   getInput("odom_drift", drift_);
+  getInput("odom_slip", slip_);
+  getInput("odom_yaw_per_m", yaw_per_m_);
+  getInput("odom_turn_slip", turn_slip_);
+  last_robot_ = ros_.robotPose(state_->global_frame, state_->robot_frame);
   getInput("detection_topic", topic);
   getInput("cmd_vel_topic", cmd_topic);
   goal_ = {state_->target.x + standoff, state_->target.y, state_->target.yaw};
@@ -421,16 +387,25 @@ BT::NodeStatus ArucoServo::onRunning()
 {
   ros_.spin();
   for (const auto & d : inbox_) {
-    if (d.board != state_->board) {
+    if (d.dock != state_->dock) {
       continue;
     }
-    const auto m = arucoMeasurement(*ros_.tf, d, state_->global_frame);
-    if (!m) {
+    const auto hs = arucoMeasurements(*ros_.tf, d, state_->global_frame);
+    if (hs.empty()) {
       continue;
     }
     state_->filter.predict(secondsSince(last_predict_), drift_, drift_);
     last_predict_ = std::chrono::steady_clock::now();
-    const auto result = state_->filter.update(m->pose, m->cov, kGate, kReinitAfter);
+    if (const auto robot = ros_.robotPose(state_->global_frame, state_->robot_frame)) {
+      if (last_robot_) {
+        state_->filter.predictMotion(
+          std::hypot(robot->x - last_robot_->x, robot->y - last_robot_->y),
+          ad::normalizeAngle(robot->yaw - last_robot_->yaw), slip_, yaw_per_m_, turn_slip_);
+      }
+      last_robot_ = robot;
+    }
+    const auto & m = hs[ad::closestHypothesis(state_->filter, hs)];   // 뒤집힌 후보가 있으면 필터에 가까운 쪽
+    const auto result = state_->filter.update(m.pose, m.cov, kGate, kReinitAfter);
     if (result == ad::DockFilter::Result::Rejected) {
       ++rejected_;
       continue;
@@ -444,7 +419,7 @@ BT::NodeStatus ArucoServo::onRunning()
   }
   inbox_.clear();
   if (lost_timeout_ > 0.0 && secondsSince(last_seen_) > lost_timeout_) {
-    return finish(BT::NodeStatus::FAILURE, "lost the board");
+    return finish(BT::NodeStatus::FAILURE, "lost the marker");
   }
   if (secondsSince(start_) > timeout_) {
     return finish(BT::NodeStatus::FAILURE, "timed out");
@@ -554,11 +529,12 @@ BT::NodeStatus ArucoRefine::onRunning()
 
   if (phase_ == Phase::Measure) {
     for (const auto & d : inbox_) {
-      if (d.board != state_->board) {
+      if (d.dock != state_->dock) {
         continue;
       }
-      if (const auto m = arucoMeasurement(*ros_.tf, d, state_->global_frame)) {
-        measured_.push_back(*m);
+      const auto hs = arucoMeasurements(*ros_.tf, d, state_->global_frame);
+      if (!hs.empty()) {
+        measured_.push_back(hs);
       }
     }
     inbox_.clear();
@@ -566,12 +542,12 @@ BT::NodeStatus ArucoRefine::onRunning()
       return BT::NodeStatus::RUNNING;
     }
     int used = 0;
-    const auto fused = ad::fuse(measured_, kGate, &used);
+    const auto fused = ad::fuseDetections(measured_, kGate, &used);
     const auto robot = ros_.robotPose(state_->global_frame, state_->robot_frame);
     if (!fused || used < 3 || !robot) {
       sub_.reset();
       RCLCPP_WARN(
-        ros_.node->get_logger(), "[aruco] %s: board not seen while standing (%zu detections)", name().c_str(),
+        ros_.node->get_logger(), "[aruco] %s: marker not seen while standing (%zu detections)", name().c_str(),
         measured_.size());
       return BT::NodeStatus::FAILURE;
     }

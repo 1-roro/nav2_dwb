@@ -1,4 +1,4 @@
-// 도킹 제어식 (dock_control.hpp) 시험. ROS 없이 계산만 본다
+// 도킹에 같이 쓰는 계산 (dock_control.hpp: BackOff 의 제어, 뒤의 레이저 점) 시험. ROS 없이 계산만 본다
 #include <cmath>
 #include <vector>
 
@@ -21,15 +21,6 @@ TEST(DockControl, ErrorIsInTheRobotFrame)
   EXPECT_NEAR(e.x, 0.0, 1e-9);
   EXPECT_NEAR(e.y, -1.0, 1e-9);
   EXPECT_NEAR(e.yaw, -M_PI / 2, 1e-9);
-}
-
-TEST(DockControl, DockedPoseFacesTheQr)
-{
-  // QR 이 x = 4.8 의 벽에 붙어 -x 를 보면, 0.1 m 앞에 서서 +x 를 본다
-  const Pose2 docked = dock::dockedPose({4.8, -1.5, M_PI}, 0.1);
-  EXPECT_NEAR(docked.x, 4.7, 1e-9);
-  EXPECT_NEAR(docked.y, -1.5, 1e-9);
-  EXPECT_NEAR(std::cos(docked.yaw), 1.0, 1e-9);
 }
 
 TEST(DockControl, LinearSpeedKeepsItsDirectionWhenLimited)
@@ -59,39 +50,6 @@ TEST(DockControl, MinimumSpeedOutsideToleranceAndZeroInside)
   cmd = dock::holonomicStep({0.005, 0.0, 0.01}, {}, p, 0.05);       // 허용오차 안
   EXPECT_EQ(cmd.vx, 0.0);
   EXPECT_EQ(cmd.wz, 0.0);
-}
-
-TEST(DockControl, AverageIgnoresFlippedNormals)
-{
-  // Gazebo 에서 본 것처럼: 법선이 대개 -4 도인데 가끔 +16 도로 뒤집힌다 (QR 은 -x 를 본다, yaw = pi)
-  std::vector<Pose2> seen;
-  for (int i = 0; i < 10; ++i) {
-    const double flip = (i % 3 == 0) ? 20.0 : 0.0;          // 10 번 중 4 번
-    const double yaw_deg = -4.0 + flip + 0.2 * (i % 2);
-    seen.push_back({4.8 + 0.001 * (i % 3), -1.5 - 0.001 * (i % 2), M_PI + yaw_deg * M_PI / 180.0});
-  }
-  const auto average = dock::robustAverage(seen, 0.03, 5.0 * M_PI / 180.0);
-  EXPECT_EQ(average.inliers, 6);
-  EXPECT_NEAR(dock::normalizeAngle(average.pose.yaw - M_PI) * 180.0 / M_PI, -3.9, 0.11);
-  EXPECT_NEAR(average.pose.x, 4.801, 0.001);
-}
-
-TEST(DockControl, AverageWrapsTheAngle)
-{
-  // yaw 가 +pi, -pi 양쪽에 걸쳐 있어도 0 쪽으로 가지 않는다
-  const auto average = dock::robustAverage(
-    {{0.0, 0.0, M_PI - 0.02}, {0.0, 0.0, -M_PI + 0.02}, {0.0, 0.0, M_PI - 0.01}, {0.0, 0.0, -M_PI + 0.01}},
-    0.03, 0.1);
-  EXPECT_EQ(average.inliers, 4);
-  EXPECT_NEAR(std::fabs(average.pose.yaw), M_PI, 1e-6);
-}
-
-TEST(DockControl, AverageDropsADetectionFarAway)
-{
-  const auto average = dock::robustAverage(
-    {{1.0, 0.0, 0.0}, {1.002, 0.0, 0.0}, {0.998, 0.001, 0.0}, {1.5, 0.3, 0.0}}, 0.03, 0.1);
-  EXPECT_EQ(average.inliers, 3);
-  EXPECT_NEAR(average.pose.x, 1.0, 1e-9);
 }
 
 TEST(DockControl, PointsBehindAreThoseInTheSweptRectangle)
@@ -125,7 +83,7 @@ static Pose2 simulate(Pose2 robot, const Pose2 & goal, const ControlParams & p, 
 TEST(DockControl, ConvergesFromALateralAndYawOffset)
 {
   ControlParams p;
-  const Pose2 goal{4.3, -1.5, 0.0};                       // 도킹 전 자리 (QR 0.5 m 앞)
+  const Pose2 goal{4.3, -1.5, 0.0};
   double max_speed = 0.0;
   const Pose2 end = simulate({3.9, -1.2, 15.0 * M_PI / 180.0}, goal, p, 15.0, &max_speed);
   const Pose2 error = dock::errorInRobotFrame(end, goal);
@@ -135,7 +93,7 @@ TEST(DockControl, ConvergesFromALateralAndYawOffset)
 
 TEST(DockControl, DoesNotOvershootTheDock)
 {
-  // 마지막 접근: 앞으로만 0.4 m. 목표(벽 쪽)를 넘어가면 dock 에 부딪힌다
+  // 앞으로만 0.4 m. 목표를 넘어가지 않는다
   ControlParams p;
   p.max_lin = 0.05;
   const Pose2 goal{4.7, -1.5, 0.0};

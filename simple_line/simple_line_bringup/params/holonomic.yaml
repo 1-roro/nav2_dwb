@@ -1,6 +1,6 @@
 # 메카넘(홀로노믹) 로봇. navigation.launch.py holonomic:=True 일 때 params_file 위에 덮어쓴다.
 # Nav2 의 경로 따라가기(controller)는 차동 구동처럼 돌고 나서 앞으로 간다. 옆으로 가는 속도(vy)는
-# QR 도킹(bt_mission 의 ApproachDock, BackOff)이 낸다. 그것이 velocity_smoother 에서 0 으로 잘리지 않게 한다.
+# ArUco 도킹(bt_mission 의 ArucoServo, ArucoRefine, BackOff)이 낸다. 그것이 velocity_smoother 에서 0 으로 잘리지 않게 한다.
 amcl:
   ros__parameters:
     robot_model_type: "nav2_amcl::OmniMotionModel"   # 옆으로 움직이는 것도 odom 의 움직임으로 본다

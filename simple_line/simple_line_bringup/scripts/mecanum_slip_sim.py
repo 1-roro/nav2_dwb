@@ -12,7 +12,7 @@ gazebo_ros_planar_move 는 명령한 속도대로 몸체를 정확히 움직이�
                                      └-- /odom, TF odom -> base_footprint (바퀴 odom: 명령을 적분)
   planar_move 의 참값 odom 은 odom_truth 로 옮긴다 (처음 자리를 잡을 때만 쓴다)
 
-파라미터 (가정한 값. 실제 로봇에서 재서 바꾼다, ARUCO_DOCKING.md 6장)
+파라미터 (가정한 값. 실제 로봇에서 재서 바꾼다, bt_navigator/DOCKING.md 8-2)
   scale_x 0.98, scale_y 0.90, scale_wz 0.96   몸체가 실제로 가는 비율
   yaw_per_lateral 0.04                         옆으로 1 m 갈 때 도는 각 [rad]
   noise 0.02                                   속도에 비례하는 잡음 (표준편차 비율)

@@ -3,7 +3,7 @@
 <package format="3">
   <name>bt_mission_msgs</name>
   <version>0.1.0</version>
-  <description>Task message, ExecuteTask action and QrCode detection message for the mission behavior trees in bt_mission.</description>
+  <description>Task message, ExecuteTask action and ArUco dock detection messages for the mission behavior trees in bt_mission.</description>
   <maintainer email="user@example.com">nav2_dwb</maintainer>
   <license>Apache-2.0</license>
 

@@ -11,12 +11,14 @@
 #include "bt_mission/dock_control.hpp"
 
 // ArUco 도킹의 계산 (ROS 와 무관. aruco_dock_nodes.cpp 가 쓰고 test_aruco_dock_control.cpp 가 시험한다).
-// ARUCO_DOCKING.md 의 2 ~ 4장.
+// DOCKING.md 의 3 ~ 5장.
 //
 // 1. dock 의 자리 추정: 움직이지 않는 물체 하나의 자세(odom 의 x, y, yaw)를 Kalman 필터로 잡는다.
 //    측정마다 공분산(aruco_detector.py 가 모서리 잡음에서 계산)이 달라서, 가까이서 본 정확한 측정이 저절로
-//    크게 반영된다. odom 이 조금씩 흐르는 것은 random walk 로 둔다. 너무 먼 측정은 Mahalanobis 거리로 버리되,
+//    크게 반영된다. odom 이 흐르는 것은 시간(random walk)과 움직인 거리(미끄러짐)에 비례해 불확실도를 키운다. 너무 먼 측정은 Mahalanobis 거리로 버리되,
 //    연달아 버리면(처음 값이 틀렸으면) 다시 잡는다.
+//    marker 하나는 자세 후보를 둘 낼 수 있다 (평면 PnP 의 뒤집힘). 필터가 있으면 거기에 가장 가까운 후보를
+//    (closestHypothesis), 처음에는 여러 장을 모아 다수결로 (fuseDetections) 고른다.
 // 2. 제어: 오차를 dock 좌표계(along = 법선 방향 남은 거리, lat = 옆, yaw)로 보고, 메카넘이라 세 축을 동시에 줄인다.
 //    다만 "깔때기": 옆과 방향 오차가 남은 거리에 비례하는 폭 안에 들어야 앞으로(dock 쪽으로) 간다.
 //    축마다 최대 속도, 가속도, 최소 속도(데드밴드), 명령 배율(실제 로봇에서 잰 미끄러짐 보정)이 다르다.
@@ -134,6 +136,16 @@ public:
     cov_ = add(cov_, diag3(q_xy * q_xy * dt, q_xy * q_xy * dt, q_yaw * q_yaw * dt));
   }
 
+  // 로봇이 dist [m] 가고 turn [rad] 돈 만큼 odom 의 오차가 쌓인다 (바퀴 odom 의 오차는 시간보다 움직인 거리에 비례한다.
+  // 메카넘은 옆으로 갈 때 롤러가 미끄러져 특히 크다). slip: 간 거리 대비 위치 오차 (표준편차 비율),
+  // yaw_per_m: 1 m 갈 때 방향 오차 [rad], turn_slip: 돈 각 대비 방향 오차
+  void predictMotion(double dist, double turn, double slip, double yaw_per_m, double turn_slip)
+  {
+    const double s_xy = slip * std::fabs(dist);
+    const double s_yaw = yaw_per_m * std::fabs(dist) + turn_slip * std::fabs(turn);
+    cov_ = add(cov_, diag3(s_xy * s_xy, s_xy * s_xy, s_yaw * s_yaw));
+  }
+
   enum class Result {Accepted, Rejected, Reinitialized};
 
   // gate: Mahalanobis 거리 제곱의 문턱 (자유도 3, 99.9 % 면 16.3). reinit_after 번 연달아 버리면 그 측정으로 다시 잡는다
@@ -223,6 +235,53 @@ inline std::optional<Measurement> fuse(const std::vector<Measurement> & ms, doub
   }
   const auto d = mulVec(*cov, weighted);
   return Measurement{{mid.x + d[0], mid.y + d[1], normalizeAngle(mid.yaw + d[2])}, *cov};
+}
+
+// marker 하나의 영상 한 장 = 후보 1 ~ 2 개 (재투영 오차 순)
+using Hypotheses = std::vector<Measurement>;
+
+// 필터에 가장 가까운 후보 (Mahalanobis 거리, 필터와 측정의 공분산을 더해서). 필터가 없으면 첫 후보
+inline std::size_t closestHypothesis(const DockFilter & filter, const Hypotheses & hs)
+{
+  if (!filter.initialized() || hs.size() < 2) {
+    return 0;
+  }
+  std::size_t best = 0;
+  double best_d2 = 1e18;
+  for (std::size_t i = 0; i < hs.size(); ++i) {
+    const double d2 = mahalanobis2(filter.mean(), add(filter.cov(), hs[i].cov), hs[i].pose);
+    if (d2 < best_d2) {
+      best_d2 = d2;
+      best = i;
+    }
+  }
+  return best;
+}
+
+// 서서 본 영상 여러 장 -> 하나. 1) 장마다 첫 후보로 fuse (중앙값 + gate: 뒤집힌 장이 절반 아래면 버려진다)
+// 2) 그 결과에 가장 가까운 후보를 장마다 다시 골라 한 번 더 fuse (첫 후보가 뒤집힌 쪽이던 장도 바른 후보로 쓴다)
+inline std::optional<Measurement> fuseDetections(
+  const std::vector<Hypotheses> & detections, double gate, int * used = nullptr)
+{
+  std::vector<Measurement> first;
+  for (const auto & hs : detections) {
+    if (!hs.empty()) {
+      first.push_back(hs.front());
+    }
+  }
+  const auto rough = fuse(first, gate, used);
+  if (!rough) {
+    return std::nullopt;
+  }
+  DockFilter around;
+  around.reset(rough->pose, rough->cov);
+  std::vector<Measurement> chosen;
+  for (const auto & hs : detections) {
+    if (!hs.empty()) {
+      chosen.push_back(hs[closestHypothesis(around, hs)]);
+    }
+  }
+  return fuse(chosen, gate, used);
 }
 
 // ---------------------------------------------------------------------------------------------
