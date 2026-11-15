@@ -121,6 +121,32 @@ void SimpleLineController::setPlan(const nav_msgs::msg::Path & path)
   for (const auto & ps : path.poses) {
     plan_.push_back({ps.pose.position.x, ps.pose.position.y, yawOf(ps.pose.orientation)});
   }
+  if (plan_.empty()) {
+    return;
+  }
+  const Pose2D & g = plan_.back();
+  auto same_goal = [&g](const Pose2D & p) {
+      return std::hypot(p.x - g.x, p.y - g.y) < 0.005 && std::fabs(normalizeAngle(p.yaw - g.yaw)) < 0.01;
+    };
+  if (arrived_ && !same_goal(arrived_goal_)) {
+    arrived_ = false;                 // 새 goal
+  }
+  // 경로 끝의 방향. planner 가 1초마다 "지금 자리 -> goal" 직선을 다시 그으므로, goal 가까이서는 경로가 몇 cm 로
+  // 짧아지고 그 방향은 옆 오차만큼 틀어진다. 같은 goal 이면 충분히 길 때(0.3 m 넘게)의 방향을 계속 쓴다
+  double length = 0.0;
+  size_t first = plan_.size() - 1;
+  while (first > 0 && length < 0.3) {
+    --first;
+    length = std::hypot(g.x - plan_[first].x, g.y - plan_[first].y);
+  }
+  const bool known = has_end_dir_ && same_goal(end_dir_goal_);
+  if (length >= 0.3 || (!known && length > 0.02)) {
+    end_dir_ = std::atan2(g.y - plan_[first].y, g.x - plan_[first].x);
+    end_dir_goal_ = g;
+    has_end_dir_ = true;
+  } else if (!known) {
+    has_end_dir_ = false;
+  }
 }
 
 std::vector<SimpleLineController::Pose2D> SimpleLineController::localPlan(const Pose2D & robot)
@@ -263,11 +289,13 @@ geometry_msgs::msg::TwistStamped SimpleLineController::computeVelocityCommands(
 
   // goal checker 의 xy 허용오차 = '도착했다'고 보는 거리
   double goal_tolerance = 0.25;
+  double goal_yaw_tolerance = 0.0;
   if (goal_checker) {
     geometry_msgs::msg::Pose pose_tol;
     geometry_msgs::msg::Twist vel_tol;
     if (goal_checker->getTolerances(pose_tol, vel_tol)) {
       goal_tolerance = pose_tol.position.x;
+      goal_yaw_tolerance = std::fabs(yawOf(pose_tol.orientation));
     }
   }
 
@@ -284,7 +312,16 @@ geometry_msgs::msg::TwistStamped SimpleLineController::computeVelocityCommands(
     local.begin(), local.end(), [&](const Pose2D & p) {
       return std::hypot(p.x, p.y) >= lookahead_dist_;
     });
-  const Pose2D carrot = (it != local.end()) ? *it : local.back();
+  Pose2D carrot = (it != local.end()) ? *it : local.back();
+  if (it == local.end() && has_end_dir_) {
+    // goal 이 lookahead 보다 가깝다: carrot 을 goal 너머 경로 방향으로 lookahead 까지 늘인다.
+    // goal 점 자체를 쫓으면 가까워질수록 작은 옆 오차가 큰 각이 되어(2 cm 옆, 5 cm 앞 = 22 도) 도착 직전에
+    // 한쪽으로 꺾는다. goal 방향이 그 반대쪽이면 "반대로 움찔했다가 도는" 것으로 보인다
+    const double extend = lookahead_dist_ - std::hypot(carrot.x, carrot.y);
+    const double dir = normalizeAngle(end_dir_ - robot.yaw);
+    carrot.x += extend * std::cos(dir);
+    carrot.y += extend * std::sin(dir);
+  }
   const double carrot_angle = std::atan2(carrot.y, carrot.x);
 
   const double dt = control_duration_;
@@ -349,13 +386,22 @@ geometry_msgs::msg::TwistStamped SimpleLineController::computeVelocityCommands(
     rotating_ = false;
   }
 
-  double w = 0.0;
   if (goal_dist <= goal_tolerance) {
-    // goal 의 xy 에 도착: 서서 goal yaw 로 회전
+    arrived_ = true;
+    arrived_goal_ = g;
+  } else if (arrived_ && goal_dist > std::max(3.0 * goal_tolerance, goal_tolerance + 0.10)) {
+    arrived_ = false;                 // 밀려났다 (추정이 크게 바뀌었다): 다시 간다
+  }
+
+  double w = 0.0;
+  if (arrived_) {
+    // goal 의 xy 에 도착: 서서 goal yaw 로 회전. 한 번 도착하면 위치가 조금 흔들려도 goal 방향으로만 돈다
     rotating_ = false;
     braking_ = false;
     m = stepToward(m, 0.0, lin, dt);
-    w = rotate_w(goal_yaw_err);
+    // goal checker 허용오차의 절반 안이면 더 맞추지 않고 선다. 1 도 남짓을 마저 맞추려다 지나쳐서
+    // (위치 추정의 방향도 그만큼 흔들린다) 끝에서 좌우로 떨었다
+    w = std::fabs(goal_yaw_err) <= 0.5 * goal_yaw_tolerance ? limit_w(0.0) : rotate_w(goal_yaw_err);
   } else if (rotating_) {
     // 경로 쪽으로 제자리 회전. 달리던 중이면 먼저 곧게 서고, 방향이 맞았으면 회전이 멈출 때까지 0 을 낸다
     m = stepToward(m, 0.0, lin, dt);
