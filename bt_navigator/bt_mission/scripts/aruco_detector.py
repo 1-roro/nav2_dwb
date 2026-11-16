@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-카메라 영상에서 dock 의 ArUco marker (dock 하나에 하나) 를 찾아, 로봇(base) 좌표계에서 본 dock 의 자세
+카메라 영상에서 dock 의 ArUco marker (dock 하나에 하나 또는 여럿) 를 찾아, 로봇(base) 좌표계에서 본 dock 의 자세
 (바닥 위 x, y, yaw) 와 그 불확실도(공분산)를 dock/aruco (bt_mission_msgs/ArucoDetection) 로 발행한다.
 도킹 BT 노드(DetectArucoDock, ArucoServo, ArucoRefine)가 이것을 받는다 (DOCKING.md).
 
@@ -29,7 +29,13 @@
 6. 깊이 (선택, depth_topic): marker 가 붙은 면의 깊이 점들에 평면을 맞춰 방향(yaw)을 재고, MAP 에 관측 한 줄로
    더한다. marker 가 작게 보이는 거리에서 방향이 좋아진다. 깊이가 유효하지 않은 가까운 거리에서는 저절로 빠진다.
 
+7. marker 가 여럿인 dock (docking.yaml 의 markers: 목록): 보인 marker 의 모서리를 모두 한 번에 맞춰 dock 의 자세
+   하나를 낸다. marker 사이의 거리가 방향을 정해 주므로 marker 하나보다 방향이 몇 배 정확하고, 하나가 가려져도
+   남은 것으로 자세가 나온다 (그때는 marker 하나짜리와 같은 정밀도).
+
 dictionary 와 docks 는 config/docking.yaml (config_file) 에서 읽는다. 도킹 BT 노드와 같은 파일이다.
+카메라는 RealSense D455 의 컬러를 1280 x 720 으로 받는 것을 기준으로 marker 의 크기와 배치를 정했다 (DOCKING.md 8장).
+계산은 camera_info 의 내부값을 쓰므로 다른 카메라, 다른 해상도에서도 그대로 돈다.
 OpenCV 4.5 (Ubuntu 22.04 의 python3-opencv) 와 4.7 이상(ArucoDetector) 을 모두 쓴다.
 """
 
@@ -272,14 +278,23 @@ def refine_map(p0, corners, points_D, camera, prior, sigma_px, iterations=30, ya
         return np.concatenate(rows)
 
     def jacobian(p, r):
+        # 수치 미분. 여섯 방향으로 조금씩 옮긴 자세의 점들을 한 번에 투영한다 (투영 호출이 계산의 대부분이다)
+        eps = 1e-7
+        moved = []
+        for i in range(6):
+            q = p.copy()
+            q[i] += eps
+            moved.append(points_D @ dock_rotation(q).T + np.array([q[0], q[1], q[3]]))
+        image = camera.project(np.vstack(moved))
+        if image is None:
+            return None
+        image = image.reshape(6, -1, 2)
         J = np.zeros((len(r), 6))
         for i in range(6):
-            dp = np.zeros(6)
-            dp[i] = 1e-7
-            ri = residual(p + dp)
-            if ri is None:
-                return None
-            J[:, i] = (ri - r) / 1e-7
+            J[:n, i] = ((image[i] - corners).reshape(-1) / sigma_px - r[:n]) / eps
+        J[n:n + 3, 3:] = np.diag(1.0 / prior.sigma)
+        if yaw_obs is not None:
+            J[n + 3, 2] = 1.0 / yaw_obs[1]
         return J
 
     p = np.array(p0, np.float64)
@@ -382,7 +397,7 @@ def depth_plane_yaw(depth, corners, image_width, camera, min_range=0.2, max_rang
     """marker 가 붙은 면의 방향을 깊이 영상에서: marker 둘레(흰 여백까지, grow 배)의 깊이 점들에 평면을 맞춘다.
     모서리 넷의 원근보다 훨씬 많은 점으로 방향을 재므로, marker 가 작게 보이는 거리(0.3 ~ 1 m)에서 방향이 좋아진다.
     depth: 컬러에 맞춘 깊이 [m] (크기는 달라도 화각은 같아야 한다). min_range 보다 가까운 점은 버린다
-    (스테레오 깊이 카메라는 가까우면 못 잰다. D435 는 848 x 480 에서 약 0.2 m).
+    (스테레오 깊이 카메라는 가까우면 못 잰다. D455 는 약 0.4 ~ 0.5 m 부터).
     -> (base 에서 본 dock x 축의 yaw, sigma) 또는 None (점이 모자라면)"""
     scale = depth.shape[1] / float(image_width)
     hull = cv2.convexHull(np.asarray(corners, np.float32).reshape(-1, 1, 2)).reshape(-1, 2)   # marker 가 여럿이면 모두 감싼다
@@ -481,7 +496,7 @@ def main():
             # 깊이 (컬러에 맞춘 것, realsense 의 aligned_depth_to_color). 비우면 쓰지 않는다
             depth_topic = self.declare_parameter('depth_topic', '').value
             self.depth_scale = self.declare_parameter('depth_scale', 0.001).value      # 16UC1 -> m
-            self.depth_min_range = self.declare_parameter('depth_min_range', 0.2).value
+            self.depth_min_range = self.declare_parameter('depth_min_range', 0.4).value     # D455: 약 0.4 ~ 0.5 m 부터
             self.depth_yaw_sigma = math.radians(self.declare_parameter('depth_yaw_sigma_deg', 0.3).value)
             self.depth = None
 
@@ -567,6 +582,7 @@ def main():
                     seen.setdefault(dock.name, []).append((marker, corners, side))
             for name, markers in seen.items():
                 dock = self.docks[name]
+                markers.sort(key=lambda item: dock.marker_ids.index(item[0].marker_id))     # config 에 적힌 순서로
                 observations = [(marker, corners) for marker, corners, _ in markers]
                 every_corner = np.vstack([corners for _, corners in observations])
                 yaw_obs = None

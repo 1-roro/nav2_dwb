@@ -22,7 +22,7 @@ docks:
     offset: 0.0         # marker 면이 도킹 면보다 뒤로 물러난 거리 (면에 바로 붙였으면 0)
     lateral: 0.0        # marker 중심이 도킹 자리의 가운데에서 옆으로 (+ = 로봇이 볼 때 오른쪽)
     gap: 0.15           # 붙었을 때 로봇 앞면 ↔ 도킹 면. 가르친 자세(aruco_teach.py)가 있으면 그것이 우선
-  # marker 둘 (DOCKING.md 8-2): 같은 높이에 가로로 나란히. 방향(yaw)이 두 marker 사이의 거리로 정해져서 훨씬 정확하다.
+  # marker 둘 (DOCKING.md 8-3): 같은 높이에 가로로 나란히. 방향(yaw)이 두 marker 사이의 거리로 정해져서 훨씬 정확하다.
   # 60 mm 둘을 중심 간격 160 mm 로: 붙은 자리(카메라 ↔ 면 0.16 m)에서 D455 의 가로 시야 0.32 m 안에 좌우 50 mm 씩 남는다.
   # 한 장(A4 가로)에 찍어서 간격이 인쇄로 정해지게 한다 (tools/make_aruco_dock.py). size, height, offset 은 marker 마다
   # 따로 적을 수도 있다. dock_a 에 marker 를 하나 더 붙이려면 marker_id 줄 대신
