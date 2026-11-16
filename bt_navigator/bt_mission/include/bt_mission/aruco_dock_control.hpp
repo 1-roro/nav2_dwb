@@ -284,6 +284,24 @@ inline std::optional<Measurement> fuseDetections(
   return fuse(chosen, gate, used);
 }
 
+// 측정들의 위치가 얼마나 흩어져 있나: 중앙값에서의 거리의 중앙값 [m]. 로봇이 아직 흔들리면 크다
+inline double positionSpread(const std::vector<Measurement> & ms)
+{
+  if (ms.size() < 2) {
+    return 0.0;
+  }
+  std::vector<double> xs, ys, d;
+  for (const auto & m : ms) {
+    xs.push_back(m.pose.x);
+    ys.push_back(m.pose.y);
+  }
+  const double mx = dock::median(xs), my = dock::median(ys);
+  for (const auto & m : ms) {
+    d.push_back(std::hypot(m.pose.x - mx, m.pose.y - my));
+  }
+  return dock::median(d);
+}
+
 // ---------------------------------------------------------------------------------------------
 // 제어
 
@@ -349,14 +367,17 @@ inline double funnelGate(const DockErrors & e, const MecanumParams & p)
          funnelGate(e.yaw, p.funnel_yaw0 + p.funnel_yaw_slope * d);
 }
 
-// 한 주기의 명령 (로봇 좌표계 vx, vy, wz). robot_yaw_in_dock: dock 좌표계에서 본 로봇 방향
+// 한 주기의 명령 (로봇 좌표계 vx, vy, wz). robot_yaw_in_dock: dock 좌표계에서 본 로봇 방향.
+// advance (0 ~ 1): dock 쪽으로 가는 속도에 곱한다. 0 이면 dock 쪽으로는 가지 않고 옆과 방향만 고친다
+// (marker 를 방금 보지 못했거나, marker 가 화면 끝에 걸려 있을 때)
 inline Cmd mecanumStep(
-  const DockErrors & e, double robot_yaw_in_dock, const Cmd & last, const MecanumParams & p, double dt)
+  const DockErrors & e, double robot_yaw_in_dock, const Cmd & last, const MecanumParams & p, double dt,
+  double advance = 1.0)
 {
   Cmd want;
   if (!withinTolerance(e, p)) {
     // dock 좌표계에서 원하는 속도
-    const double gate = funnelGate(e, p);
+    const double gate = funnelGate(e, p) * std::clamp(advance, 0.0, 1.0);
     double v_along = -p.k_along * e.along;
     if (v_along < 0.0) {                       // dock 쪽으로 들어가는 것은 깔때기 안에 있을 때만
       v_along *= gate;

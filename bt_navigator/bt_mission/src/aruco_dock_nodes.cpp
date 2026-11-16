@@ -44,15 +44,6 @@ geometry_msgs::msg::Twist toTwist(const dock::Cmd & cmd)
 
 double deg(double rad) {return rad * 180.0 / M_PI;}
 
-std::string expandHome(const std::string & path)
-{
-  const char * home = std::getenv("HOME");
-  if (!path.empty() && path[0] == '~' && home) {
-    return std::string(home) + path.substr(1);
-  }
-  return path;
-}
-
 bool fileExists(const std::string & path)
 {
   std::ifstream f(path);
@@ -109,67 +100,39 @@ ad::Hypotheses arucoMeasurements(
 
 // ---------------------------------------------------------------------------------------------
 
-BT::PortsList mecanumPorts()
+void ScanWatch::start(DockRos & ros, const std::string & topic)
 {
-  const ad::MecanumParams d;
-  return {
-    BT::InputPort<double>("k_along", d.k_along, "[1/s]"),
-    BT::InputPort<double>("k_lat", d.k_lat, "[1/s]"),
-    BT::InputPort<double>("k_yaw", d.k_yaw, "[1/s]"),
-    BT::InputPort<double>("max_vx", d.max_vx, "[m/s]"),
-    BT::InputPort<double>("max_vy", d.max_vy, "[m/s]"),
-    BT::InputPort<double>("max_wz", d.max_wz, "[rad/s]"),
-    BT::InputPort<double>("min_vx", d.min_vx, "deadband [m/s]"),
-    BT::InputPort<double>("min_vy", d.min_vy, "deadband [m/s]"),
-    BT::InputPort<double>("min_wz", d.min_wz, "deadband [rad/s]"),
-    BT::InputPort<double>("accel_x", d.accel_x, "[m/s^2]"),
-    BT::InputPort<double>("accel_y", d.accel_y, "[m/s^2]"),
-    BT::InputPort<double>("accel_wz", d.accel_wz, "[rad/s^2]"),
-    BT::InputPort<double>("scale_vx", d.scale_vx, "commanded / achieved speed, measured on the robot"),
-    BT::InputPort<double>("scale_vy", d.scale_vy, ""),
-    BT::InputPort<double>("scale_wz", d.scale_wz, ""),
-    BT::InputPort<double>("tol_along", d.tol_along, "[m]"),
-    BT::InputPort<double>("tol_lat", d.tol_lat, "[m]"),
-    BT::InputPort<double>("tol_yaw", deg(d.tol_yaw), "[deg]"),
-    BT::InputPort<double>("funnel_lat0", d.funnel_lat0, "[m]"),
-    BT::InputPort<double>("funnel_lat_slope", d.funnel_lat_slope, "[m/m]"),
-    BT::InputPort<double>("funnel_yaw0", deg(d.funnel_yaw0), "[deg]"),
-    BT::InputPort<double>("funnel_yaw_slope", deg(d.funnel_yaw_slope), "[deg/m]"),
-  };
+  scan_.reset();
+  sub_.reset();
+  if (topic.empty()) {
+    return;
+  }
+  rclcpp::SubscriptionOptions options;
+  options.callback_group = ros.group;
+  sub_ = ros.node->create_subscription<sensor_msgs::msg::LaserScan>(
+    topic, rclcpp::SensorDataQoS(),
+    [this](sensor_msgs::msg::LaserScan::SharedPtr msg) {
+      scan_ = msg;
+      time_ = std::chrono::steady_clock::now();
+    }, options);
 }
 
-ad::MecanumParams readMecanumParams(const BT::TreeNode & node)
+std::optional<std::vector<dock::Point2>> ScanWatch::points(
+  const tf2_ros::Buffer & tf, const std::string & robot_frame, std::string * why) const
 {
-  ad::MecanumParams p;
-  node.getInput("k_along", p.k_along);
-  node.getInput("k_lat", p.k_lat);
-  node.getInput("k_yaw", p.k_yaw);
-  node.getInput("max_vx", p.max_vx);
-  node.getInput("max_vy", p.max_vy);
-  node.getInput("max_wz", p.max_wz);
-  node.getInput("min_vx", p.min_vx);
-  node.getInput("min_vy", p.min_vy);
-  node.getInput("min_wz", p.min_wz);
-  node.getInput("accel_x", p.accel_x);
-  node.getInput("accel_y", p.accel_y);
-  node.getInput("accel_wz", p.accel_wz);
-  node.getInput("scale_vx", p.scale_vx);
-  node.getInput("scale_vy", p.scale_vy);
-  node.getInput("scale_wz", p.scale_wz);
-  node.getInput("tol_along", p.tol_along);
-  node.getInput("tol_lat", p.tol_lat);
-  double v = deg(p.tol_yaw);
-  node.getInput("tol_yaw", v);
-  p.tol_yaw = v * M_PI / 180.0;
-  node.getInput("funnel_lat0", p.funnel_lat0);
-  node.getInput("funnel_lat_slope", p.funnel_lat_slope);
-  v = deg(p.funnel_yaw0);
-  node.getInput("funnel_yaw0", v);
-  p.funnel_yaw0 = v * M_PI / 180.0;
-  v = deg(p.funnel_yaw_slope);
-  node.getInput("funnel_yaw_slope", v);
-  p.funnel_yaw_slope = v * M_PI / 180.0;
-  return p;
+  if (!sub_) {
+    *why = "no laser to check around the robot (ros.scan_topic is empty)";
+    return std::nullopt;
+  }
+  if (!scan_ || secondsSince(time_) > 1.0) {
+    *why = "no recent laser scan";
+    return std::nullopt;
+  }
+  auto points = scanPoints(tf, *scan_, robot_frame);
+  if (!points) {
+    *why = "no transform for the laser";
+  }
+  return points;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -206,23 +169,18 @@ std::optional<dock::Pose2> DetectArucoDock::taughtTarget(const std::string & fil
 
 void DetectArucoDock::chooseTarget()
 {
-  std::string taught, taught_dir = "~/.ros/aruco_taught";
-  bool use_taught = true;
-  double docked_distance = 0.17;
-  getInput("taught_file", taught);
-  getInput("taught_dir", taught_dir);
-  getInput("use_taught", use_taught);
-  getInput("docked_distance", docked_distance);
-  if (taught.empty() && use_taught) {
-    const std::string candidate = expandHome(taught_dir) + "/" + state_->dock + ".yaml";
+  std::string taught;
+  if (cfg_.flag("detect", "use_taught", true)) {
+    const std::string candidate = DockingConfig::expandHome(
+      cfg_.text("detect", "taught_dir", "~/.ros/aruco_taught")) + "/" + state_->dock + ".yaml";
     if (fileExists(candidate)) {
       taught = candidate;
     }
   }
   std::optional<dock::Pose2> target;
-  if (use_taught && !taught.empty()) {
+  if (!taught.empty()) {
     std::string why;
-    target = taughtTarget(expandHome(taught), &why);
+    target = taughtTarget(taught, &why);
     if (!target) {
       // 예전 형식이거나 다른 dock 의 파일: 도킹을 멈추지 않고 도면 값으로 (다시 가르치라고 알린다)
       RCLCPP_WARN(
@@ -235,69 +193,53 @@ void DetectArucoDock::chooseTarget()
     state_->target = *target;
     state_->target_source = "taught";
   } else {
-    state_->target = {docked_distance, 0.0, M_PI};          // 접점 면 앞 docked_distance 에서 dock 을 본다
+    if (!cfg_.dock(state_->dock)) {
+      RCLCPP_WARN(
+        ros_.node->get_logger(), "[aruco] dock '%s' is not in the docking config: using the default gap",
+        state_->dock.c_str());
+    }
+    // 도면 값: 로봇 앞면이 도킹 면에서 gap 만큼 떨어져 설비를 본다 (중심은 gap + robot.front)
+    state_->target = {cfg_.dockedDistance(state_->dock), 0.0, M_PI};
     state_->target_source = "geometry";
   }
   RCLCPP_INFO(
-    ros_.node->get_logger(), "[aruco] target (%s%s%s): robot %.1f mm in front of the contact face, %+.1f mm, %.2f deg",
-    state_->target_source.c_str(), taught.empty() ? "" : " ", taught.c_str(), state_->target.x * 1000.0,
+    ros_.node->get_logger(), "[aruco] target (%s%s%s): robot center %.1f mm from the docking face "
+    "(front edge %.1f mm), %+.1f mm, %.2f deg", state_->target_source.c_str(), taught.empty() ? "" : " ",
+    taught.c_str(), state_->target.x * 1000.0, (state_->target.x - cfg_.number("robot", "front", 0.16)) * 1000.0,
     state_->target.y * 1000.0, deg(state_->target.yaw));
 }
 
-namespace
-{
-
-std::vector<double> parseAngles(const std::string & text)
-{
-  std::vector<double> out;
-  std::string item;
-  for (const char c : text + ";") {
-    if (c == ';' || c == ',') {
-      if (item.find_first_not_of(" \t") != std::string::npos) {
-        out.push_back(std::stod(item) * M_PI / 180.0);
-      }
-      item.clear();
-    } else {
-      item += c;
-    }
-  }
-  return out;
-}
-
-}  // namespace
-
 BT::NodeStatus DetectArucoDock::onStart()
 {
+  cfg_ = loadDockingConfig(ros_, true);
   ArucoDockStatePtr previous;
   last_dock_.reset();
   if (getInput("state", previous) && previous && previous->filter.initialized()) {
     last_dock_ = previous->filter.mean();             // 다시 시도: 앞선 시도가 잡은 dock 의 자리
   }
   state_ = std::make_shared<ArucoDockState>();
-  std::string topic = "dock/aruco", cmd_topic = "cmd_vel_nav", scan_topic = "scan", angles = "30;-30;60;-60";
   getInput("target", state_->dock);
-  getInput("global_frame", state_->global_frame);
-  getInput("robot_frame", state_->robot_frame);
-  getInput("detection_topic", topic);
-  getInput("cmd_vel_topic", cmd_topic);
-  getInput("scan_topic", scan_topic);
-  getInput("search_angles", angles);
-  getInput("settle_time", settle_time_);
-  getInput("look_time", look_time_);
-  getInput("min_detections", min_detections_);
-  getInput("min_found", min_found_);
-  getInput("search_wz", search_wz_);
-  getInput("turn_radius", turn_radius_);
-  getInput("clearance", clearance_);
-  getInput("timeout", timeout_);
-  try {
-    search_ = parseAngles(angles);
-  } catch (const std::exception &) {
-    RCLCPP_ERROR(ros_.node->get_logger(), "[aruco] bad search_angles '%s'", angles.c_str());
-    return BT::NodeStatus::FAILURE;
+  state_->global_frame = cfg_.text("ros", "odom_frame", "odom");
+  state_->robot_frame = cfg_.text("ros", "base_frame", "base_footprint");
+  bool search = true;
+  getInput("search", search);
+  search_.clear();
+  if (search) {
+    for (const double a : cfg_.numbers("detect", "search_angles_deg", {30.0, -30.0, 60.0, -60.0})) {
+      search_.push_back(a * M_PI / 180.0);
+    }
   }
+  settle_time_ = cfg_.number("detect", "settle_time", 0.5);
+  look_time_ = cfg_.number("detect", "look_time", 3.0);
+  min_detections_ = static_cast<int>(cfg_.number("detect", "min_detections", 8));
+  min_found_ = static_cast<int>(cfg_.number("detect", "min_found", 3));
+  search_wz_ = cfg_.number("detect", "search_wz", 0.5);
+  clearance_ = cfg_.number("detect", "clearance", 0.05);
+  timeout_ = cfg_.number("detect", "timeout", 40.0);
+  turn_radius_ = cfg_.number("robot", "turn_radius", 0.22);
   if (!cmd_pub_) {
-    cmd_pub_ = ros_.node->create_publisher<geometry_msgs::msg::Twist>(cmd_topic, rclcpp::QoS(10));
+    cmd_pub_ = ros_.node->create_publisher<geometry_msgs::msg::Twist>(
+      cfg_.text("ros", "cmd_vel_topic", "cmd_vel_nav"), rclcpp::QoS(10));
   }
   rclcpp::SubscriptionOptions options;
   options.callback_group = ros_.group;
@@ -308,25 +250,16 @@ BT::NodeStatus DetectArucoDock::onStart()
   received_ = no_tf_ = turns_ = 0;
   next_search_ = 0;
   sub_ = ros_.node->create_subscription<bt_mission_msgs::msg::ArucoDetection>(
-    topic, rclcpp::QoS(10),
+    cfg_.text("ros", "detection_topic", "dock/aruco"), rclcpp::QoS(10),
     [this](bt_mission_msgs::msg::ArucoDetection::SharedPtr msg) {inbox_.push_back(*msg);}, options);
-  scan_.reset();
-  scan_sub_.reset();
-  if (!scan_topic.empty() && !search_.empty()) {
-    scan_sub_ = ros_.node->create_subscription<sensor_msgs::msg::LaserScan>(
-      scan_topic, rclcpp::SensorDataQoS(),
-      [this](sensor_msgs::msg::LaserScan::SharedPtr msg) {
-        scan_ = msg;
-        scan_time_ = std::chrono::steady_clock::now();
-      }, options);
-  }
+  scan_.start(ros_, search_.empty() ? std::string() : cfg_.text("ros", "scan_topic", "scan"));
   const auto robot = ros_.robotPose(state_->global_frame, state_->robot_frame);
   start_yaw_ = robot ? robot->yaw : 0.0;
   start_ = last_cmd_time_ = std::chrono::steady_clock::now();
   enter(Phase::Settle);
   RCLCPP_INFO(
-    ros_.node->get_logger(), "[aruco] looking for dock '%s' from here%s", state_->dock.empty() ? "(any)" : state_->dock.c_str(),
-    last_dock_ ? " (retry)" : "");
+    ros_.node->get_logger(), "[aruco] %s: looking for dock '%s' from here%s", name().c_str(),
+    state_->dock.empty() ? "(any)" : state_->dock.c_str(), last_dock_ ? " (retry)" : "");
   return BT::NodeStatus::RUNNING;
 }
 
@@ -380,30 +313,21 @@ bool DetectArucoDock::tryFinish()
     state_->dock.c_str(), fused->pose.x, fused->pose.y, deg(fused->pose.yaw), sigmas(fused->cov).c_str(), used,
     seen_.size(), turns_, secondsSince(start_));
   sub_.reset();
-  scan_sub_.reset();
+  scan_.stop();
   return true;
 }
 
 bool DetectArucoDock::turningIsSafe(std::string * why)
 {
-  if (!scan_sub_) {
-    *why = "no laser to check around the robot (scan_topic empty)";
-    return false;
-  }
   if (last_dock_) {
     const auto robot = ros_.robotPose(state_->global_frame, state_->robot_frame);
     if (robot && std::hypot(robot->x - last_dock_->x, robot->y - last_dock_->y) < turn_radius_ + clearance_ + 0.10) {
-      *why = "too close to the dock to turn in place (the charger is too low for the laser)";
+      *why = "too close to the dock to turn in place";
       return false;
     }
   }
-  if (!scan_ || secondsSince(scan_time_) > 1.0) {
-    *why = "no recent laser scan";
-    return false;
-  }
-  const auto points = scanPoints(*ros_.tf, *scan_, state_->robot_frame);
+  const auto points = scan_.points(*ros_.tf, state_->robot_frame, why);
   if (!points) {
-    *why = "no transform for the laser";
     return false;
   }
   const int inside = dock::pointsInCircle(*points, turn_radius_ + clearance_);
@@ -443,18 +367,16 @@ BT::NodeStatus DetectArucoDock::fail(const std::string & why)
   std::string hint;
   if (received_ == 0 && sub_ && sub_->get_publisher_count() == 0) {
     hint = "aruco_detector is not running (simple_line.launch.py robot:=mecanum dock:=True starts it, or "
-      "ros2 launch bt_mission aruco_detector.launch.py use_sim_time:=True). If it was started, look at its "
-      "terminal for an error (e.g. bt_mission_msgs not rebuilt and re-sourced, OpenCV without aruco)";
+      "ros2 launch bt_mission aruco_detector.launch.py). If it was started, look at its terminal for an error";
   } else if (received_ == 0) {
     hint = "aruco_detector is running but saw no marker: the marker is not in the camera view from here "
-      "(is the staging pose in front of the dock, 0.5 - 1.5 m, facing it?), or the camera is not publishing "
-      "(robot:=mecanum; ros2 topic hz /camera/color/image_raw)";
+      "(is the staging pose in front of the dock and facing it?), or the camera is not publishing";
   } else if (!other_docks_.empty() && seen_.empty()) {
     hint = "saw only other docks:";
     for (const auto & d : other_docks_) {
       hint += " '" + d + "'";
     }
-    hint += ". Check the dock name in the task (dock:<name>) and aruco_docks.yaml";
+    hint += ". Check the dock name in the task (dock:<name>) and docks in docking.yaml";
   } else if (no_tf_ > 0 && seen_.empty()) {
     hint = std::to_string(no_tf_) + " detections dropped: no TF " + state_->global_frame + " <- " +
       state_->robot_frame + " at the image time";
@@ -466,7 +388,7 @@ BT::NodeStatus DetectArucoDock::fail(const std::string & why)
     hint += ". Did not turn to search: " + turn_blocked_;
   }
   sub_.reset();
-  scan_sub_.reset();
+  scan_.stop();
   RCLCPP_WARN(
     ros_.node->get_logger(), "[aruco] dock '%s' not found (%s) after %.1f s, %d turn(s): %s",
     state_->dock.empty() ? "(any)" : state_->dock.c_str(), why.c_str(), secondsSince(start_), turns_, hint.c_str());
@@ -504,7 +426,7 @@ BT::NodeStatus DetectArucoDock::onRunning()
     if (startNextTurn()) {
       return BT::NodeStatus::RUNNING;
     }
-    return fail(next_search_ >= search_.size() || !turn_blocked_.empty() ? "looked everywhere it could" : "not seen");
+    return fail(search_.empty() ? "not seen from here" : "looked everywhere it could");
   }
   // Phase::Turn: 제자리 회전. marker 가 보이면 그 자리에 선다
   seen_.clear();
@@ -545,7 +467,7 @@ void DetectArucoDock::onHalted()
     cmd_pub_->publish(toTwist(dock::Cmd{}));
   }
   sub_.reset();
-  scan_sub_.reset();
+  scan_.stop();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -561,50 +483,58 @@ BT::NodeStatus ArucoServo::onStart()
     RCLCPP_ERROR(ros_.node->get_logger(), "[aruco] %s: no dock estimate (run DetectArucoDock first)", name().c_str());
     return BT::NodeStatus::FAILURE;
   }
-  params_ = readMecanumParams(*this);
-  double standoff = 0.0;
-  std::string topic = "dock/aruco", cmd_topic = "cmd_vel_nav";
-  getInput("standoff", standoff);
-  getInput("lost_timeout", lost_timeout_);
-  getInput("settle", settle_);
-  getInput("timeout", timeout_);
-  getInput("odom_drift", drift_);
-  getInput("odom_slip", slip_);
-  getInput("odom_yaw_per_m", yaw_per_m_);
-  getInput("odom_turn_slip", turn_slip_);
-  getInput("hold_if_closer", hold_if_closer_);
+  const DockingConfig cfg = loadDockingConfig(ros_);
+  stage_ = "insert";
+  getInput("stage", stage_);
+  params_ = cfg.mecanum(stage_);
+  const double standoff = cfg.stageNumber(stage_, "standoff", 0.0);
+  lost_timeout_ = cfg.stageNumber(stage_, "lost_timeout", 2.0);
+  settle_ = cfg.stageNumber(stage_, "settle", 0.3);
+  timeout_ = cfg.stageNumber(stage_, "timeout", 30.0);
+  drift_ = cfg.stageNumber(stage_, "odom_drift", 0.002);
+  slip_ = cfg.stageNumber(stage_, "odom_slip", 0.10);
+  yaw_per_m_ = cfg.stageNumber(stage_, "odom_yaw_per_m", 0.05);
+  turn_slip_ = cfg.stageNumber(stage_, "odom_turn_slip", 0.05);
+  hold_if_closer_ = cfg.stageFlag(stage_, "hold_if_closer", false);
+  check_behind_ = cfg.stageFlag(stage_, "check_behind", false);
+  fresh_ = cfg.number("safety", "fresh_detection", 0.5);
+  min_border_ = cfg.number("safety", "min_border_px", 10.0);
+  min_camera_distance_ = cfg.number("safety", "min_camera_distance", 0.10);
+  rear_ = cfg.number("robot", "rear", 0.16);
+  half_width_ = cfg.number("robot", "half_width", 0.15);
+  clearance_ = cfg.number("undock", "clearance", 0.05);
   last_robot_ = ros_.robotPose(state_->global_frame, state_->robot_frame);
-  getInput("detection_topic", topic);
-  getInput("cmd_vel_topic", cmd_topic);
   goal_ = {state_->target.x + standoff, state_->target.y, state_->target.yaw};
   if (!cmd_pub_) {
-    cmd_pub_ = ros_.node->create_publisher<geometry_msgs::msg::Twist>(cmd_topic, rclcpp::QoS(10));
+    cmd_pub_ = ros_.node->create_publisher<geometry_msgs::msg::Twist>(
+      cfg.text("ros", "cmd_vel_topic", "cmd_vel_nav"), rclcpp::QoS(10));
     estimate_pub_ = ros_.node->create_publisher<geometry_msgs::msg::PoseStamped>("dock/aruco_estimate", 10);
+  }
+  if (hold_if_closer_ && last_robot_) {
+    const ad::DockErrors e = ad::dockErrors(ad::relative(state_->filter.mean(), *last_robot_), goal_);
+    if (e.along < -params_.tol_along) {
+      // 다시 시도하는 중에 이미 이 단계의 목표보다 설비 가까이 있다: 뒤로 가지 않고 다음 단계(들어가기)로
+      RCLCPP_INFO(
+        ros_.node->get_logger(), "[aruco] %s: already %.0f mm closer than its goal, not backing up", name().c_str(),
+        -e.along * 1000.0);
+      return BT::NodeStatus::SUCCESS;
+    }
   }
   inbox_.clear();
   rclcpp::SubscriptionOptions options;
   options.callback_group = ros_.group;
   sub_ = ros_.node->create_subscription<bt_mission_msgs::msg::ArucoDetection>(
-    topic, rclcpp::QoS(10),
+    cfg.text("ros", "detection_topic", "dock/aruco"), rclcpp::QoS(10),
     [this](bt_mission_msgs::msg::ArucoDetection::SharedPtr msg) {inbox_.push_back(*msg);}, options);
+  scan_.start(ros_, check_behind_ ? cfg.text("ros", "scan_topic", "scan") : std::string());
   last_cmd_ = dock::Cmd{};
-  accepted_ = rejected_ = 0;
+  accepted_ = rejected_ = held_cycles_ = 0;
+  last_border_ = 1e9;
   settled_since_.reset();
-  if (hold_if_closer_ && last_robot_) {
-    const ad::DockErrors e = ad::dockErrors(ad::relative(state_->filter.mean(), *last_robot_), goal_);
-    if (e.along < -params_.tol_along) {
-      // 다시 시도하는 중에 이미 이 단계의 목표보다 dock 가까이 있다: 뒤로 가지 않고 다음 단계(들어가기)로
-      RCLCPP_INFO(
-        ros_.node->get_logger(), "[aruco] %s: already %.0f mm closer than its goal, not backing up", name().c_str(),
-        -e.along * 1000.0);
-      sub_.reset();
-      return BT::NodeStatus::SUCCESS;
-    }
-  }
   start_ = last_seen_ = last_cmd_time_ = last_predict_ = std::chrono::steady_clock::now();
   RCLCPP_INFO(
-    ros_.node->get_logger(), "[aruco] %s: to %.0f mm in front of the contact face (%s target%s), up to %.2f/%.2f m/s",
-    name().c_str(), goal_.x * 1000.0, state_->target_source.c_str(),
+    ros_.node->get_logger(), "[aruco] %s (stage %s): to %.0f mm from the docking face (%s target%s), up to %.2f/%.2f m/s",
+    name().c_str(), stage_.c_str(), goal_.x * 1000.0, state_->target_source.c_str(),
     standoff > 0.0 ? " + standoff" : "", params_.max_vx, params_.max_vy);
   return BT::NodeStatus::RUNNING;
 }
@@ -614,13 +544,15 @@ BT::NodeStatus ArucoServo::finish(BT::NodeStatus status, const char * why)
   cmd_pub_->publish(toTwist(dock::Cmd{}));
   last_cmd_ = dock::Cmd{};
   sub_.reset();
+  scan_.stop();
   const auto robot = ros_.robotPose(state_->global_frame, state_->robot_frame);
   const std::string errors = robot ?
     describe(ad::dockErrors(ad::relative(state_->filter.mean(), *robot), goal_)) : std::string("no robot pose");
-  char line[300];
+  char line[360];
   std::snprintf(
-    line, sizeof(line), "[aruco] %s: %s in %.1f s, %s; dock %s (%d detections used, %d rejected)", name().c_str(),
-    why, secondsSince(start_), errors.c_str(), sigmas(state_->filter.cov()).c_str(), accepted_, rejected_);
+    line, sizeof(line), "[aruco] %s: %s in %.1f s, %s; dock %s (%d detections used, %d rejected, "
+    "held %.1f s for the marker)", name().c_str(), why, secondsSince(start_), errors.c_str(),
+    sigmas(state_->filter.cov()).c_str(), accepted_, rejected_, held_cycles_ * kControlPeriod);
   if (status == BT::NodeStatus::SUCCESS) {
     RCLCPP_INFO(ros_.node->get_logger(), "%s", line);
   } else {
@@ -635,6 +567,10 @@ BT::NodeStatus ArucoServo::onRunning()
   for (const auto & d : inbox_) {
     if (d.dock != state_->dock) {
       continue;
+    }
+    if (d.camera_distance > 0.0 && d.camera_distance < min_camera_distance_) {
+      inbox_.clear();
+      return finish(BT::NodeStatus::FAILURE, "camera too close to the marker (safety.min_camera_distance), stopped");
     }
     const auto hs = arucoMeasurements(*ros_.tf, d, state_->global_frame);
     if (hs.empty()) {
@@ -661,6 +597,7 @@ BT::NodeStatus ArucoServo::onRunning()
     }
     ++accepted_;
     last_seen_ = std::chrono::steady_clock::now();
+    last_border_ = d.border_px;
     estimate_pub_->publish(toPoseStamped(state_->filter.mean(), state_->global_frame));
   }
   inbox_.clear();
@@ -683,7 +620,7 @@ BT::NodeStatus ArucoServo::onRunning()
   const dock::Pose2 in_dock = ad::relative(state_->filter.mean(), *robot);
   ad::DockErrors e = ad::dockErrors(in_dock, goal_);
   if (hold_if_closer_) {
-    e.along = std::max(e.along, 0.0);              // dock 에서 멀어지는 쪽으로는 가지 않는다
+    e.along = std::max(e.along, 0.0);              // 설비에서 멀어지는 쪽으로는 가지 않는다
   }
   if (ad::withinTolerance(e, params_)) {
     last_cmd_ = dock::Cmd{};
@@ -695,7 +632,26 @@ BT::NodeStatus ArucoServo::onRunning()
            BT::NodeStatus::RUNNING;
   }
   settled_since_.reset();
-  last_cmd_ = ad::mecanumStep(e, in_dock.yaw, last_cmd_, params_, std::min(dt, 0.2));
+  // 설비 쪽으로 가는 것은 marker 를 방금 보았고 화면 안쪽에 있을 때만. 아니면 옆과 방향만 고친다
+  const bool sees = secondsSince(last_seen_) <= fresh_ && last_border_ >= min_border_;
+  if (!sees && e.along > params_.tol_along) {
+    ++held_cycles_;
+  }
+  dock::Cmd cmd = ad::mecanumStep(e, in_dock.yaw, last_cmd_, params_, std::min(dt, 0.2), sees ? 1.0 : 0.0);
+  if (check_behind_ && cmd.vx < -1e-3) {
+    // 뒤로 간다: 남은 거리만큼 몸이 쓸고 갈 사각형을 레이저로 본다 (collision_monitor 는 꺼져 있다)
+    std::string why;
+    const auto points = scan_.points(*ros_.tf, state_->robot_frame, &why);
+    if (!points) {
+      if (secondsSince(start_) > 2.0) {
+        return finish(BT::NodeStatus::FAILURE, "cannot check behind the robot (no laser), stopped");
+      }
+      cmd = dock::Cmd{};
+    } else if (dock::pointsBehind(*points, rear_, half_width_, std::max(0.05, -e.along), clearance_) > 3) {
+      return finish(BT::NodeStatus::FAILURE, "something is behind the robot, stopped");
+    }
+  }
+  last_cmd_ = cmd;
   cmd_pub_->publish(toTwist(last_cmd_));
   return BT::NodeStatus::RUNNING;
 }
@@ -706,6 +662,7 @@ void ArucoServo::onHalted()
     cmd_pub_->publish(toTwist(dock::Cmd{}));
   }
   sub_.reset();
+  scan_.stop();
   RCLCPP_WARN(ros_.node->get_logger(), "[aruco] %s: interrupted", name().c_str());
 }
 
@@ -738,31 +695,46 @@ BT::NodeStatus ArucoRefine::onStart()
     RCLCPP_ERROR(ros_.node->get_logger(), "[aruco] %s: no dock estimate", name().c_str());
     return BT::NodeStatus::FAILURE;
   }
-  params_ = readMecanumParams(*this);
-  std::string topic = "dock/aruco", cmd_topic = "cmd_vel_nav";
-  getInput("settle_time", settle_time_);
-  getInput("measure_time", measure_time_);
-  getInput("max_iterations", max_iterations_);
-  getInput("move_timeout", move_timeout_);
-  getInput("accept_along", accept_along_);
-  getInput("accept_lat", accept_lat_);
-  double accept_yaw_deg = deg(accept_yaw_);
-  getInput("accept_yaw", accept_yaw_deg);
-  accept_yaw_ = accept_yaw_deg * M_PI / 180.0;
-  getInput("detection_topic", topic);
-  getInput("cmd_vel_topic", cmd_topic);
+  const DockingConfig cfg = loadDockingConfig(ros_);
+  std::string stage = "refine";
+  getInput("stage", stage);
+  params_ = cfg.mecanum(stage);
+  settle_time_ = cfg.stageNumber(stage, "settle_time", 0.5);
+  measure_time_ = cfg.stageNumber(stage, "measure_time", 1.0);
+  max_measure_time_ = cfg.stageNumber(stage, "max_measure_time", 4.0);
+  stable_spread_ = cfg.stageNumber(stage, "stable_spread", 0.0015);
+  max_iterations_ = static_cast<int>(cfg.stageNumber(stage, "max_iterations", 3));
+  move_timeout_ = cfg.stageNumber(stage, "move_timeout", 8.0);
+  accept_along_ = cfg.stageNumber(stage, "accept_along", 0.005);
+  accept_lat_ = cfg.stageNumber(stage, "accept_lat", 0.004);
+  accept_yaw_ = cfg.stageNumber(stage, "accept_yaw_deg", 1.0) * M_PI / 180.0;
   if (!cmd_pub_) {
-    cmd_pub_ = ros_.node->create_publisher<geometry_msgs::msg::Twist>(cmd_topic, rclcpp::QoS(10));
+    cmd_pub_ = ros_.node->create_publisher<geometry_msgs::msg::Twist>(
+      cfg.text("ros", "cmd_vel_topic", "cmd_vel_nav"), rclcpp::QoS(10));
+    result_pub_ = ros_.node->create_publisher<geometry_msgs::msg::Vector3Stamped>("dock/final_error", 10);
   }
   rclcpp::SubscriptionOptions options;
   options.callback_group = ros_.group;
   sub_ = ros_.node->create_subscription<bt_mission_msgs::msg::ArucoDetection>(
-    topic, rclcpp::QoS(10),
+    cfg.text("ros", "detection_topic", "dock/aruco"), rclcpp::QoS(10),
     [this](bt_mission_msgs::msg::ArucoDetection::SharedPtr msg) {inbox_.push_back(*msg);}, options);
   iteration_ = 0;
   start_ = last_cmd_time_ = std::chrono::steady_clock::now();
   enter(Phase::Settle);
   return BT::NodeStatus::RUNNING;
+}
+
+BT::NodeStatus ArucoRefine::done(BT::NodeStatus status, const ad::DockErrors & e)
+{
+  sub_.reset();
+  geometry_msgs::msg::Vector3Stamped msg;          // 서서 마지막으로 잰 오차 (기록, 추이 보기)
+  msg.header.stamp = ros_.node->now();
+  msg.header.frame_id = state_->dock;
+  msg.vector.x = e.along;
+  msg.vector.y = e.lat;
+  msg.vector.z = e.yaw;
+  result_pub_->publish(msg);
+  return status;
 }
 
 BT::NodeStatus ArucoRefine::onRunning()
@@ -777,21 +749,44 @@ BT::NodeStatus ArucoRefine::onRunning()
   }
 
   if (phase_ == Phase::Measure) {
+    const auto now = std::chrono::steady_clock::now();
     for (const auto & d : inbox_) {
       if (d.dock != state_->dock) {
         continue;
       }
       const auto hs = arucoMeasurements(*ros_.tf, d, state_->global_frame);
       if (!hs.empty()) {
-        measured_.push_back(hs);
+        measured_.emplace_back(now, hs);
       }
     }
     inbox_.clear();
-    if (secondsSince(phase_start_) < measure_time_) {
+    const double elapsed = secondsSince(phase_start_);
+    if (elapsed < measure_time_) {
       return BT::NodeStatus::RUNNING;
     }
+    // 최근 measure_time 동안의 측정만 본다. 그것이 흩어져 있으면 (로봇이 아직 흔들린다) 더 기다린다
+    while (!measured_.empty() &&
+      std::chrono::duration<double>(now - measured_.front().first).count() > measure_time_)
+    {
+      measured_.erase(measured_.begin());
+    }
+    std::vector<ad::Hypotheses> window;
+    std::vector<ad::Measurement> first;
+    for (const auto & entry : measured_) {
+      window.push_back(entry.second);
+      first.push_back(entry.second.front());
+    }
+    const double spread = ad::positionSpread(first);
+    if (spread > stable_spread_ && elapsed < max_measure_time_) {
+      return BT::NodeStatus::RUNNING;
+    }
+    if (spread > stable_spread_) {
+      RCLCPP_WARN(
+        ros_.node->get_logger(), "[aruco] %s: measurements still spread %.1f mm after %.1f s (vibration? "
+        "exposure?), using them anyway", name().c_str(), spread * 1000.0, elapsed);
+    }
     int used = 0;
-    const auto fused = ad::fuseDetections(measured_, kGate, &used);
+    const auto fused = ad::fuseDetections(window, kGate, &used);
     const auto robot = ros_.robotPose(state_->global_frame, state_->robot_frame);
     if (!fused || used < 3 || !robot) {
       sub_.reset();
@@ -803,27 +798,25 @@ BT::NodeStatus ArucoRefine::onRunning()
     state_->filter.reset(fused->pose, fused->cov);   // 서서 잰 것으로 dock 의 자리를 다시
     const ad::DockErrors e = errorsNow(*robot);
     RCLCPP_INFO(
-      ros_.node->get_logger(), "[aruco] %s: measured standing (%d frames, %s): %s", name().c_str(), used,
-      sigmas(fused->cov).c_str(), describe(e).c_str());
+      ros_.node->get_logger(), "[aruco] %s: measured standing (%d frames in %.1f s, spread %.1f mm, %s): %s",
+      name().c_str(), used, elapsed, spread * 1000.0, sigmas(fused->cov).c_str(), describe(e).c_str());
     if (ad::withinTolerance(e, params_)) {
-      sub_.reset();
       RCLCPP_INFO(
         ros_.node->get_logger(), "[aruco] %s: done after %d correction(s), %.1f s", name().c_str(), iteration_,
         secondsSince(start_));
-      return BT::NodeStatus::SUCCESS;
+      return done(BT::NodeStatus::SUCCESS, e);
     }
     if (iteration_ >= max_iterations_) {
-      sub_.reset();
       const bool acceptable = std::fabs(e.along) <= accept_along_ && std::fabs(e.lat) <= accept_lat_ &&
         std::fabs(e.yaw) <= accept_yaw_;
       if (acceptable) {
         RCLCPP_WARN(
           ros_.node->get_logger(), "[aruco] %s: still outside the tolerance after %d corrections, accepted",
           name().c_str(), iteration_);
-        return BT::NodeStatus::SUCCESS;
+        return done(BT::NodeStatus::SUCCESS, e);
       }
       RCLCPP_WARN(ros_.node->get_logger(), "[aruco] %s: could not correct it", name().c_str());
-      return BT::NodeStatus::FAILURE;
+      return done(BT::NodeStatus::FAILURE, e);
     }
     ++iteration_;
     enter(Phase::Move);

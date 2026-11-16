@@ -26,6 +26,10 @@
 5. 진단: 추정한 dock 의 기울기(tilt_deg)와 바닥 높이(height_offset). 가까이서 늘 2 ~ 3 도, 1 cm 를 넘으면
    카메라 TF(특히 pitch, 높이), marker 높이가 config 와 다르다는 뜻이다 (경고를 낸다).
 
+6. 깊이 (선택, depth_topic): marker 가 붙은 면의 깊이 점들에 평면을 맞춰 방향(yaw)을 재고, MAP 에 관측 한 줄로
+   더한다. marker 가 작게 보이는 거리에서 방향이 좋아진다. 깊이가 유효하지 않은 가까운 거리에서는 저절로 빠진다.
+
+dictionary 와 docks 는 config/docking.yaml (config_file) 에서 읽는다. 도킹 BT 노드와 같은 파일이다.
 OpenCV 4.5 (Ubuntu 22.04 의 python3-opencv) 와 4.7 이상(ArucoDetector) 을 모두 쓴다.
 """
 
@@ -206,16 +210,20 @@ class Prior:
         self.sigma = np.array([sigma_z, sigma_tilt, sigma_tilt])
 
 
-def refine_map(p0, corners, marker, camera, prior, sigma_px, iterations=30):
-    """바닥 사전분포를 둔 6자유도 Levenberg-Marquardt -> (p, 비용, 재투영 RMS px, 정규화 Jacobian 11x6). 실패하면 None"""
+def refine_map(p0, corners, marker, camera, prior, sigma_px, iterations=30, yaw_obs=None):
+    """바닥 사전분포를 둔 6자유도 Levenberg-Marquardt -> (p, 비용, 재투영 RMS px, 정규화 Jacobian). 실패하면 None.
+    yaw_obs = (yaw, sigma): 깊이 평면에서 잰 dock 의 방향. 있으면 관측 한 줄을 더한다 (Jacobian 12 x 6)"""
     def residual(p):
         image = project_dock6(p, marker, camera)
         if image is None:
             return None
-        return np.concatenate([(image - corners).reshape(-1) / sigma_px, p[3:] / prior.sigma])
+        rows = [(image - corners).reshape(-1) / sigma_px, p[3:] / prior.sigma]
+        if yaw_obs is not None:
+            rows.append([angle(p[2] - yaw_obs[0]) / yaw_obs[1]])
+        return np.concatenate(rows)
 
     def jacobian(p, r):
-        J = np.zeros((11, 6))
+        J = np.zeros((len(r), 6))
         for i in range(6):
             dp = np.zeros(6)
             dp[i] = 1e-7
@@ -256,16 +264,17 @@ def refine_map(p0, corners, marker, camera, prior, sigma_px, iterations=30):
     return p, float(r @ r), rms, J
 
 
-def estimate(corners, marker, camera, pixel_sigma=0.5, prior=None):
+def estimate(corners, marker, camera, pixel_sigma=0.5, prior=None, yaw_obs=None):
     """모서리 4개 -> dict(hypotheses=[(q=(x, y, yaw), 3x3 공분산, 재투영 rms)], ambiguity, tilt, height, distance).
-    실패하면 None"""
+    yaw_obs = (yaw, sigma): 깊이 평면에서 잰 방향 (depth_plane_yaw). 실패하면 None"""
     prior = prior or Prior()
     solutions = ippe(corners, marker, camera)
     if not solutions:
         return None
     refined = []
     for R, t, _ in solutions:
-        out = refine_map(dock6_from_marker(R, t, marker, camera), corners, marker, camera, prior, pixel_sigma)
+        out = refine_map(dock6_from_marker(R, t, marker, camera), corners, marker, camera, prior, pixel_sigma,
+                         yaw_obs=yaw_obs)
         if out is not None:
             refined.append(out)
     if not refined:
@@ -291,7 +300,56 @@ def estimate(corners, marker, camera, pixel_sigma=0.5, prior=None):
     ambiguity = kept[1][1] / max(kept[0][1], 1e-9) if len(kept) > 1 else 0.0
     distance = float(np.linalg.norm(min(solutions, key=lambda s: s[2])[1]))
     return {'hypotheses': hypotheses, 'ambiguity': ambiguity, 'tilt': float(math.hypot(best[4], best[5])),
-            'height': float(best[3]), 'distance': distance}
+            'height': float(best[3]), 'distance': distance, 'depth_used': yaw_obs is not None}
+
+
+def depth_plane_yaw(depth, corners, image_width, camera, min_range=0.2, max_range=3.0, grow=1.3,
+                    min_points=150, floor_sigma=math.radians(0.3)):
+    """marker 가 붙은 면의 방향을 깊이 영상에서: marker 둘레(흰 여백까지, grow 배)의 깊이 점들에 평면을 맞춘다.
+    모서리 넷의 원근보다 훨씬 많은 점으로 방향을 재므로, marker 가 작게 보이는 거리(0.3 ~ 1 m)에서 방향이 좋아진다.
+    depth: 컬러에 맞춘 깊이 [m] (크기는 달라도 화각은 같아야 한다). min_range 보다 가까운 점은 버린다
+    (스테레오 깊이 카메라는 가까우면 못 잰다. D435 는 848 x 480 에서 약 0.2 m).
+    -> (base 에서 본 dock x 축의 yaw, sigma) 또는 None (점이 모자라면)"""
+    scale = depth.shape[1] / float(image_width)
+    center = corners.mean(axis=0)
+    polygon = (center + (corners - center) * grow) * scale
+    mask = np.zeros(depth.shape[:2], np.uint8)
+    cv2.fillConvexPoly(mask, np.round(polygon).astype(np.int32), 1)
+    v, u = np.nonzero(mask)
+    z = depth[v, u].astype(np.float64)
+    ok = np.isfinite(z) & (z > min_range) & (z < max_range)
+    if ok.sum() < min_points:
+        return None
+    u, v, z = u[ok], v[ok], z[ok]
+    fx, fy = camera.K[0, 0] * scale, camera.K[1, 1] * scale
+    cx, cy = camera.K[0, 2] * scale, camera.K[1, 2] * scale
+    xn, yn = (u - cx) / fx, (v - cy) / fy
+    # 깊이 잡음은 시선 방향이므로 1/z 를 (x', y') 의 일차식으로 맞춘다: n . (x', y', 1) = d / z
+    for _ in range(2):
+        A = np.column_stack([xn, yn, np.ones(len(z))])
+        coef, *_ = np.linalg.lstsq(A, 1.0 / z, rcond=None)
+        residual = 1.0 / z - A @ coef
+        keep = np.abs(residual) < max(3.0 * np.median(np.abs(residual)), 1e-4)
+        if keep.all() or keep.sum() < min_points:
+            break
+        xn, yn, z = xn[keep], yn[keep], z[keep]
+    normal = coef / np.linalg.norm(coef)
+    if normal[2] > 0:                                  # 카메라를 보는 쪽으로
+        normal = -normal
+    axis = camera.R_base_cam @ normal                  # dock 의 x 축 (설비에서 로봇 쪽)
+    if abs(axis[2]) > 0.5:
+        return None                                    # 서 있는 면이 아니다
+    # 방향의 불확실도: 깊이 잔차 / (면의 가로 폭 * sqrt(점 수)). 깊이의 고정 편향이 있으므로 floor_sigma 아래로는 믿지 않는다
+    width = (xn.max() - xn.min()) * float(np.mean(z))
+    rms = float(np.sqrt(np.mean((1.0 / z - np.column_stack([xn, yn, np.ones(len(z))]) @ coef) ** 2))) * float(np.mean(z)) ** 2
+    sigma = max(floor_sigma, 3.5 * rms / max(width, 1e-3) / math.sqrt(len(z)))
+    return math.atan2(axis[1], axis[0]), sigma
+
+
+def border_distance(corners, width, height):
+    """marker 모서리에서 영상 끝까지 가장 가까운 거리 [px]"""
+    return float(min(corners[:, 0].min(), corners[:, 1].min(), width - 1 - corners[:, 0].max(),
+                     height - 1 - corners[:, 1].max()))
 
 
 def usable(corners, width, height, min_px):
@@ -323,13 +381,14 @@ def main():
 
         def __init__(self):
             super().__init__('aruco_detector')
-            default_docks = ''
+            default_config = ''
             try:
                 from ament_index_python.packages import get_package_share_directory
-                default_docks = os.path.join(get_package_share_directory('bt_mission'), 'config', 'aruco_docks.yaml')
+                default_config = os.path.join(get_package_share_directory('bt_mission'), 'config', 'docking.yaml')
             except Exception:  # noqa: BLE001  (패키지 밖에서 돌릴 때)
                 pass
-            docks_file = self.declare_parameter('docks_file', default_docks).value
+            # dictionary 와 docks 는 도킹 BT 노드와 같은 파일에서 (config/docking.yaml)
+            docks_file = os.path.expanduser(self.declare_parameter('config_file', default_config).value or default_config)
             image_topic = self.declare_parameter('image_topic', '/camera/color/image_raw').value
             info_topic = self.declare_parameter('camera_info_topic', '/camera/color/camera_info').value
             self.base_frame = self.declare_parameter('base_frame', 'base_footprint').value
@@ -342,6 +401,14 @@ def main():
             self.tilt_warn = math.radians(self.declare_parameter('tilt_warn_deg', 3.0).value)
             self.height_warn = self.declare_parameter('height_warn', 0.015).value
             self.publish_debug = self.declare_parameter('debug_image', True).value
+            # 영상 stamp 에 더하는 시간 [s]. 카메라 드라이버의 stamp 가 실제 찍은 때보다 늦으면 음수 (DOCKING.md 8-1)
+            self.stamp_offset = self.declare_parameter('stamp_offset', 0.0).value
+            # 깊이 (컬러에 맞춘 것, realsense 의 aligned_depth_to_color). 비우면 쓰지 않는다
+            depth_topic = self.declare_parameter('depth_topic', '').value
+            self.depth_scale = self.declare_parameter('depth_scale', 0.001).value      # 16UC1 -> m
+            self.depth_min_range = self.declare_parameter('depth_min_range', 0.2).value
+            self.depth_yaw_sigma = math.radians(self.declare_parameter('depth_yaw_sigma_deg', 0.3).value)
+            self.depth = None
 
             dictionary_name, self.docks = load_docks(docks_file, self.marker_scale)
             self.by_id = {d.marker_id: d for d in self.docks.values()}
@@ -355,14 +422,29 @@ def main():
             self.debug_pub = self.create_publisher(Image, 'dock/aruco_debug', 1) if self.publish_debug else None
             self.create_subscription(CameraInfo, info_topic, self.on_info, qos_profile_sensor_data)
             self.create_subscription(Image, image_topic, self.on_image, qos_profile_sensor_data)
+            if depth_topic:
+                self.create_subscription(Image, depth_topic, lambda m: setattr(self, 'depth', m),
+                                         qos_profile_sensor_data)
             self.msg_types = ArucoDetection, DockHypothesis
             self.get_logger().info(
                 f'ArUco detector (OpenCV {cv2.__version__}): {image_topic}, docks '
                 f'{ {n: d.marker_id for n, d in self.docks.items()} } from {docks_file} (size x {self.marker_scale}), '
-                f'poses in {self.base_frame}')
+                f'poses in {self.base_frame}, yaw from depth: {depth_topic or "off"}')
 
         def on_info(self, msg):
             self.info = msg
+
+        def depth_for(self, stamp):
+            """영상과 같은 때(0.1 s 안)의 깊이 [m]. 없으면 None"""
+            msg = self.depth
+            if msg is None:
+                return None
+            if abs((msg.header.stamp.sec - stamp.sec) + (msg.header.stamp.nanosec - stamp.nanosec) * 1e-9) > 0.1:
+                return None
+            depth = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+            if depth.dtype == np.uint16:
+                depth = depth.astype(np.float32) * self.depth_scale
+            return depth
 
         def camera_for(self, frame):
             """내부값 + TF (base <- camera optical). 로봇에 고정이라 한 번 찾으면 계속 쓴다"""
@@ -395,6 +477,10 @@ def main():
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             height, width = gray.shape
             found = self.detector.detect(gray)
+            depth = self.depth_for(msg.header.stamp) if found else None
+            stamp = msg.header.stamp
+            if self.stamp_offset:
+                stamp = (rclpy.time.Time.from_msg(stamp) + rclpy.duration.Duration(seconds=self.stamp_offset)).to_msg()
             for marker_id, corners in found.items():
                 marker = self.by_id.get(marker_id)
                 if marker is None:
@@ -402,7 +488,11 @@ def main():
                 ok, side = usable(corners, width, height, self.min_marker_px)
                 if not ok:
                     continue
-                result = estimate(corners, marker, camera, self.pixel_sigma, self.prior)
+                yaw_obs = None
+                if depth is not None:
+                    yaw_obs = depth_plane_yaw(depth, corners, width, camera, self.depth_min_range,
+                                              floor_sigma=self.depth_yaw_sigma)
+                result = estimate(corners, marker, camera, self.pixel_sigma, self.prior, yaw_obs)
                 if result is None:
                     continue
                 if result['distance'] < 0.8 and (result['tilt'] > self.tilt_warn
@@ -412,12 +502,14 @@ def main():
                         f"{result['height'] * 1000:+.0f} mm off the floor: check the camera TF (pitch, height), "
                         'the marker height and size in the config', throttle_duration_sec=5.0)
                 out = ArucoDetection()
-                out.header.stamp = msg.header.stamp
+                out.header.stamp = stamp
                 out.header.frame_id = self.base_frame
                 out.dock = marker.name
                 out.marker_id = marker_id
                 out.marker_px = side
                 out.camera_distance = result['distance']
+                out.border_px = border_distance(corners, width, height)
+                out.depth_used = result['depth_used']
                 out.ambiguity = result['ambiguity']
                 out.tilt_deg = math.degrees(result['tilt'])
                 out.height_offset = result['height']
@@ -448,7 +540,7 @@ def main():
             rx, ry = -(c * q[0] + s * q[1]), -(-s * q[0] + c * q[1])
             lines = [f'{marker.name} id {marker.marker_id}: {result["distance"]:.2f} m, rms {rms:.2f}px, '
                      f'tilt {math.degrees(result["tilt"]):.1f}deg z {result["height"] * 1000:+.0f}mm, '
-                     f'{len(result["hypotheses"])} hyp',
+                     f'{len(result["hypotheses"])} hyp' + (' +depth' if result['depth_used'] else ''),
                      f'robot in dock: x {rx * 1000:.0f} y {ry * 1000:+.0f} mm, yaw {math.degrees(angle(-q[2])):+.1f} deg',
                      f'sigma x {math.sqrt(cov[0, 0]) * 1000:.1f} y {math.sqrt(cov[1, 1]) * 1000:.1f} mm '
                      f'yaw {math.degrees(math.sqrt(cov[2, 2])):.2f} deg']

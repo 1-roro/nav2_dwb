@@ -139,6 +139,31 @@ TEST(ArucoDockControl, FunnelHoldsTheApproachUntilAligned)
   EXPECT_LT(cmd.vx, 0.0);
 }
 
+TEST(ArucoDockControl, WithoutAFreshDetectionItOnlyCorrectsSidewaysAndHeading)
+{
+  MecanumParams p;
+  p.accel_x = p.accel_y = p.accel_wz = 100.0;
+  // 깔때기 안이고 0.2 m 남았다: 보통은 앞으로. advance 0 (marker 를 못 봤다) 이면 앞으로 가지 않는다
+  EXPECT_GT(ad::mecanumStep({0.2, 0.002, 0.0}, M_PI, {}, p, 0.05).vx, 0.1);
+  const Cmd blind = ad::mecanumStep({0.2, 0.010, 0.02}, M_PI, {}, p, 0.05, 0.0);
+  EXPECT_NEAR(blind.vx, 0.0, 1e-9);
+  EXPECT_GT(std::fabs(blind.vy), 0.0);               // 옆과 방향은 고친다 (marker 를 화면 가운데로)
+  EXPECT_GT(std::fabs(blind.wz), 0.0);
+  // 물러나는 것(지나쳤을 때)은 막지 않는다
+  EXPECT_LT(ad::mecanumStep({-0.01, 0.0, 0.0}, M_PI, {}, p, 0.05, 0.0).vx, 0.0);
+}
+
+TEST(ArucoDockControl, SpreadTellsAStillRobotFromAShakingOne)
+{
+  std::vector<ad::Measurement> still, shaking;
+  for (int i = 0; i < 12; ++i) {
+    still.push_back({{4.55 + 0.0002 * (i % 3), 1.0 - 0.0002 * (i % 2), M_PI}, ad::diag3(1e-6, 1e-6, 1e-5)});
+    shaking.push_back({{4.55 + 0.004 * ((i % 4) - 1.5), 1.0, M_PI}, ad::diag3(1e-6, 1e-6, 1e-5)});
+  }
+  EXPECT_LT(ad::positionSpread(still), 0.0005);
+  EXPECT_GT(ad::positionSpread(shaking), 0.0015);
+}
+
 TEST(ArucoDockControl, PerAxisLimitsKeepTheDirectionAndMinimumSpeeds)
 {
   MecanumParams p;

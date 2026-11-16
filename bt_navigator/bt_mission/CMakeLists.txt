@@ -83,7 +83,7 @@ install(
   RUNTIME DESTINATION bin
 )
 install(TARGETS task_server task_server_lifecycle DESTINATION lib/${PROJECT_NAME})
-install(PROGRAMS scripts/task_client.py scripts/aruco_detector.py scripts/aruco_teach.py
+install(PROGRAMS scripts/task_client.py scripts/aruco_detector.py scripts/aruco_teach.py scripts/dock_calibrate.py
   tools/make_aruco_dock.py DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY behavior_trees launch config DESTINATION share/${PROJECT_NAME})
@@ -100,6 +100,11 @@ if(BUILD_TESTING)
   target_include_directories(test_dock_control PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
   ament_add_gtest(test_aruco_dock_control test/test_aruco_dock_control.cpp)
   target_include_directories(test_aruco_dock_control PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  ament_add_gtest(test_docking_config test/test_docking_config.cpp)
+  target_include_directories(test_docking_config PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_link_libraries(test_docking_config yaml-cpp)
+  target_compile_definitions(test_docking_config PRIVATE
+    DOCKING_YAML="${CMAKE_CURRENT_SOURCE_DIR}/config/docking.yaml")
   # aruco_detector.py 의 계산 (합성 영상). launch_testing 의 pytest 플러그인은 이 pytest 와 맞지 않아 끈다
   find_package(ament_cmake_pytest REQUIRED)
   ament_add_pytest_test(test_aruco_detector test/test_aruco_detector.py TIMEOUT 60

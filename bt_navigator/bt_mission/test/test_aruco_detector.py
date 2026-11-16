@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DOCKS = os.path.join(HERE, '..', 'config', 'aruco_docks.yaml')
+DOCKS = os.path.join(HERE, '..', 'config', 'docking.yaml')
 
 
 def load(name, path):
@@ -31,9 +31,10 @@ K = np.array([[F, 0, (W - 1) / 2], [0, F, (H - 1) / 2], [0, 0, 1.0]])
 # 시뮬레이션의 메카넘 (robots/make_mecanum.py): 카메라가 base 앞 0.15, 가운데, 높이 0.13 m. optical: x 오른쪽, y 아래, z 앞
 R_BASE_CAM = np.array([[0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]])
 T_BASE_CAM = np.array([0.15, 0.0, 0.13])
-PPM = 3000.0                                      # marker 그림의 해상도 [px/m]
+PPM = 6000.0                                      # marker 그림의 해상도 [px/m]
 SS = 6                                            # 크게 그리는 배수
-DOCKED = (0.17, 0.0, math.pi)                     # 붙은 자리: 로봇 중심이 접점 면 0.17 m 앞, dock 을 본다
+# 붙은 자리: 로봇 앞면이 설비(marker 면) 0.15 m 앞 = 중심은 0.31 m 앞. 카메라 <-> marker 0.16 m
+DOCKED = (0.31, 0.0, math.pi)
 
 
 @pytest.fixture(scope='module')
@@ -95,8 +96,8 @@ def lateral_error_at_docked(q, truth):
 def test_marker_frame_and_projection(scene):
     marker, _, _, _, camera = scene
     # 모서리: 왼위가 -y_D (로봇이 dock 을 볼 때 왼쪽), 위
-    assert np.allclose(marker.corners_D[0], [-0.30, -0.06, 0.215])
-    assert np.allclose(marker.corners_D[2], [-0.30, 0.06, 0.095])
+    assert np.allclose(marker.corners_D[0], [0.0, -0.03, 0.16])
+    assert np.allclose(marker.corners_D[2], [0.0, 0.03, 0.10])
     # 붙은 자리에서 marker 는 영상 가운데 근처에, 왼위 모서리가 왼쪽 위에
     p = ad.project_dock(dock_in_base(DOCKED), marker, camera)
     assert p[0, 0] < p[1, 0] and p[0, 1] < p[3, 1]
@@ -151,8 +152,8 @@ def errors(scene, robot, camera, frames=6):
 
 
 def test_floor_prior_stops_the_flip_far_away(scene):
-    # 1.3 m 정면: 6자유도 PnP 는 기울기와 방향이 섞여 몇 도 틀린다 (두 해가 비슷하다). 바닥 사전분포가 그것을 줄인다
-    (map_yaw, map_lat), (free_yaw, free_lat) = errors(scene, (1.3, 0.0, math.pi), None, frames=8)
+    # 0.75 m 정면 (marker 61 px): 6자유도 PnP 는 기울기와 방향이 섞여 2 도 가까이 틀린다. 바닥 사전분포가 그것을 줄인다
+    (map_yaw, map_lat), (free_yaw, free_lat) = errors(scene, (0.75, 0.0, math.pi), None, frames=8)
     assert map_yaw < 0.8 * free_yaw and map_lat < 0.8 * free_lat
 
 
@@ -162,7 +163,7 @@ def test_wrong_camera_extrinsics_do_not_break_it(scene):
     low = ad.Camera(K, np.zeros(5), R_BASE_CAM, T_BASE_CAM - np.array([0.0, 0.0, 0.01]))
     pitched = ad.Camera(K, np.zeros(5), R_BASE_CAM @ rot_x(math.radians(1.0)), T_BASE_CAM)
     for camera in (low, pitched):
-        for robot in (DOCKED, (0.70, 0.05, math.pi)):
+        for robot in (DOCKED, (0.40, 0.02, math.pi)):
             (map_yaw, map_lat), _ = errors(scene, robot, camera, frames=3)
             assert math.degrees(map_yaw) < 0.3 and map_lat < 0.003, (robot, math.degrees(map_yaw), map_lat)
     # 가까이서는 진단이 그 오차를 드러낸다 (dock 이 바닥 아래로 1 cm 가라앉은 것처럼, 1 도 기운 것처럼 보인다)
@@ -173,7 +174,7 @@ def test_wrong_camera_extrinsics_do_not_break_it(scene):
 
 
 def test_covariance_is_honest_and_grows_with_distance(scene):
-    robot = (1.0, 0.25, math.radians(195))                  # 비스듬히, 멀리
+    robot = (0.75, 0.10, math.radians(190))                 # 비스듬히, 멀리 (marker 60 px)
     truth = dock_in_base(robot)
     _, result = solve(scene, robot)
     q, cov, _ = result['hypotheses'][0]
@@ -191,3 +192,50 @@ def test_detects_the_big_marker_up_close_in_gazebo(scene):
     assert list(found) == [0]
     side = np.linalg.norm(found[0][1] - found[0][0])
     assert 215 < side < 230
+
+
+def test_border_distance_says_how_close_the_marker_is_to_leaving_the_image(scene):
+    marker, _, _, _, camera = scene
+    centred = ad.project_dock(dock_in_base(DOCKED), marker, camera)
+    assert 110 < ad.border_distance(centred, W, H) < 135          # 붙은 자리: 위아래로 125 px 남는다
+    # 옆으로 6 cm 벗어나면 화면 끝으로 간다 (0.16 m 앞에서 1 cm = 38 px)
+    shifted = ad.project_dock(dock_in_base((0.31, 0.06, math.pi)), marker, camera)
+    assert ad.border_distance(shifted, W, H) < 85
+    assert ad.border_distance(shifted, W, H) < ad.border_distance(centred, W, H)
+
+
+def depth_image(scene, robot, noise=0.001, seed=0):
+    """marker 가 붙은 면(dock 의 x = 0 평면)의 깊이 영상 [m]. 컬러와 같은 화각, 해상도는 절반 (시뮬레이션과 같다)"""
+    _, _, _, _, camera = scene
+    q = dock_in_base(robot)
+    normal = camera.R_cam_base @ ad.rot_z(q[2])[:, 0]               # 평면의 법선 (카메라 좌표)
+    point = camera.R_cam_base @ np.array([q[0], q[1], 0.0]) + camera.t_cam_base
+    w, h = W // 2, H // 2
+    u, v = np.meshgrid(np.arange(w), np.arange(h))
+    rays = np.stack([(u - K[0, 2] / 2) / (K[0, 0] / 2), (v - K[1, 2] / 2) / (K[1, 1] / 2), np.ones((h, w))], axis=-1)
+    z = (normal @ point) / (rays @ normal)
+    rng = np.random.default_rng(seed)
+    return (z + rng.normal(0, noise, z.shape)).astype(np.float32)
+
+
+def test_depth_plane_gives_the_heading_where_the_marker_is_small(scene):
+    # 0.75 m 앞 (marker 61 px): 모서리 넷으로는 방향이 0.5 도 안팎 틀리고 공분산은 몇 도다.
+    # 면의 깊이 점들에 평면을 맞추면 0.3 도 안으로 재고, MAP 에 넣으면 방향 오차와 공분산이 같이 줄어든다
+    marker, _, _, _, camera = scene
+    robot = (0.75, 0.0, math.pi)
+    truth = dock_in_base(robot)
+    plain, fused = [], []
+    for seed in range(6):
+        corners, result = solve(scene, robot, seed)
+        obs = ad.depth_plane_yaw(depth_image(scene, robot, seed=seed), corners, W, camera)
+        assert obs is not None and abs(ad.angle(obs[0] - truth[2])) < math.radians(0.3)
+        with_depth = ad.estimate(corners, marker, camera, yaw_obs=obs)
+        assert with_depth['depth_used'] and not result['depth_used']
+        plain.append((abs(ad.angle(result['hypotheses'][0][0][2] - truth[2])), result['hypotheses'][0][1][2, 2]))
+        fused.append((abs(ad.angle(with_depth['hypotheses'][0][0][2] - truth[2])), with_depth['hypotheses'][0][1][2, 2]))
+    plain, fused = np.mean(plain, axis=0), np.mean(fused, axis=0)
+    assert fused[0] < 0.5 * plain[0] and math.degrees(fused[0]) < 0.2
+    assert fused[1] < 0.05 * plain[1]
+    # 붙은 자리 (0.16 m) 는 깊이 카메라가 못 재는 거리다: 버리고 영상만으로 한다
+    corners, _ = solve(scene, DOCKED)
+    assert ad.depth_plane_yaw(depth_image(scene, DOCKED), corners, W, camera, min_range=0.2) is None

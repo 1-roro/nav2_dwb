@@ -12,6 +12,7 @@
 #include "behaviortree_cpp_v3/bt_factory.h"
 #include "behaviortree_cpp_v3/decorator_node.h"
 #include "bt_mission/dock_control.hpp"
+#include "bt_mission/docking_config.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "nav2_behavior_tree/bt_conversions.hpp"
@@ -48,6 +49,11 @@ struct DockRos
   rclcpp::executors::SingleThreadedExecutor executor;
 };
 
+// config/docking.yaml 을 읽는다. 경로: 이 ROS 노드의 파라미터 docking_config (비면 bt_mission 의 share/config/docking.yaml).
+// 노드들이 시작할 때마다 부르므로, 파일을 고치면 다음 작업부터 바로 쓰인다 (task_server 를 다시 띄우지 않아도 된다).
+// report: 읽은 경로와 모르는 이름(오타)을 로그에 남긴다
+DockingConfig loadDockingConfig(DockRos & ros, bool report = false);
+
 geometry_msgs::msg::PoseStamped toPoseStamped(const dock::Pose2 & pose, const std::string & frame);
 
 // 레이저 점들을 로봇 좌표계(robot_frame)로. 레이저의 TF 가 없으면 없음
@@ -55,32 +61,18 @@ std::optional<std::vector<dock::Point2>> scanPoints(
   const tf2_ros::Buffer & tf, const sensor_msgs::msg::LaserScan & scan, const std::string & robot_frame);
 dock::Pose2 toPose2(const geometry_msgs::msg::PoseStamped & pose);
 
-// 지금 방향 그대로 distance 만큼 곧게 뒤로 간다 (옆으로 밀리거나 돌면 vy, wz 로 바로잡는다).
+// 단순 undock. 지금 방향 그대로 distance 만큼 곧게 뒤로 간다 (옆으로 밀리거나 돌면 vy, wz 로 바로잡는다).
 // collision_monitor 를 끄고 쓰므로(dock 이 로봇에 붙어 있다) 뒤는 스스로 본다: 남은 거리만큼 몸이 쓸고 갈 사각형
 // (robot_rear, robot_half_width, clearance) 안에 레이저 점이 3 개 넘게 있으면 서서 FAILURE
-// (fail_when_blocked="false" 이면 거기 선 채로 SUCCESS: 재시도 전에 물러나는 것처럼 못 물러나도 되는 경우).
+// 값은 docking.yaml 의 undock, robot, ros.
 // scan_topic 을 비우면 보지 않는다. 뒤를 보는 레이저가 없는 로봇이면 뒤로 가는 거리를 짧게 둔다
 class BackOff : public BT::StatefulActionNode
 {
 public:
   BackOff(const std::string & name, const BT::NodeConfiguration & config);
 
-  static BT::PortsList providedPorts()
-  {
-    return {
-      BT::InputPort<double>("distance", 0.4, "[m]"),
-      BT::InputPort<double>("speed", 0.05, "[m/s]"),
-      BT::InputPort<double>("timeout", 20.0, "[s]"),
-      BT::InputPort<std::string>("scan_topic", "scan", "laser to check behind, empty: no check"),
-      BT::InputPort<double>("robot_rear", 0.17, "robot center to its rear edge [m]"),
-      BT::InputPort<double>("robot_half_width", 0.16, "[m]"),
-      BT::InputPort<double>("clearance", 0.05, "[m]"),
-      BT::InputPort<bool>("fail_when_blocked", true, "false: stop where it is and succeed"),
-      BT::InputPort<std::string>("global_frame", "odom", ""),
-      BT::InputPort<std::string>("robot_frame", "base_footprint", ""),
-      BT::InputPort<std::string>("cmd_vel_topic", "cmd_vel_nav", ""),
-    };
-  }
+  // 값은 config/docking.yaml 의 undock (distance, speed, timeout, clearance), robot, ros 에서 읽는다
+  static BT::PortsList providedPorts() {return {};}
 
   BT::NodeStatus onStart() override;
   BT::NodeStatus onRunning() override;
@@ -100,8 +92,7 @@ private:
   dock::ControlParams params_;
   dock::Cmd last_cmd_;
   std::string global_frame_, robot_frame_;
-  double timeout_{20.0}, rear_{0.20}, half_width_{0.16}, clearance_{0.05};
-  bool fail_when_blocked_{true};
+  double timeout_{20.0}, rear_{0.16}, half_width_{0.15}, clearance_{0.05};
   std::chrono::steady_clock::time_point start_, last_cmd_time_;
 };
 
