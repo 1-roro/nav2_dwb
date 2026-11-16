@@ -27,7 +27,8 @@ public:
   struct Dock
   {
     std::string name;
-    int marker_id{0};
+    int marker_id{0};                 // marker 가 여럿이면 첫 번째
+    std::vector<int> marker_ids;      // 이 dock 의 marker 전부 (markers: 목록, 없으면 marker_id 하나)
     double size{0.06};
     double height{0.13};
     double offset{0.0};
@@ -162,6 +163,16 @@ public:
     Dock d;
     d.name = name;
     d.marker_id = child(n, "marker_id").as<int>(d.marker_id);
+    const YAML::Node markers = child(n, "markers");
+    if (markers.IsSequence()) {
+      for (const auto & m : markers) {
+        d.marker_ids.push_back(child(m, "id").as<int>(0));
+      }
+    }
+    if (d.marker_ids.empty()) {
+      d.marker_ids.push_back(d.marker_id);
+    }
+    d.marker_id = d.marker_ids.front();
     d.size = child(n, "size").as<double>(d.size);
     d.height = child(n, "height").as<double>(d.height);
     d.offset = child(n, "offset").as<double>(d.offset);
@@ -197,7 +208,7 @@ public:
     static const std::set<std::string> stage_only{
       "standoff", "lost_timeout", "timeout", "settle", "hold_if_closer", "check_behind", "settle_time",
       "measure_time", "stable_spread", "max_measure_time", "max_iterations", "accept_along", "accept_lat",
-      "accept_yaw_deg", "move_timeout"};
+      "accept_yaw_deg", "move_timeout", "all_markers"};
     static const std::map<std::string, std::set<std::string>> sections{
       {"robot", {"front", "rear", "half_width", "turn_radius"}},
       {"ros", {"odom_frame", "base_frame", "cmd_vel_topic", "scan_topic", "detection_topic"}},
@@ -207,7 +218,8 @@ public:
       {"safety", {"fresh_detection", "min_border_px", "min_camera_distance"}},
       {"undock", {"distance", "speed", "timeout", "clearance"}},
     };
-    static const std::set<std::string> dock_keys{"marker_id", "size", "height", "offset", "lateral", "gap"};
+    static const std::set<std::string> dock_keys{"marker_id", "markers", "size", "height", "offset", "lateral", "gap"};
+    static const std::set<std::string> marker_keys{"id", "size", "height", "offset", "lateral"};
     std::vector<std::string> out;
     if (!root_.IsMap()) {
       return out;
@@ -220,8 +232,18 @@ public:
       if (section == "docks") {
         for (const auto & dock : kv.second) {
           for (const auto & item : dock.second) {
-            if (!dock_keys.count(item.first.as<std::string>())) {
-              out.push_back("docks." + dock.first.as<std::string>() + "." + item.first.as<std::string>());
+            const std::string key = item.first.as<std::string>();
+            if (!dock_keys.count(key)) {
+              out.push_back("docks." + dock.first.as<std::string>() + "." + key);
+            } else if (key == "markers" && item.second.IsSequence()) {
+              for (const auto & marker : item.second) {
+                for (const auto & value : marker) {
+                  if (!marker_keys.count(value.first.as<std::string>())) {
+                    out.push_back(
+                      "docks." + dock.first.as<std::string>() + ".markers." + value.first.as<std::string>());
+                  }
+                }
+              }
             }
           }
         }

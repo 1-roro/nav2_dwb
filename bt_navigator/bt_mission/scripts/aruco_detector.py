@@ -98,15 +98,15 @@ def rot_z(a):
 
 
 class DockMarker:
-    """dock 좌표계 D 의 marker. 모서리는 로봇이 dock 을 바라볼 때의 OpenCV 순서 (영상 오른쪽 = +y_D, 위 = +z_D)"""
+    """dock 좌표계 D 의 marker 하나. 모서리는 로봇이 dock 을 바라볼 때의 OpenCV 순서 (영상 오른쪽 = +y_D, 위 = +z_D)"""
 
     R_D_M = np.array([[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])   # marker 좌표계 (x 오른쪽, y 위, z 앞)
 
     def __init__(self, name, cfg, scale=1.0):
-        self.name = name
+        self.name = name                      # dock 이름
         self.marker_id = int(cfg['marker_id'])
         self.size = cfg['size'] * scale
-        self.offset = cfg['offset']
+        self.offset = cfg.get('offset', 0.0)
         self.height = cfg['height']
         self.lateral = cfg.get('lateral', 0.0)
         h = self.size / 2.0
@@ -115,10 +115,45 @@ class DockMarker:
         self.t_D_M = np.array([x, y, z])
 
 
+class Dock:
+    """dock 하나 = 같은 dock 좌표계 D 에 놓인 marker 한 개 이상.
+
+    docking.yaml 의 두 가지 꼴:
+      dock_a: {marker_id: 0, size: 0.06, height: 0.13, offset: 0.0, lateral: 0.0, gap: 0.15}       # marker 하나
+      dock_b: {size: 0.06, height: 0.13, gap: 0.15,                                                # marker 여럿
+               markers: [{id: 1, lateral: -0.08}, {id: 2, lateral: 0.08}]}
+    markers 의 항목에 없는 값(size, height, offset, lateral)은 dock 에 적힌 값을 쓴다."""
+
+    def __init__(self, name, cfg, scale=1.0):
+        self.name = name
+        common = {k: cfg[k] for k in ('size', 'height', 'offset', 'lateral') if k in cfg}
+        if 'markers' in cfg:
+            entries = [dict(common, **{('marker_id' if k == 'id' else k): v for k, v in m.items()})
+                       for m in cfg['markers']]
+        else:
+            entries = [dict(common, marker_id=cfg['marker_id'])]
+        self.markers = [DockMarker(name, e, scale) for e in entries]
+        self.by_id = {m.marker_id: m for m in self.markers}
+        if not self.markers or len(self.by_id) != len(self.markers):
+            raise ValueError(f"dock '{name}': needs at least one marker and no marker id twice")
+
+    @property
+    def marker_ids(self):
+        return [m.marker_id for m in self.markers]
+
+
 def load_docks(path, scale=1.0):
+    """-> (dictionary 이름, {dock 이름: Dock}). marker 번호가 두 dock 에 겹치면 ValueError"""
     with open(path) as f:
         cfg = yaml.safe_load(f)
-    return cfg['dictionary'], {name: DockMarker(name, d, scale) for name, d in cfg['docks'].items()}
+    docks = {name: Dock(name, d, scale) for name, d in cfg['docks'].items()}
+    owner = {}
+    for dock in docks.values():
+        for marker_id in dock.marker_ids:
+            if marker_id in owner:
+                raise ValueError(f"marker id {marker_id} is used by both '{owner[marker_id]}' and '{dock.name}'")
+            owner[marker_id] = dock.name
+    return cfg['dictionary'], docks
 
 
 # ---------------------------------------------------------------------------------------------
@@ -189,8 +224,19 @@ def dock_rotation(p):
     return rot_z(p[2]) @ rot_y(p[5]) @ rot_x(p[4])
 
 
+def project_points6(p, points_D, camera):
+    """D 의 점들을 6자유도 자세 p 로 영상에"""
+    return camera.project(points_D @ dock_rotation(p).T + np.array([p[0], p[1], p[3]]))
+
+
 def project_dock6(p, marker, camera):
-    return camera.project(marker.corners_D @ dock_rotation(p).T + np.array([p[0], p[1], p[3]]))
+    return project_points6(p, marker.corners_D, camera)
+
+
+def camera_to_marker_plane(p, offset, camera):
+    """카메라에서 marker 가 붙은 면까지의 수직 거리 [m] (D 에서 면은 x = -offset)"""
+    in_dock = dock_rotation(p).T @ (camera.t_base_cam - np.array([p[0], p[1], p[3]]))
+    return float(in_dock[0] + offset)
 
 
 def dock6_from_marker(R_cam_M, t_cam_M, marker, camera):
@@ -210,11 +256,14 @@ class Prior:
         self.sigma = np.array([sigma_z, sigma_tilt, sigma_tilt])
 
 
-def refine_map(p0, corners, marker, camera, prior, sigma_px, iterations=30, yaw_obs=None):
+def refine_map(p0, corners, points_D, camera, prior, sigma_px, iterations=30, yaw_obs=None):
     """바닥 사전분포를 둔 6자유도 Levenberg-Marquardt -> (p, 비용, 재투영 RMS px, 정규화 Jacobian). 실패하면 None.
-    yaw_obs = (yaw, sigma): 깊이 평면에서 잰 dock 의 방향. 있으면 관측 한 줄을 더한다 (Jacobian 12 x 6)"""
+    corners (N x 2): 영상의 모서리, points_D (N x 3): 그 모서리의 D 좌표 (marker 가 여럿이면 이어 붙인 것).
+    yaw_obs = (yaw, sigma): 깊이 평면에서 잰 dock 의 방향. 있으면 관측 한 줄을 더한다"""
+    n = 2 * len(corners)
+
     def residual(p):
-        image = project_dock6(p, marker, camera)
+        image = project_points6(p, points_D, camera)
         if image is None:
             return None
         rows = [(image - corners).reshape(-1) / sigma_px, p[3:] / prior.sigma]
@@ -250,7 +299,7 @@ def refine_map(p0, corners, marker, camera, prior, sigma_px, iterations=30, yaw_
         r_new = residual(p + step)
         if r_new is not None and r_new @ r_new < r @ r:
             p, r, lam = p + step, r_new, max(lam * 0.3, 1e-9)
-            if np.max(np.abs(step)) < 1e-10:
+            if np.max(np.abs(step)) < 1e-9:
                 break
         else:
             lam *= 10.0
@@ -260,21 +309,40 @@ def refine_map(p0, corners, marker, camera, prior, sigma_px, iterations=30, yaw_
     if J is None:
         return None
     p[2], p[4], p[5] = angle(p[2]), angle(p[4]), angle(p[5])
-    rms = float(math.sqrt(np.mean(r[:8] ** 2) * 2.0) * sigma_px)
+    rms = float(math.sqrt(np.mean(r[:n] ** 2) * 2.0) * sigma_px)
     return p, float(r @ r), rms, J
 
 
-def estimate(corners, marker, camera, pixel_sigma=0.5, prior=None, yaw_obs=None):
-    """모서리 4개 -> dict(hypotheses=[(q=(x, y, yaw), 3x3 공분산, 재투영 rms)], ambiguity, tilt, height, distance).
-    yaw_obs = (yaw, sigma): 깊이 평면에서 잰 방향 (depth_plane_yaw). 실패하면 None"""
+def estimate_dock(observations, camera, pixel_sigma=0.5, prior=None, yaw_obs=None):
+    """한 dock 의 보인 marker 들 [(DockMarker, 모서리 4 x 2)] -> dict(hypotheses=[(q=(x, y, yaw), 3x3 공분산,
+    재투영 rms)], ambiguity, tilt, height, distance, depth_used). 실패하면 None.
+
+    marker 가 여럿이면 모서리를 모두 한 번에 맞춘다 (모서리 4N 개 = 식 8N 개). marker 사이의 거리가 방향(yaw)을
+    정해 주므로 marker 하나보다 방향이 훨씬 정확하고, 뒤집힌 해는 비용이 커서 남지 않는다.
+    yaw_obs = (yaw, sigma): 깊이 평면에서 잰 방향 (depth_plane_yaw)"""
     prior = prior or Prior()
-    solutions = ippe(corners, marker, camera)
-    if not solutions:
+    points = np.vstack([marker.corners_D for marker, _ in observations])
+    image = np.vstack([corners for _, corners in observations])
+    # 시작점: marker 마다 IPPE 의 두 해. 모든 모서리의 재투영 오차가 작은 순
+    starts = []
+    for marker, corners in observations:
+        for R, t, _ in ippe(corners, marker, camera):
+            p0 = dock6_from_marker(R, t, marker, camera)
+            projected = project_points6(p0, points, camera)
+            if projected is not None:
+                starts.append((float(np.sum((projected - image) ** 2)), p0))
+    if not starts:
         return None
+    starts.sort(key=lambda start: start[0])
+    if len(observations) > 1:
+        # 가장 좋은 것과, 그것과 다른 골짜기에서 시작하는 것 하나 (marker 마다의 같은 해는 한 자리로 모인다)
+        best = starts[0][1]
+        other = [st for st in starts[1:]
+                 if np.hypot(*(st[1][:2] - best[:2])) > 0.02 or abs(angle(st[1][2] - best[2])) > math.radians(2.0)]
+        starts = starts[:1] + other[:1]
     refined = []
-    for R, t, _ in solutions:
-        out = refine_map(dock6_from_marker(R, t, marker, camera), corners, marker, camera, prior, pixel_sigma,
-                         yaw_obs=yaw_obs)
+    for _, p0 in starts:
+        out = refine_map(p0, image, points, camera, prior, pixel_sigma, yaw_obs=yaw_obs)
         if out is not None:
             refined.append(out)
     if not refined:
@@ -286,7 +354,7 @@ def estimate(corners, marker, camera, pixel_sigma=0.5, prior=None, yaw_obs=None)
             continue
         # 재투영 오차가 pixel_sigma 보다 크면 그만큼 영상 행을 덜 믿는다
         J = J.copy()
-        J[:8] *= pixel_sigma / max(pixel_sigma, rms)
+        J[:2 * len(image)] *= pixel_sigma / max(pixel_sigma, rms)
         try:
             cov6 = np.linalg.inv(J.T @ J)
         except np.linalg.LinAlgError:
@@ -298,9 +366,15 @@ def estimate(corners, marker, camera, pixel_sigma=0.5, prior=None, yaw_obs=None)
         return None
     best = kept[0][0]
     ambiguity = kept[1][1] / max(kept[0][1], 1e-9) if len(kept) > 1 else 0.0
-    distance = float(np.linalg.norm(min(solutions, key=lambda s: s[2])[1]))
+    offset = float(np.mean([marker.offset for marker, _ in observations]))
     return {'hypotheses': hypotheses, 'ambiguity': ambiguity, 'tilt': float(math.hypot(best[4], best[5])),
-            'height': float(best[3]), 'distance': distance, 'depth_used': yaw_obs is not None}
+            'height': float(best[3]), 'distance': camera_to_marker_plane(best, offset, camera),
+            'depth_used': yaw_obs is not None}
+
+
+def estimate(corners, marker, camera, pixel_sigma=0.5, prior=None, yaw_obs=None):
+    """marker 하나의 모서리 4개로 (estimate_dock 참고)"""
+    return estimate_dock([(marker, corners)], camera, pixel_sigma, prior, yaw_obs)
 
 
 def depth_plane_yaw(depth, corners, image_width, camera, min_range=0.2, max_range=3.0, grow=1.3,
@@ -311,8 +385,9 @@ def depth_plane_yaw(depth, corners, image_width, camera, min_range=0.2, max_rang
     (스테레오 깊이 카메라는 가까우면 못 잰다. D435 는 848 x 480 에서 약 0.2 m).
     -> (base 에서 본 dock x 축의 yaw, sigma) 또는 None (점이 모자라면)"""
     scale = depth.shape[1] / float(image_width)
-    center = corners.mean(axis=0)
-    polygon = (center + (corners - center) * grow) * scale
+    hull = cv2.convexHull(np.asarray(corners, np.float32).reshape(-1, 1, 2)).reshape(-1, 2)   # marker 가 여럿이면 모두 감싼다
+    center = hull.mean(axis=0)
+    polygon = (center + (hull - center) * grow) * scale
     mask = np.zeros(depth.shape[:2], np.uint8)
     cv2.fillConvexPoly(mask, np.round(polygon).astype(np.int32), 1)
     v, u = np.nonzero(mask)
@@ -411,7 +486,7 @@ def main():
             self.depth = None
 
             dictionary_name, self.docks = load_docks(docks_file, self.marker_scale)
-            self.by_id = {d.marker_id: d for d in self.docks.values()}
+            self.by_id = {m.marker_id: (dock, m) for dock in self.docks.values() for m in dock.markers}
             self.detector = MarkerDetector(aruco_dictionary(dictionary_name))
             self.bridge = CvBridge()
             self.info = None
@@ -428,7 +503,7 @@ def main():
             self.msg_types = ArucoDetection, DockHypothesis
             self.get_logger().info(
                 f'ArUco detector (OpenCV {cv2.__version__}): {image_topic}, docks '
-                f'{ {n: d.marker_id for n, d in self.docks.items()} } from {docks_file} (size x {self.marker_scale}), '
+                f'{ {n: d.marker_ids for n, d in self.docks.items()} } from {docks_file} (size x {self.marker_scale}), '
                 f'poses in {self.base_frame}, yaw from depth: {depth_topic or "off"}')
 
         def on_info(self, msg):
@@ -481,34 +556,43 @@ def main():
             stamp = msg.header.stamp
             if self.stamp_offset:
                 stamp = (rclpy.time.Time.from_msg(stamp) + rclpy.duration.Duration(seconds=self.stamp_offset)).to_msg()
+            # dock 마다, 그 dock 의 보인 marker 를 모은다 (영상 끝에 걸렸거나 너무 작은 것은 뺀다)
+            seen = {}
             for marker_id, corners in found.items():
-                marker = self.by_id.get(marker_id)
-                if marker is None:
+                if marker_id not in self.by_id:
                     continue
+                dock, marker = self.by_id[marker_id]
                 ok, side = usable(corners, width, height, self.min_marker_px)
-                if not ok:
-                    continue
+                if ok:
+                    seen.setdefault(dock.name, []).append((marker, corners, side))
+            for name, markers in seen.items():
+                dock = self.docks[name]
+                observations = [(marker, corners) for marker, corners, _ in markers]
+                every_corner = np.vstack([corners for _, corners in observations])
                 yaw_obs = None
                 if depth is not None:
-                    yaw_obs = depth_plane_yaw(depth, corners, width, camera, self.depth_min_range,
-                                              floor_sigma=self.depth_yaw_sigma)
-                result = estimate(corners, marker, camera, self.pixel_sigma, self.prior, yaw_obs)
+                    yaw_obs = depth_plane_yaw(depth, every_corner, width, camera, self.depth_min_range,
+                                              grow=1.3 if len(markers) == 1 else 1.1, floor_sigma=self.depth_yaw_sigma)
+                result = estimate_dock(observations, camera, self.pixel_sigma, self.prior, yaw_obs)
                 if result is None:
                     continue
                 if result['distance'] < 0.8 and (result['tilt'] > self.tilt_warn
                                                  or abs(result['height']) > self.height_warn):
                     self.get_logger().warn(
-                        f"{marker.name}: the dock looks tilted {math.degrees(result['tilt']):.1f} deg and "
+                        f"{name}: the dock looks tilted {math.degrees(result['tilt']):.1f} deg and "
                         f"{result['height'] * 1000:+.0f} mm off the floor: check the camera TF (pitch, height), "
                         'the marker height and size in the config', throttle_duration_sec=5.0)
                 out = ArucoDetection()
                 out.header.stamp = stamp
                 out.header.frame_id = self.base_frame
-                out.dock = marker.name
-                out.marker_id = marker_id
-                out.marker_px = side
+                out.dock = name
+                out.marker_ids = [marker.marker_id for marker, _ in observations]
+                out.markers_total = len(dock.markers)
+                out.marker_id = out.marker_ids[0]
+                out.marker_px = max(side for _, _, side in markers)
                 out.camera_distance = result['distance']
-                out.border_px = border_distance(corners, width, height)
+                # marker 가 여럿이면 하나만 화면 안에 있어도 자세가 나온다: 가장 여유 있는 marker 의 값
+                out.border_px = max(border_distance(corners, width, height) for _, corners in observations)
                 out.depth_used = result['depth_used']
                 out.ambiguity = result['ambiguity']
                 out.tilt_deg = math.degrees(result['tilt'])
@@ -521,31 +605,35 @@ def main():
                     out.hypotheses.append(h)
                 self.pub.publish(out)
                 if self.debug_pub is not None:
-                    self.draw(image, corners, marker, camera, result)
+                    self.draw(image, dock, observations, camera, result, list(seen).index(name))
             if self.debug_pub is not None and self.debug_pub.get_subscription_count() > 0:
                 out = self.bridge.cv2_to_imgmsg(image, encoding='bgr8')
                 out.header = msg.header
                 self.debug_pub.publish(out)
 
-        def draw(self, image, corners, marker, camera, result):
+        def draw(self, image, dock, observations, camera, result, row):
             q, cov, rms = result['hypotheses'][0]
-            cv2.polylines(image, [np.round(corners).astype(np.int32)], True, (0, 255, 0), 2)
-            # 바닥 위 자세(x, y, yaw)로 다시 그린 모서리 (빨강). 초록과 겹치면 config 와 TF 가 맞다
-            projected = project_dock(q, marker, camera)
-            if projected is not None:
-                for p in projected:
-                    cv2.circle(image, (int(round(p[0])), int(round(p[1]))), 3, (0, 0, 255), -1)
+            for marker, corners in observations:
+                cv2.polylines(image, [np.round(corners).astype(np.int32)], True, (0, 255, 0), 2)
+                # 바닥 위 자세(x, y, yaw)로 다시 그린 모서리 (빨강). 초록과 겹치면 config 와 TF 가 맞다
+                projected = project_dock(q, marker, camera)
+                if projected is not None:
+                    for p in projected:
+                        cv2.circle(image, (int(round(p[0])), int(round(p[1]))), 3, (0, 0, 255), -1)
             # 로봇이 dock 좌표계에서 어디 있나 (= q 의 역)
             c, s = math.cos(q[2]), math.sin(q[2])
             rx, ry = -(c * q[0] + s * q[1]), -(-s * q[0] + c * q[1])
-            lines = [f'{marker.name} id {marker.marker_id}: {result["distance"]:.2f} m, rms {rms:.2f}px, '
-                     f'tilt {math.degrees(result["tilt"]):.1f}deg z {result["height"] * 1000:+.0f}mm, '
+            ids = ','.join(str(marker.marker_id) for marker, _ in observations)
+            lines = [f'{dock.name} id {ids} ({len(observations)}/{len(dock.markers)}): {result["distance"]:.2f} m, '
+                     f'rms {rms:.2f}px, tilt {math.degrees(result["tilt"]):.1f}deg z {result["height"] * 1000:+.0f}mm, '
                      f'{len(result["hypotheses"])} hyp' + (' +depth' if result['depth_used'] else ''),
                      f'robot in dock: x {rx * 1000:.0f} y {ry * 1000:+.0f} mm, yaw {math.degrees(angle(-q[2])):+.1f} deg',
                      f'sigma x {math.sqrt(cov[0, 0]) * 1000:.1f} y {math.sqrt(cov[1, 1]) * 1000:.1f} mm '
                      f'yaw {math.degrees(math.sqrt(cov[2, 2])):.2f} deg']
+            scale = max(image.shape[1] / 848.0, 1.0)
             for i, line in enumerate(lines):
-                cv2.putText(image, line, (10, 22 + 22 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2)
+                cv2.putText(image, line, (int(10 * scale), int((22 + 22 * (i + 3 * row)) * scale)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55 * scale, (0, 0, 255), max(int(round(2 * scale)), 1))
 
     rclpy.init()
     node = ArucoDetector()

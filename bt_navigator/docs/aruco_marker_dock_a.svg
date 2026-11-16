@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="120.00mm" height="134.00mm" viewBox="0 0 120.00 134.00">
-<rect x="0" y="0" width="120.00" height="134.00" fill="white"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="120.00mm" height="139.00mm" viewBox="0 0 120.00 139.00">
+<rect x="0" y="0" width="120.00" height="139.00" fill="white"/>
 <rect x="10" y="10" width="100.00" height="100.00" fill="white" stroke="#999" stroke-width="0.15" stroke-dasharray="1.5,1.5"/>
 <rect x="30.000" y="30.000" width="60.000" height="60.000" fill="black"/>
 <rect x="40.000" y="40.000" width="10.000" height="10.000" fill="white"/>
@@ -10,7 +10,8 @@
 <rect x="60.000" y="60.000" width="10.000" height="10.000" fill="white"/>
 <rect x="70.000" y="60.000" width="10.000" height="10.000" fill="white"/>
 <rect x="60.000" y="70.000" width="10.000" height="10.000" fill="white"/>
-<text x="10" y="116.0" font-family="sans-serif" font-size="3">dock_a: DICT_4X4_50 id 0, 60.0 mm (black square), center 130 mm above the floor</text>
+<text x="60.00" y="96.00" font-family="sans-serif" font-size="3" text-anchor="middle" fill="#666">id 0</text>
+<text x="10" y="116.0" font-family="sans-serif" font-size="3">dock_a: DICT_4X4_50 id 0, 60.0 mm (black square), centers 130 mm above the floor</text>
 <text x="10" y="121.0" font-family="sans-serif" font-size="3">print at 100 % (no fit to page). check: this bar is 50 mm</text>
 <rect x="10" y="124.0" width="50" height="1.2" fill="black"/>
 <rect x="10" y="123.0" width="0.3" height="3.2" fill="black"/>

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 config/docking.yaml 의 dock 하나로 인쇄용 marker (SVG, PNG) 와, 원하면 Gazebo 설비 모델을 만든다.
+dock 에 marker 가 여럿이면 (markers: 목록) 한 장에 모두 찍는다: marker 사이의 간격이 인쇄로 정해져서 따로 붙일 때보다 정확하다.
 
   python3 make_aruco_dock.py ../config/docking.yaml dock_a marker_dock_a          # marker_dock_a.svg, .png
   python3 make_aruco_dock.py ../config/docking.yaml dock_a marker_dock_a \\
@@ -69,7 +70,7 @@ MODEL = '''<?xml version="1.0"?>
       </visual>{base}
       <visual name="marker_visual">
         <pose>{plate_cx:.4f} {plate_cy:.4f} {plate_cz:.4f} 0 0 0</pose>
-        <geometry><box><size>0.002 {plate:.4f} {plate:.4f}</size></box></geometry>
+        <geometry><box><size>0.002 {plate_w:.4f} {plate_h:.4f}</size></box></geometry>
         <material>
           <script>
             <uri>model://{model}/materials/scripts</uri>
@@ -110,53 +111,84 @@ def marker_image(dictionary, marker_id, side):
     return cv2.aruco.drawMarker(dictionary, marker_id, side)
 
 
-def quiet_zone(cfg):
-    """흰 여백: 한 변의 1/4, 적어도 20 mm"""
-    return max(cfg['size'] / 4.0, 0.02)
+def dock_markers(cfg):
+    """docking.yaml 의 dock 하나 -> marker 목록 [{marker_id, size, height, offset, lateral}].
+    marker 하나 (marker_id: ...) 와 여럿 (markers: [{id: ...}, ...]) 을 모두 읽는다 (aruco_detector.py 의 Dock 과 같다)"""
+    common = {k: cfg[k] for k in ('size', 'height', 'offset', 'lateral') if k in cfg}
+    if 'markers' in cfg:
+        entries = [dict(common, **{('marker_id' if k == 'id' else k): v for k, v in m.items()}) for m in cfg['markers']]
+    else:
+        entries = [dict(common, marker_id=cfg['marker_id'])]
+    for e in entries:
+        e.setdefault('offset', 0.0)
+        e.setdefault('lateral', 0.0)
+    return entries
 
 
-def plate_image(cfg, dictionary, px_per_m):
-    """흰 판 가운데에 marker. 그림의 오른쪽 = D 의 +y, 위 = +z (로봇이 설비를 바라본 모습)"""
-    side = int(round(cfg['size'] * px_per_m))
-    quiet = int(round(quiet_zone(cfg) * px_per_m))
-    image = np.full((side + 2 * quiet, side + 2 * quiet), 255, np.uint8)
-    image[quiet:quiet + side, quiet:quiet + side] = marker_image(dictionary, cfg['marker_id'], side)
+def plate_bounds(markers):
+    """marker 를 모두 담는 흰 판 (D 의 y, z): (y0, y1, z0, z1). 흰 여백은 한 변의 1/4, 적어도 20 mm"""
+    quiet = max(max(m['size'] for m in markers) / 4.0, 0.02)
+    return (min(m['lateral'] - m['size'] / 2 for m in markers) - quiet,
+            max(m['lateral'] + m['size'] / 2 for m in markers) + quiet,
+            min(m['height'] - m['size'] / 2 for m in markers) - quiet,
+            max(m['height'] + m['size'] / 2 for m in markers) + quiet)
+
+
+def plate_image(markers, dictionary, px_per_m):
+    """흰 판에 marker 들. 그림의 오른쪽 = D 의 +y, 위 = +z (로봇이 설비를 바라본 모습)"""
+    y0, y1, z0, z1 = plate_bounds(markers)
+    image = np.full((int(round((z1 - z0) * px_per_m)), int(round((y1 - y0) * px_per_m))), 255, np.uint8)
+    for m in markers:
+        side = int(round(m['size'] * px_per_m))
+        col = int(round((m['lateral'] - m['size'] / 2 - y0) * px_per_m))
+        row = int(round((z1 - m['height'] - m['size'] / 2) * px_per_m))
+        image[row:row + side, col:col + side] = marker_image(dictionary, m['marker_id'], side)
     return image
 
 
-def marker_svg(cfg, dictionary, name, dictionary_name):
-    """인쇄용 SVG (mm). marker, 여백, 자르는 선, 50 mm 눈금, 설명"""
+def marker_svg(markers, dictionary, name, dictionary_name):
+    """인쇄용 SVG (mm). marker 들(서로의 간격이 그대로 찍힌다), 여백, 자르는 선, 50 mm 눈금, 설명"""
     # 칸마다 한 화소인 그림 (테두리 포함). 4x4 dictionary 면 6 x 6
     bits = int(dictionary_name.split('_')[1].split('X')[0]) + 2
-    cells = marker_image(dictionary, cfg['marker_id'], bits)
-    size = cfg['size'] * 1000.0
-    quiet = quiet_zone(cfg) * 1000.0
-    cell = size / bits
-    plate = size + 2 * quiet
-    page_w, page_h = plate + 20.0, plate + 34.0
-    x0, y0 = 10.0 + quiet, 10.0 + quiet
+    y0, y1, z0, z1 = (v * 1000.0 for v in plate_bounds(markers))
+    plate_w, plate_h = y1 - y0, z1 - z0
+    page_w, page_h = plate_w + 20.0, plate_h + 39.0
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{page_w:.2f}mm" height="{page_h:.2f}mm" '
            f'viewBox="0 0 {page_w:.2f} {page_h:.2f}">',
            f'<rect x="0" y="0" width="{page_w:.2f}" height="{page_h:.2f}" fill="white"/>',
-           f'<rect x="10" y="10" width="{plate:.2f}" height="{plate:.2f}" fill="white" stroke="#999" '
-           'stroke-width="0.15" stroke-dasharray="1.5,1.5"/>',
-           f'<rect x="{x0:.3f}" y="{y0:.3f}" width="{size:.3f}" height="{size:.3f}" fill="black"/>']
-    for r in range(bits):
-        for c in range(bits):
-            if cells[r, c] > 127:
-                out.append(f'<rect x="{x0 + c * cell:.3f}" y="{y0 + r * cell:.3f}" width="{cell:.3f}" '
-                           f'height="{cell:.3f}" fill="white"/>')
-    ty = 10.0 + plate + 6.0
-    out += [f'<text x="10" y="{ty:.1f}" font-family="sans-serif" font-size="3">{name}: {dictionary_name} id '
-            f'{cfg["marker_id"]}, {size:.1f} mm (black square), center {cfg["height"] * 1000:.0f} mm above the floor'
-            '</text>',
-            f'<text x="10" y="{ty + 5:.1f}" font-family="sans-serif" font-size="3">print at 100 % (no fit to page). '
-            'check: this bar is 50 mm</text>',
-            f'<rect x="10" y="{ty + 8:.1f}" width="50" height="1.2" fill="black"/>',
-            f'<rect x="10" y="{ty + 7:.1f}" width="0.3" height="3.2" fill="black"/>',
-            f'<rect x="59.7" y="{ty + 7:.1f}" width="0.3" height="3.2" fill="black"/>',
+           f'<rect x="10" y="10" width="{plate_w:.2f}" height="{plate_h:.2f}" fill="white" stroke="#999" '
+           'stroke-width="0.15" stroke-dasharray="1.5,1.5"/>']
+    for m in markers:
+        size = m['size'] * 1000.0
+        cell = size / bits
+        x0 = 10.0 + (m['lateral'] * 1000.0 - size / 2 - y0)
+        top = 10.0 + (z1 - m['height'] * 1000.0 - size / 2)
+        cells = marker_image(dictionary, m['marker_id'], bits)
+        out.append(f'<rect x="{x0:.3f}" y="{top:.3f}" width="{size:.3f}" height="{size:.3f}" fill="black"/>')
+        for r in range(bits):
+            for c in range(bits):
+                if cells[r, c] > 127:
+                    out.append(f'<rect x="{x0 + c * cell:.3f}" y="{top + r * cell:.3f}" width="{cell:.3f}" '
+                               f'height="{cell:.3f}" fill="white"/>')
+        out.append(f'<text x="{x0 + size / 2:.2f}" y="{top + size + 6:.2f}" font-family="sans-serif" font-size="3" '
+                   f'text-anchor="middle" fill="#666">id {m["marker_id"]}</text>')
+    ty = 10.0 + plate_h + 6.0
+    ids = ', '.join(str(m['marker_id']) for m in markers)
+    sizes = ' / '.join(sorted({f"{m['size'] * 1000:.1f}" for m in markers}))
+    lines = [f'{name}: {dictionary_name} id {ids}, {sizes} mm (black square), centers '
+             f'{markers[0]["height"] * 1000:.0f} mm above the floor']
+    if len(markers) > 1:
+        gaps = ', '.join(f'{(b["lateral"] - a["lateral"]) * 1000:.1f}' for a, b in zip(markers, markers[1:]))
+        lines.append(f'center to center {gaps} mm: keep the markers on this one sheet, level')
+    lines.append('print at 100 % (no fit to page). check: this bar is 50 mm')
+    for i, line in enumerate(lines):
+        out.append(f'<text x="10" y="{ty + 5 * i:.1f}" font-family="sans-serif" font-size="3">{line}</text>')
+    by = ty + 5 * len(lines) - 2
+    out += [f'<rect x="10" y="{by:.1f}" width="50" height="1.2" fill="black"/>',
+            f'<rect x="10" y="{by - 1:.1f}" width="0.3" height="3.2" fill="black"/>',
+            f'<rect x="59.7" y="{by - 1:.1f}" width="0.3" height="3.2" fill="black"/>',
             '</svg>']
-    return '\n'.join(out) + '\n'
+    return '\n'.join(out) + '\n', page_w, page_h
 
 
 def main():
@@ -170,18 +202,22 @@ def main():
 
     with open(args.config) as f:
         config = yaml.safe_load(f)
-    cfg = config['docks'][args.dock]
-    cfg.setdefault('offset', 0.0)
-    cfg.setdefault('lateral', 0.0)
+    markers = dock_markers(config['docks'][args.dock])
     dictionary = cv2.aruco.getPredefinedDictionary(getattr(cv2.aruco, config['dictionary']))
     out = os.path.splitext(args.out)[0]
-    image = plate_image(cfg, dictionary, args.px_per_m)
+    image = plate_image(markers, dictionary, args.px_per_m)
     cv2.imwrite(out + '.png', image)
+    svg, page_w, page_h = marker_svg(markers, dictionary, args.dock, config['dictionary'])
     with open(out + '.svg', 'w') as f:
-        f.write(marker_svg(cfg, dictionary, args.dock, config['dictionary']))
-    print(f"dock '{args.dock}': marker {cfg['marker_id']} ({config['dictionary']}), {cfg['size'] * 1000:.1f} mm + "
-          f"{quiet_zone(cfg) * 1000:.0f} mm quiet zone, center {cfg['height']:.3f} m high -> {out}.svg (print this "
-          f'at 100 %), {out}.png ({image.shape[1]} px, {args.px_per_m * 0.0254:.0f} dpi)')
+        f.write(svg)
+    ids = ', '.join(str(m['marker_id']) for m in markers)
+    paper = 'A4 portrait' if page_w <= 200 and page_h <= 287 else 'A4 landscape' if page_w <= 287 and page_h <= 200 \
+        else 'larger than A4: print on A3 or put the markers closer'
+    sizes = ' / '.join('%.1f' % (m['size'] * 1000) for m in markers)
+    print(f"dock '{args.dock}': marker {ids} ({config['dictionary']}), {sizes} mm, center "
+          f"{markers[0]['height']:.3f} m high -> "
+          f'{out}.svg ({page_w:.0f} x {page_h:.0f} mm, {paper}. print this at 100 %), {out}.png '
+          f'({image.shape[1]} x {image.shape[0]} px, {args.px_per_m * 0.0254:.0f} dpi)')
 
     if args.gazebo_model:
         model = os.path.basename(os.path.normpath(args.gazebo_model))
@@ -189,22 +225,23 @@ def main():
         os.makedirs(os.path.join(args.gazebo_model, 'materials', 'scripts'), exist_ok=True)
         os.makedirs(os.path.join(args.gazebo_model, 'materials', 'textures'), exist_ok=True)
         cv2.imwrite(os.path.join(args.gazebo_model, 'materials', 'textures', texture),
-                    plate_image(cfg, dictionary, 8000.0))
+                    plate_image(markers, dictionary, 8000.0))
         with open(os.path.join(args.gazebo_model, 'materials', 'scripts', 'aruco_dock.material'), 'w') as f:
             f.write(MATERIAL.format(name=args.dock, texture=texture))
-        offset = cfg['offset']
-        body_d, body_w, body_h = 0.35, 0.50, max(0.45, cfg['height'] + cfg['size'])
-        plate = cfg['size'] + 2 * quiet_zone(cfg)
+        offset = markers[0]['offset']
+        y0, y1, z0, z1 = plate_bounds(markers)
+        body_d, body_w, body_h = 0.35, max(0.50, y1 - y0 + 0.1), max(0.45, z1 + 0.05)
         base = BASE.format(cx=-offset / 2, d=offset, w=body_w, grey=GREY.format('DarkGrey')) if offset > 0.02 else ''
         with open(os.path.join(args.gazebo_model, 'model.sdf'), 'w') as f:
             f.write(MODEL.format(
-                model=model, dock=args.dock, marker_id=cfg['marker_id'], size=cfg['size'], height=cfg['height'],
-                marker_x=-offset, grey=GREY.format('Grey'), base=base,
+                model=model, dock=args.dock, marker_id=ids, size=' / '.join(str(m['size']) for m in markers),
+                height=markers[0]['height'], marker_x=-offset, grey=GREY.format('Grey'), base=base,
                 # marker 판(두께 2 mm)의 앞면이 정확히 x = -offset 에 오게, 설비는 그 뒤에
                 body_cx=-offset - 0.002 - body_d / 2, body_cz=body_h / 2, body_d=body_d, body_w=body_w, body_h=body_h,
-                plate_cx=-offset - 0.001, plate_cy=cfg['lateral'], plate_cz=cfg['height'], plate=plate))
+                plate_cx=-offset - 0.001, plate_cy=(y0 + y1) / 2, plate_cz=(z0 + z1) / 2,
+                plate_w=y1 - y0, plate_h=z1 - z0))
         with open(os.path.join(args.gazebo_model, 'model.config'), 'w') as f:
-            f.write(CONFIG.format(model=model, dock=args.dock, marker_id=cfg['marker_id']))
+            f.write(CONFIG.format(model=model, dock=args.dock, marker_id=ids))
         print(f'Gazebo model {model} -> {args.gazebo_model}')
 
 

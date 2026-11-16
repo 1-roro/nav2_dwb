@@ -338,10 +338,11 @@
         <update_rate>15</update_rate>
         <pose>0.15 0 0.13 0 0 0</pose>
         <camera name="color">
-          <horizontal_fov>1.211</horizontal_fov>
+          <!-- RealSense D455 컬러: 가로 화각 약 90 도, 1280 x 720 (fx = 640 px) -->
+          <horizontal_fov>1.5708</horizontal_fov>
           <image>
-            <width>848</width>
-            <height>480</height>
+            <width>1280</width>
+            <height>720</height>
             <format>R8G8B8</format>
           </image>
           <clip>
@@ -369,7 +370,7 @@
         <update_rate>15</update_rate>
         <pose>0.15 0 0.13 0 0 0</pose>
         <camera name="depth">
-          <horizontal_fov>1.211</horizontal_fov>
+          <horizontal_fov>1.5708</horizontal_fov>
           <image>
             <width>424</width>
             <height>240</height>
