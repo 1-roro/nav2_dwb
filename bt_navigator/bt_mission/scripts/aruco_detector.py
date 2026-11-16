@@ -401,7 +401,7 @@ def main():
             self.tilt_warn = math.radians(self.declare_parameter('tilt_warn_deg', 3.0).value)
             self.height_warn = self.declare_parameter('height_warn', 0.015).value
             self.publish_debug = self.declare_parameter('debug_image', True).value
-            # 영상 stamp 에 더하는 시간 [s]. 카메라 드라이버의 stamp 가 실제 찍은 때보다 늦으면 음수 (DOCKING.md 8-1)
+            # 영상 stamp 에 더하는 시간 [s]. 카메라 드라이버의 stamp 가 실제 찍은 때보다 늦으면 음수 (DOCKING.md 14-2)
             self.stamp_offset = self.declare_parameter('stamp_offset', 0.0).value
             # 깊이 (컬러에 맞춘 것, realsense 의 aligned_depth_to_color). 비우면 쓰지 않는다
             depth_topic = self.declare_parameter('depth_topic', '').value

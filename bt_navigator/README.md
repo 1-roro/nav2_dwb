@@ -4,10 +4,10 @@
 
 이런 일은 Nav2 위에 **상위 작업 계층**을 두고 맡긴다. 상위 작업 계층이 작업을 받아서, 단계마다 Nav2 명령을 골라 보낸다. 이 폴더는 상위 작업 계층을 BT(BehaviorTree.CPP)로 만든 예제다.
 
-- **작업 하나** = 들를 점들 + 할 일 (`go`, `inspect`, `scan`, `look_around`, `dock`, `undock`)
+- **작업 하나** = 들를 점들 + 할 일 (`go`, `inspect`, `scan`, `look_around`, `dock`, `undock`, `undock_precise`)
 - 로봇은 **점마다 멈춰서** 위치와 방향을 맞추고, 도착을 알린 뒤 다음 점으로 간다.
 - 작업은 **액션**(`execute_task`)으로 받는다. 결과, 진행 상황(BT 상태 포함), 취소, 선점이 있다.
-- **ArUco 도킹 (mm 단위)**: dock 앞까지 Nav2 로 간 뒤, RealSense 로 dock 의 ArUco marker 하나를 보며 메카넘으로 붙는다. 바닥 사전분포를 둔 자세 추정(MAP), Kalman 필터, dock 좌표계의 깔때기 제어, 서서 재고 고치기, 가르친 자세로 실제 로봇의 고정 오차까지 지운다 ([DOCKING.md](DOCKING.md)).
+- **ArUco 도킹 (mm 단위)**: dock 앞까지 Nav2 로 간 뒤, RealSense 로 dock 의 ArUco marker 하나를 보며 메카넘으로 붙는다. 바닥 사전분포를 둔 자세 추정(MAP), Kalman 필터, dock 좌표계의 깔때기 제어, 서서 재고 고치기, 가르친 자세로 실제 로봇의 고정 오차까지 지운다. marker 의 원리부터 실제 로봇으로 옮기는 순서까지 [DOCKING.md](DOCKING.md) 한 문서에 정리했다.
 - 길에 장애물이 있으면 **감속해서 멈춰 기다렸다가** 치우면 다시 간다 (stop & go). Nav2 goal 은 그대로 두고 속도만 0 으로 한다. controller 가 감속해서 서고, 갑자기 나타나면 collision_monitor 가 비상 감속한다 (6장).
 
 ![stop and go in the warehouse](docs/warehouse_stop_and_go.gif)
@@ -19,7 +19,7 @@ bt_navigator/
 ├── bt_mission/        미션 BT (task.xml), 직접 만든 BT 노드, 작업 액션 서버, 클라이언트
 ├── bt_mission_msgs/   작업 메시지와 액션 (Task.msg, ExecuteTask.action, ArucoDetection.msg)
 ├── docs/              시뮬레이션 기록 (창고 주행 영상, 지도와 costmap, 캡처, 도킹 결과)
-└── DOCKING.md         ArUco 도킹 (marker 하나, 정밀도, 메카넘, sim-to-real)
+└── DOCKING.md         ArUco 도킹: marker 의 원리, 도킹 메커니즘, 구현, 실제 로봇으로 옮기는 순서, 실험
 ```
 
 | 하고 싶은 것 | 실행 | 장 |
@@ -27,7 +27,7 @@ bt_navigator/
 | 점과 작업을 실행 중에 액션으로 맡기기 (결과, 진행 상황, 취소, 선점) | `task_server` (`task.xml`)<br>+ `task_client.py` | 4 |
 | 위와 같되, 서버를 Nav2 의 `BtActionServer` 와 lifecycle 노드로 | `task_server_lifecycle.launch.py`<br>+ `task_client.py` | 5 |
 | 장애물이 있으면 멈췄다가 치우면 가기. 시뮬레이션에서 장애물을 놓고 치워 보기 | `simple_line.launch.py` 에 들어 있다<br>+ `obstacle.py click` | 6 |
-| ArUco marker 를 보고 충전 dock 에 mm 단위로 붙기 (메카넘, RealSense), 실제 로봇으로 옮기기 | `dock:<dock> <staging 점>`, `undock`<br>+ `aruco_detector.launch.py`, `aruco_teach.py` | [DOCKING.md](DOCKING.md) |
+| ArUco marker 를 보고 설비 앞 15 cm 에 mm 단위로 붙고 떨어지기 (메카넘, RealSense), 실제 로봇으로 옮기기 | `dock:<dock> <staging 점>`, `undock`, `undock_precise:<dock>`<br>+ `config/docking.yaml`, `aruco_teach.py`, `dock_calibrate.py` | [DOCKING.md](DOCKING.md) |
 
 - **명령 내리는 법**(입력 형식과 예시)은 [4-5](#4-5-명령-내리기-입력-형식과-예시) 에 모아 두었다.
 - 아래층(planner, controller, 시뮬레이션 launch)은 [`simple_line/`](../simple_line/README.md) 것을 그대로 쓴다.
@@ -137,7 +137,7 @@ BT 는 루트부터 **tick** 을 한다. 실행 노드가 tick 을 주기적으�
 |---|---|---|
 | 제어 | **Sequence** (→) | 자식을 왼쪽부터 차례로. 하나라도 FAILURE 면 바로 FAILURE. 모두 SUCCESS 면 SUCCESS |
 | 제어 | **Parallel** (⇉) | 자식을 매 tick 모두 실행. `success_threshold` 개가 SUCCESS 면 SUCCESS. 나머지 RUNNING 자식은 **halt** (중단) |
-| 제어 | **Switch5** (⇢) | `variable` 값이 `case_1..5` 중 맞는 자식 하나만 실행. 맞는 것이 없으면 마지막 자식 (4-3) |
+| 제어 | **Switch6** (⇢) | `variable` 값이 `case_1..6` 중 맞는 자식 하나만 실행. 맞는 것이 없으면 마지막 자식 (4-3) |
 | 데코레이터 | **ForEachWaypoint** (직접 만듦) | 점 목록의 점마다 자식을 한 번씩 다시 실행 (4-2) |
 | 액션 | **Nav2 BT 노드** | `NavigateToPose`, `Spin`. Nav2 서버에 액션을 보내고, 끝날 때까지 RUNNING |
 | 액션 | **직접 만든 노드** | `DoWork`, `ScanWhileMoving` (3장) |
@@ -382,12 +382,12 @@ task_client.py ──goal: ExecuteTask (Task)────▶ task_server (액션
 ```
 string id                                 # 작업 이름 (로그와 mission/status 에 씀). 비우면 서버가 붙인다
 geometry_msgs/PoseStamped[] waypoints     # 들를 점들. 1개 이상. orientation 은 그 점에 도착했을 때 볼 방향
-string action                             # go | inspect | scan | look_around | dock | undock. 그 외 값이면 이동만
+string action                             # go | inspect | scan | look_around | dock | undock | undock_precise. 그 외 값이면 이동만
 float64 duration                          # inspect 의 작업 시간 [s]
-string target                             # dock: config/aruco_docks.yaml 의 dock 이름 (비우면 처음 보이는 것)
+string target                             # dock, undock_precise: config/docking.yaml 의 dock 이름 (비우면 처음 보이는 것)
 ```
 
-점은 1개 이상이어야 한다. `undock` 만 점이 없어도 된다 (그 자리에서 dock 을 빠져나온다). 점이 없는 다른 작업은 서버가 받지 않는다 (`checkTask`).
+점은 1개 이상이어야 한다. `undock`, `undock_precise` 만 점이 없어도 된다 (그 자리에서 dock 을 빠져나온다). 점이 없는 다른 작업은 서버가 받지 않는다 (`checkTask`).
 
 ROS 2 에서는 새 메시지 형식을 별도 패키지에 정의하는 것이 관례라서, 메시지만 담은 `bt_mission_msgs` 패키지를 따로 두었다.
 
@@ -424,7 +424,7 @@ float32 elapsed               # 작업 시작 후 지난 시간 [s]
 
 작업 하나를 실행하는 트리다. 작업을 기다리고, 결과를 보고하고, 다음 작업을 받는 일은 서버가 맡는다. 그래서 트리에는 "작업 하나를 어떻게 하나" 만 남는다.
 
-**`Switch5`** 가 `{action}` 값으로 가지 하나를 고른다.
+**`Switch6`** 가 `{action}` 값으로 가지 하나를 고른다.
 
 | action | 가지 |
 |---|---|
@@ -433,9 +433,10 @@ float32 elapsed               # 작업 시작 후 지난 시간 [s]
 | `look_around` | 점을 차례로 들른 뒤 → `Spin` 한 바퀴 |
 | `dock` | 점을 차례로 들른 뒤(마지막 점 = dock 앞 staging) → `SubTree Dock` ([DOCKING.md](DOCKING.md)) |
 | `undock` | `SubTree Undock`: 그 자리에서 곧게 물러난다 |
+| `undock_precise` | `SubTree UndockPrecise`: marker 를 보며 dock 축을 따라 물러난다 ([DOCKING.md 11장](DOCKING.md#11-undock-두-가지)) |
 | 그 외 (`go` 등) | 점을 차례로 들르기만 |
 
-`Dock`, `Undock` 트리는 같은 `task.xml` 에 `Task` 트리 다음으로 들어 있고, `SubTree` 로 부른다 (`__shared_blackboard="true"`: 작업의 blackboard 를 같이 쓴다). 처음에는 `dock.xml` 로 따로 두고 `<include path="dock.xml"/>` 했는데, `task_server` (`createTreeFromFile`, 상대 경로를 그 파일의 폴더에서 찾는다)는 됐지만 `task_server_lifecycle` 이 쓰는 Nav2 `BtActionServer` 는 파일을 글자로 읽어 `createTreeFromText` 로 만들어서 상대 경로를 찾지 못했다 (5장 테스트가 잡았다).
+`Dock`, `Undock`, `UndockPrecise` 트리는 같은 `task.xml` 에 `Task` 트리 다음으로 들어 있고, `SubTree` 로 부른다 (`__shared_blackboard="true"`: 작업의 blackboard 를 같이 쓴다). 처음에는 `dock.xml` 로 따로 두고 `<include path="dock.xml"/>` 했는데, `task_server` (`createTreeFromFile`, 상대 경로를 그 파일의 폴더에서 찾는다)는 됐지만 `task_server_lifecycle` 이 쓰는 Nav2 `BtActionServer` 는 파일을 글자로 읽어 `createTreeFromText` 로 만들어서 상대 경로를 찾지 못했다 (5장 테스트가 잡았다).
 
 **점마다 멈추기: `ForEachWaypoint`**
 
@@ -499,7 +500,7 @@ BT::NodeStatus ForEachWaypoint::tick()       // src/mission_nodes.cpp, 발췌
 goal 도착 ─▶ 서버가 blackboard 에 쓴다  (TaskServer::start → writeTask, src/bt_common.cpp)
               {action}="inspect"  {waypoints}=[(1,0)]  {duration}=5  {task_id}="t2"
           ─▶ 루트부터 tick
-              Switch5            {action} 을 읽고 "inspect" 가지 하나만 실행
+              Switch6            {action} 을 읽고 "inspect" 가지 하나만 실행
                └ Sequence
                   ├ ForEachWaypoint  {waypoints} 를 읽고 점 수(1)만큼 자식을 다시 실행
                   │   └ NavigateToPose   {waypoint} 를 읽어 goal 로 보낸다
@@ -509,15 +510,15 @@ goal 도착 ─▶ 서버가 blackboard 에 쓴다  (TaskServer::start → write
 
 | 보낸 명령 | blackboard | 실행되는 노드 (차례대로) |
 |---|---|---|
-| `go 0,-1 0,1.5` | action=`go`, waypoints=2개 | Switch5 → (그 외 가지) ForEachWaypoint → NavigateToPose (0,-1) → 도착 → NavigateToPose (0,1.5) → 도착 |
-| `inspect:5 1,0,0` | action=`inspect`, waypoints=1개, duration=5 | Switch5 → inspect 가지 → ForEachWaypoint → NavigateToPose (1,0) → 도착 → DoWork 5초 |
-| `look_around -1,1.5` | action=`look_around`, waypoints=1개 | Switch5 → look_around 가지 → ForEachWaypoint → NavigateToPose (-1,1.5) → 도착 → Spin |
+| `go 0,-1 0,1.5` | action=`go`, waypoints=2개 | Switch6 → (그 외 가지) ForEachWaypoint → NavigateToPose (0,-1) → 도착 → NavigateToPose (0,1.5) → 도착 |
+| `inspect:5 1,0,0` | action=`inspect`, waypoints=1개, duration=5 | Switch6 → inspect 가지 → ForEachWaypoint → NavigateToPose (1,0) → 도착 → DoWork 5초 |
+| `look_around -1,1.5` | action=`look_around`, waypoints=1개 | Switch6 → look_around 가지 → ForEachWaypoint → NavigateToPose (-1,1.5) → 도착 → Spin |
 
 이렇게 되는 이유는 세 가지다.
 
 1. **포트를 `{이름}` 으로 적으면 blackboard 값을 가리킨다.** `variable="{action}"` 은 "blackboard 의 action 값" 이라는 뜻이다 (2장). 노드는 실행할 때 `getInput()` 으로 그 순간의 값을 읽는다. 그래서 같은 노드라도 들어 있는 값에 따라 다르게 동작한다.
 2. **노드가 그 값으로 무엇을 할지 정한다.**
-   - `Switch5` 는 시작할 때 `{action}` 과 `case_1..5` 을 비교해서 가지 하나만 실행한다.
+   - `Switch6` 는 시작할 때 `{action}` 과 `case_1..6` 을 비교해서 가지 하나만 실행한다.
    - `ForEachWaypoint` 는 `{waypoints}` 의 점 수만큼 자식을 다시 실행하고, 매번 `{waypoint}` 에 다음 점을 써서 `NavigateToPose` 의 goal 을 바꾼다.
    - `DoWork` 는 `{duration}` 만큼 기다린다.
 3. **작업이 끝날 때마다 트리를 초기화한다.** 서버가 `haltTree()` 로 모든 노드를 IDLE 로 돌린다. 다음 goal 은 새 값으로 루트부터 다시 시작한다.
@@ -599,8 +600,8 @@ void TaskServer::finish(Outcome outcome, const std::string & message)
 
 | 부분 | 쓰는 법 | 예 |
 |---|---|---|
-| `action` | `go`, `inspect`, `scan`, `look_around`, `dock`, `undock` 중 하나. 꼭 적는다 | `inspect` |
-| `:option` | `inspect` 는 작업 시간 [초] (생략하면 3초). `dock` 은 `aruco_docks.yaml` 의 dock 이름 (생략하면 처음 보인 것). 다른 action 에서는 쓰이지 않는다 | `inspect:5`  `dock:dock_a` |
+| `action` | `go`, `inspect`, `scan`, `look_around`, `dock`, `undock`, `undock_precise` 중 하나. 꼭 적는다 | `inspect` |
+| `:option` | `inspect` 는 작업 시간 [초] (생략하면 3초). `dock`, `undock_precise` 는 `docking.yaml` 의 dock 이름 (생략하면 처음 보인 것). 다른 action 에서는 쓰이지 않는다 | `inspect:5`  `dock:dock_a` |
 | 점 | `x,y` 또는 `x,y,yaw`. map 좌표 [m], yaw 는 **도(°)** | `1.5,-1`  `1.5,-1,90` |
 | 띄어쓰기 | action 과 점, 점과 점 사이는 공백. **점 안에는 공백 없이** 쉼표만 | `go 0,-1 1,1` |
 | 주석 | `#` 뒤는 무시 | `go 1,1  # 창고 앞` |
@@ -613,6 +614,7 @@ void TaskServer::finish(Outcome outcome, const std::string & message)
 | `look_around` | 점을 차례로 들른 뒤, 마지막 점에서 제자리 한 바퀴 |
 | `dock` | 점을 차례로 들른 뒤, 마지막 점(dock 앞에서 marker 가 보이는 자리)에서 ArUco marker 를 보고 mm 단위로 붙는다 ([DOCKING.md](DOCKING.md)) |
 | `undock` | 점 없이. 그 자리에서 dock 을 곧게 빠져나온다 |
+| `undock_precise` | 점 없이. marker 를 보며 dock 축을 따라 물러나, 설비 기준으로 정해진 자리에 선다 |
 
 어느 action 이든 로봇은 **점마다 멈춰서 위치와 방향을 맞추고**, 도착을 알린 뒤 다음 점으로 간다. 출발할 때는 다음 점 쪽으로 먼저 다 돌고 나서 직선으로 간다.
 
@@ -650,7 +652,8 @@ void TaskServer::finish(Outcome outcome, const std::string & message)
 | `scan 1.5,1.5 -1,1.5,180` | 두 점을 들르는 동안 0.5m 마다 스캔 |
 | `look_around -1,1.5` | (-1,1.5) 에 가서 제자리 한 바퀴 |
 | `dock:dock_a 3.85,-2.5 3.85,1.0,0` | (창고, `robot:=mecanum dock:=True`) (3.85,-2.5) 를 지나 dock 앞 (3.85,1.0) 에서 0° 를 보고 선 뒤, 'dock_a' 의 marker 를 보고 붙는다 |
-| `undock` | dock 에서 0.4 m 물러난다 |
+| `undock` | dock 에서 곧게 0.4 m 물러난다 |
+| `undock_precise:dock_a` | 'dock_a' 의 marker 를 보며 옆과 방향을 맞춰 0.4 m 물러난다 |
 
 #### 4-5-3. 대화형 (`task_client.py`)
 
@@ -693,8 +696,8 @@ task> go 0,-1 0,1.5 -2,1.5 -2,-1,0
 |---|---|---|
 | `go 1, -1` | `'1,' is not x,y or x,y,yaw_deg` | 점 안에는 공백 없이: `go 1,-1` |
 | `go 1,-1 2` | `'2' is not x,y or x,y,yaw_deg` | 점마다 x 와 y 를 다 적는다 |
-| `move 1,1` | `unknown action 'move' (one of go, inspect, scan, look_around, dock, undock)` | action 이름 확인 |
-| `go` | `need at least one point` | 점을 하나 이상 (`undock` 만 점 없이) |
+| `move 1,1` | `unknown action 'move' (one of go, inspect, scan, look_around, dock, undock, undock_precise)` | action 이름 확인 |
+| `go` | `need at least one point` | 점을 하나 이상 (`undock`, `undock_precise` 만 점 없이) |
 | `inspect:abc 1,1` | `duration 'abc' is not a number (e.g. inspect:5)` | 작업 시간은 숫자 [초] |
 | `go 1,-1,1.57` | (오류 없음) | yaw 는 라디안이 아니라 **도**다. 1.57° 로 해석된다. 90° 면 `go 1,-1,90` |
 
@@ -716,7 +719,7 @@ ros2 run bt_mission task_client.py < tasks.txt
 ros2 action send_goal --feedback /execute_task bt_mission_msgs/action/ExecuteTask "
 task:
   id: b1                                   # 작업 이름 (아무 문자열)
-  action: inspect                          # go | inspect | scan | look_around | dock | undock
+  action: inspect                          # go | inspect | scan | look_around | dock | undock | undock_precise
   duration: 2.0                            # inspect 의 작업 시간 [s]
   waypoints:                               # 들를 점, 차례대로
   - header: {frame_id: map}
@@ -1261,7 +1264,7 @@ navigation BT 는 Nav2 기본 트리에서 제자리 회전, 후진 recovery 를
 
 ### 7-4. ArUco 도킹 (Gazebo)
 
-[DOCKING.md 7장](DOCKING.md#7-시뮬레이션-실험): staging 서너 곳에서 16회 도킹을 Gazebo 참값으로 쟀다. 실제 로봇과의 차이(메카넘 미끄러짐, 카메라 TF 오차, marker 크기 오차)를 넣고 도면 값 목표와 가르친 자세 목표를 비교했다. 단위 테스트: `test_aruco_dock_control` (10개), `test_aruco_detector` (합성 영상과 Gazebo 영상, 7개), `test_dock_control` (7개).
+[DOCKING.md 13장](DOCKING.md#13-시뮬레이션-실험): staging 세 곳에서 도킹 12회와 undock 7회를 Gazebo 참값으로 쟀다. 실제 로봇과의 차이(메카넘 미끄러짐, 카메라 TF 오차, marker 크기 오차)를 넣고 도면 값 목표와 가르친 자세 목표, 단순 undock 과 정밀 undock 을 비교했다. 단위 테스트: `test_aruco_dock_control` (12개), `test_aruco_detector` (합성 영상과 Gazebo 영상, 9개), `test_dock_control` (8개), `test_docking_config` (3개).
 
 ---
 
@@ -1305,10 +1308,11 @@ bt_navigator/
 │                                            feedback: bt_status/running/도착한 점 수/elapsed
 └── bt_mission/
     ├── behavior_trees/
-    │   └── task.xml                         작업 하나를 실행, 점마다 NavigateToPose (4장). Dock, Undock 트리
+    │   └── task.xml                         작업 하나를 실행, 점마다 NavigateToPose (4장). Dock, Undock, UndockPrecise 트리
     ├── include/bt_mission/
     │   ├── mission_nodes.hpp                직접 만든 BT 노드 선언 (포트 포함)
-    │   ├── dock_nodes.hpp                   도킹 공통 BT 노드 (BackOff, MuteCollisionMonitor, CheckCharging)
+    │   ├── dock_nodes.hpp                   도킹 공통 BT 노드 (BackOff, MuteCollisionMonitor, CheckCharging), docking.yaml 읽기
+    │   ├── docking_config.hpp               config/docking.yaml 읽기 (ROS 없음)
     │   ├── dock_control.hpp                 도킹 공통 계산 (ROS 없음): 홀로노믹 P 제어, 뒤 확인
     │   ├── aruco_dock_nodes.hpp             ArUco 도킹 BT 노드 (DetectArucoDock, ArucoServo, ArucoRefine)
     │   ├── aruco_dock_control.hpp           ArUco 도킹 계산: Kalman 필터, 후보 고르기, 깔때기, 메카넘 축 제한
@@ -1329,18 +1333,20 @@ bt_navigator/
     ├── scripts/task_client.py               액션 클라이언트: 한 줄 형식 해석, 대기열, 선점(!), cancel, 도착 출력
     ├── scripts/aruco_detector.py            ArUco marker 검출, IPPE + 바닥 사전분포 MAP, 공분산 → dock/aruco
     ├── scripts/aruco_teach.py               가르친 자세 남기기
+    ├── scripts/dock_calibrate.py            미끄러짐 배율, 데드밴드 재기 (실제 로봇)
     ├── launch/aruco_detector.launch.py
-    ├── config/aruco_docks.yaml              dock 마다 marker 번호, 크기, 자리 (dock 좌표계)
+    ├── config/docking.yaml                  도킹 설정 전부: dock(marker), 로봇 치수, 토픽, 속도, 단계, 안전 (로봇마다 이것만 고친다)
     ├── test/
     │   ├── test_task_server.cpp             gtest: ExecuteTask 액션 → task.xml (선점, 취소, feedback, BT 상태)
     │   ├── test_task_server_lifecycle.cpp   gtest: 같은 경우를 task_server_lifecycle 로
     │   ├── test_dock_control.cpp            gtest: 도킹 공통 계산 (제어, 뒤 확인)
+    │   ├── test_docking_config.cpp          gtest: docking.yaml 읽기 (단계 값, 기본값, 오타)
     │   ├── test_aruco_dock_control.cpp      gtest: ArUco 도킹 계산 (필터, 후보 고르기, 깔때기, 미끄러짐 속 폐루프)
     │   ├── test_aruco_detector.py           pytest: 합성 영상으로 자세(MAP vs PnP), TF 오차, 공분산 + Gazebo 영상
     │   ├── data/gazebo_docked.jpg           Gazebo 에서 붙은 자리의 영상 (검출 회귀 시험)
     │   └── test_fakes.hpp / .cpp            테스트가 같이 쓰는 가짜 Nav2 노드 (플러그인 test_fake_nav2)
     ├── tools/draw_bt.py                     XML → 그림 (graphviz)
-    ├── tools/make_aruco_dock.py             ArUco marker 인쇄용 그림과 Gazebo dock 모델
+    ├── tools/make_aruco_dock.py             ArUco marker 인쇄용 SVG/PNG 와 Gazebo 설비 모형
     └── doc/
         ├── task.png                         BT 그림 (draw_bt.py 로 생성)
         ├── dock.png                         도킹 BT 그림
@@ -1351,8 +1357,9 @@ docs/                                        시뮬레이션 기록 (README.md �
 ├── warehouse_map_costmap.png                지도 만들기 결과와 global costmap, 경로
 ├── warehouse_rviz_path.png                  RViz: 경로와 웨이포인트
 ├── warehouse_gazebo_obstacle_stop.png       Gazebo: 통로의 장애물 앞에서 대기
-└── aruco_*.png / .jpg                       ArUco 도킹: 실험 결과, 인쇄용 marker, 카메라 화면 (DOCKING.md)
-DOCKING.md                                   ArUco 도킹
+├── aruco_*.png / .jpg / .svg                ArUco 도킹: marker 의 원리, 실험 결과, 인쇄용 marker, 카메라 화면 (DOCKING.md)
+└── docking_overview.png                     도킹 구조: 좌표계, 단계, 지나가는 길 (DOCKING.md)
+DOCKING.md                                   ArUco 도킹: 원리, 메커니즘, 구현, 옮기는 순서, 실험
 ```
 
 장애물 처리(controller 의 장애물 감속은 `simple_line/simple_line_controller`, collision_monitor 설정과 장애물 도구 `obstacle.py` 는 `simple_line/simple_line_bringup`)는 6-2 에 있다.

@@ -11,7 +11,7 @@
 #include "bt_mission/dock_control.hpp"
 
 // ArUco 도킹의 계산 (ROS 와 무관. aruco_dock_nodes.cpp 가 쓰고 test_aruco_dock_control.cpp 가 시험한다).
-// DOCKING.md 의 3 ~ 5장.
+// DOCKING.md 의 3장(흐름), 9 ~ 10장(자세 추정, 필터, 제어).
 //
 // 1. dock 의 자리 추정: 움직이지 않는 물체 하나의 자세(odom 의 x, y, yaw)를 Kalman 필터로 잡는다.
 //    측정마다 공분산(aruco_detector.py 가 모서리 잡음에서 계산)이 달라서, 가까이서 본 정확한 측정이 저절로

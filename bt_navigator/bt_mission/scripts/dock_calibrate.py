@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-로봇이 명령한 만큼 실제로 움직이는지 marker 로 잰다 -> docking.yaml 의 motion 에 넣을 값 (DOCKING.md 8-2).
+로봇이 명령한 만큼 실제로 움직이는지 marker 로 잰다 -> docking.yaml 의 motion 에 넣을 값 (DOCKING.md 14-3).
 
   # 로봇을 marker 정면 0.5 ~ 0.7 m 에 세운다 (옆, 뒤로 0.3 m 는 비어 있어야 한다). aruco_detector 가 떠 있어야 한다
   ros2 run bt_mission dock_calibrate.py                       # 배율만 (약 1 분)
