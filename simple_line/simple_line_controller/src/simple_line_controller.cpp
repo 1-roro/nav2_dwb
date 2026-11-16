@@ -317,10 +317,18 @@ geometry_msgs::msg::TwistStamped SimpleLineController::computeVelocityCommands(
     // goal 이 lookahead 보다 가깝다: carrot 을 goal 너머 경로 방향으로 lookahead 까지 늘인다.
     // goal 점 자체를 쫓으면 가까워질수록 작은 옆 오차가 큰 각이 되어(2 cm 옆, 5 cm 앞 = 22 도) 도착 직전에
     // 한쪽으로 꺾는다. goal 방향이 그 반대쪽이면 "반대로 움찔했다가 도는" 것으로 보인다
-    const double extend = lookahead_dist_ - std::hypot(carrot.x, carrot.y);
+    // 다만 그 방향으로 가서 goal 에 닿을 때만: goal 이 그 방향으로 앞에 있고, 로봇이 마지막 직선에서 옆으로
+    // 도착 범위 안에 있을 때. 옆으로 더 빗나가 있으면 그대로 가도 goal 을 스쳐 지나가므로 (미끄러짐, 짧은 경로)
+    // goal 점을 직접 쫓아 되돌아온다
     const double dir = normalizeAngle(end_dir_ - robot.yaw);
-    carrot.x += extend * std::cos(dir);
-    carrot.y += extend * std::sin(dir);
+    const double ux = std::cos(dir), uy = std::sin(dir);
+    const double ahead = carrot.x * ux + carrot.y * uy;
+    const double beside = std::fabs(carrot.x * uy - carrot.y * ux);
+    if (ahead > 0.0 && beside <= 0.8 * goal_tolerance) {
+      const double extend = lookahead_dist_ - std::hypot(carrot.x, carrot.y);
+      carrot.x += extend * ux;
+      carrot.y += extend * uy;
+    }
   }
   const double carrot_angle = std::atan2(carrot.y, carrot.x);
 
