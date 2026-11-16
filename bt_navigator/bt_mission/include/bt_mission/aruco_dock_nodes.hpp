@@ -79,7 +79,7 @@ private:
 //      돌기 전에, 그리고 도는 동안 레이저로 몸이 쓸고 갈 원(turn_radius + clearance) 안을 본다. 무엇이 있으면 돌지 않는다.
 //      앞선 시도에서 dock 의 자리를 알고 dock 이 그 원 가까이 있으면 돌지 않는다.
 //      도는 중에 marker 가 보이면 그 자리에 서서 본다
-//   3. 그래도 못 찾으면 FAILURE. 로그에 이유 (DOCKING.md 5-5)
+//   3. 그래도 못 찾으면 FAILURE. 로그에 이유 (DOCKING.md 15장)
 // 설 곳: 가르친 자세(<taught_dir>/<dock>.yaml, aruco_teach.py)가 있으면 그것, 없으면 도면 값 (dock 의 gap + 로봇 front).
 // 값은 docking.yaml 의 detect, robot, ros, docks
 class DetectArucoDock : public BT::StatefulActionNode

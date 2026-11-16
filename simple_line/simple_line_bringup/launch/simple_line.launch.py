@@ -26,7 +26,7 @@ camera_depth:=True  컬러에 맞춘 깊이 카메라도 켠다 (기본은 끈�
 dock:=True        월드마다 정해 둔 곳에 ArUco marker 가 붙은 설비 모형 (models/aruco_dock, tools/make_aruco_dock.py)을
                   놓는다. 지도에는 없는 물체다. robot:=mecanum 이면 marker 검출 노드(bt_mission 의
                   aruco_detector.launch.py)도 같이 띄운다 (aruco_detector:=False 이면 띄우지 않는다: 따로 띄울 때)
-실제 로봇과의 차이를 일부러 넣기 (robot:=mecanum, bt_navigator/DOCKING.md 7장)
+실제 로봇과의 차이를 일부러 넣기 (robot:=mecanum, bt_navigator/DOCKING.md 13장)
   mecanum_slip:=True       몸체가 명령보다 덜 가고(옆 90 %), 옆으로 가면 조금 돈다. odom 은 바퀴 odom 처럼 명령을
                            적분해서 그만큼 틀린다 (scripts/mecanum_slip_sim.py)
   camera_tf_error:=dyaw_deg,dx,dy

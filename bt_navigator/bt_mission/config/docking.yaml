@@ -4,7 +4,7 @@
 #   바꾸는 법 이 파일을 로봇 PC 로 복사해 고치고, 그 경로를 넘긴다 (BT 노드는 작업을 시작할 때마다 다시 읽는다):
 #               ros2 run bt_mission task_server --ros-args -p docking_config:=/path/docking.yaml
 #               ros2 launch bt_mission aruco_detector.launch.py config_file:=/path/docking.yaml
-#   표시      [설비] dock(설비)마다  [로봇] 로봇 치수, 연결  [측정] 실제 로봇에서 재서 넣는 값 (DOCKING.md 8-2)
+#   표시      [설비] dock(설비)마다  [로봇] 로봇 치수, 연결  [측정] 실제 로봇에서 재서 넣는 값 (DOCKING.md 14-3)
 #             표시가 없는 것은 알고리즘 값이다. 보통 그대로 둔다
 #   없는 항목은 코드의 기본값(이 파일의 값과 같다)을 쓰고, 모르는 이름이 있으면 경고한다 (오타 확인).
 #   단위: m, s, m/s, rad/s. 이름이 _deg 로 끝나면 도(°).

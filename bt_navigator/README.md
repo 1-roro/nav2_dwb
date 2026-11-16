@@ -7,7 +7,7 @@
 - **작업 하나** = 들를 점들 + 할 일 (`go`, `inspect`, `scan`, `look_around`, `dock`, `undock`, `undock_precise`)
 - 로봇은 **점마다 멈춰서** 위치와 방향을 맞추고, 도착을 알린 뒤 다음 점으로 간다.
 - 작업은 **액션**(`execute_task`)으로 받는다. 결과, 진행 상황(BT 상태 포함), 취소, 선점이 있다.
-- **ArUco 도킹 (mm 단위)**: dock 앞까지 Nav2 로 간 뒤, RealSense 로 dock 의 ArUco marker 하나를 보며 메카넘으로 붙는다. 바닥 사전분포를 둔 자세 추정(MAP), Kalman 필터, dock 좌표계의 깔때기 제어, 서서 재고 고치기, 가르친 자세로 실제 로봇의 고정 오차까지 지운다 ([DOCKING.md](DOCKING.md)).
+- **ArUco 도킹 (mm 단위)**: dock 앞까지 Nav2 로 간 뒤, RealSense 로 dock 의 ArUco marker 하나를 보며 메카넘으로 붙는다. 바닥 사전분포를 둔 자세 추정(MAP), Kalman 필터, dock 좌표계의 깔때기 제어, 서서 재고 고치기, 가르친 자세로 실제 로봇의 고정 오차까지 지운다. marker 의 원리부터 실제 로봇으로 옮기는 순서까지 [DOCKING.md](DOCKING.md) 한 문서에 정리했다.
 - 길에 장애물이 있으면 **감속해서 멈춰 기다렸다가** 치우면 다시 간다 (stop & go). Nav2 goal 은 그대로 두고 속도만 0 으로 한다. controller 가 감속해서 서고, 갑자기 나타나면 collision_monitor 가 비상 감속한다 (6장).
 
 ![stop and go in the warehouse](docs/warehouse_stop_and_go.gif)
@@ -19,7 +19,7 @@ bt_navigator/
 ├── bt_mission/        미션 BT (task.xml), 직접 만든 BT 노드, 작업 액션 서버, 클라이언트
 ├── bt_mission_msgs/   작업 메시지와 액션 (Task.msg, ExecuteTask.action, ArucoDetection.msg)
 ├── docs/              시뮬레이션 기록 (창고 주행 영상, 지도와 costmap, 캡처, 도킹 결과)
-└── DOCKING.md         ArUco 도킹 (marker 하나, 정밀도, 메카넘, sim-to-real)
+└── DOCKING.md         ArUco 도킹: marker 의 원리, 도킹 메커니즘, 구현, 실제 로봇으로 옮기는 순서, 실험
 ```
 
 | 하고 싶은 것 | 실행 | 장 |
@@ -433,7 +433,7 @@ float32 elapsed               # 작업 시작 후 지난 시간 [s]
 | `look_around` | 점을 차례로 들른 뒤 → `Spin` 한 바퀴 |
 | `dock` | 점을 차례로 들른 뒤(마지막 점 = dock 앞 staging) → `SubTree Dock` ([DOCKING.md](DOCKING.md)) |
 | `undock` | `SubTree Undock`: 그 자리에서 곧게 물러난다 |
-| `undock_precise` | `SubTree UndockPrecise`: marker 를 보며 dock 축을 따라 물러난다 ([DOCKING.md 7장](DOCKING.md#7-undock-두-가지)) |
+| `undock_precise` | `SubTree UndockPrecise`: marker 를 보며 dock 축을 따라 물러난다 ([DOCKING.md 11장](DOCKING.md#11-undock-두-가지)) |
 | 그 외 (`go` 등) | 점을 차례로 들르기만 |
 
 `Dock`, `Undock`, `UndockPrecise` 트리는 같은 `task.xml` 에 `Task` 트리 다음으로 들어 있고, `SubTree` 로 부른다 (`__shared_blackboard="true"`: 작업의 blackboard 를 같이 쓴다). 처음에는 `dock.xml` 로 따로 두고 `<include path="dock.xml"/>` 했는데, `task_server` (`createTreeFromFile`, 상대 경로를 그 파일의 폴더에서 찾는다)는 됐지만 `task_server_lifecycle` 이 쓰는 Nav2 `BtActionServer` 는 파일을 글자로 읽어 `createTreeFromText` 로 만들어서 상대 경로를 찾지 못했다 (5장 테스트가 잡았다).
@@ -1264,7 +1264,7 @@ navigation BT 는 Nav2 기본 트리에서 제자리 회전, 후진 recovery 를
 
 ### 7-4. ArUco 도킹 (Gazebo)
 
-[DOCKING.md 7장](DOCKING.md#7-시뮬레이션-실험): staging 서너 곳에서 16회 도킹을 Gazebo 참값으로 쟀다. 실제 로봇과의 차이(메카넘 미끄러짐, 카메라 TF 오차, marker 크기 오차)를 넣고 도면 값 목표와 가르친 자세 목표를 비교했다. 단위 테스트: `test_aruco_dock_control` (10개), `test_aruco_detector` (합성 영상과 Gazebo 영상, 7개), `test_dock_control` (7개).
+[DOCKING.md 13장](DOCKING.md#13-시뮬레이션-실험): staging 세 곳에서 도킹 12회와 undock 7회를 Gazebo 참값으로 쟀다. 실제 로봇과의 차이(메카넘 미끄러짐, 카메라 TF 오차, marker 크기 오차)를 넣고 도면 값 목표와 가르친 자세 목표, 단순 undock 과 정밀 undock 을 비교했다. 단위 테스트: `test_aruco_dock_control` (12개), `test_aruco_detector` (합성 영상과 Gazebo 영상, 9개), `test_dock_control` (8개), `test_docking_config` (3개).
 
 ---
 
@@ -1357,8 +1357,9 @@ docs/                                        시뮬레이션 기록 (README.md �
 ├── warehouse_map_costmap.png                지도 만들기 결과와 global costmap, 경로
 ├── warehouse_rviz_path.png                  RViz: 경로와 웨이포인트
 ├── warehouse_gazebo_obstacle_stop.png       Gazebo: 통로의 장애물 앞에서 대기
-└── aruco_*.png / .jpg                       ArUco 도킹: 실험 결과, 인쇄용 marker, 카메라 화면 (DOCKING.md)
-DOCKING.md                                   ArUco 도킹
+├── aruco_*.png / .jpg / .svg                ArUco 도킹: marker 의 원리, 실험 결과, 인쇄용 marker, 카메라 화면 (DOCKING.md)
+└── docking_overview.png                     도킹 구조: 좌표계, 단계, 지나가는 길 (DOCKING.md)
+DOCKING.md                                   ArUco 도킹: 원리, 메커니즘, 구현, 옮기는 순서, 실험
 ```
 
 장애물 처리(controller 의 장애물 감속은 `simple_line/simple_line_controller`, collision_monitor 설정과 장애물 도구 `obstacle.py` 는 `simple_line/simple_line_bringup`)는 6-2 에 있다.
