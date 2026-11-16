@@ -2,7 +2,7 @@
 #
 # 로봇은 waypoints 의 점마다 멈춰서 위치와 방향을 맞춘 뒤(도착) 다음 점으로 간다.
 # 마지막 점에 도착하면 action 에 따라 작업한다. BT 가 action 을 보고 동작을 고른다.
-# waypoints 는 1개 이상이어야 한다. undock 만 없어도 된다 (그 자리에서 dock 을 빠져나온다).
+# waypoints 는 1개 이상이어야 한다. undock, undock_precise 만 없어도 된다 (그 자리에서 dock 을 빠져나온다).
 
 string id                                 # 작업 이름 (로그와 mission/status 에 씀). 비우면 BT 가 붙인다
 geometry_msgs/PoseStamped[] waypoints     # 들를 점들. frame 은 보통 map.
@@ -15,7 +15,8 @@ string ACTION_SCAN = "scan"               #   이동하는 동안 0.5m 마다 �
 string ACTION_LOOK_AROUND = "look_around" #   마지막 점에 도착한 뒤 제자리에서 한 바퀴 회전
 string ACTION_DOCK = "dock"               #   마지막 점(dock 앞, marker 가 보이는 staging 자리)에 간 뒤 ArUco marker 를 보고 도킹
                                           #   (task.xml 의 Dock 트리, DOCKING.md)
-string ACTION_UNDOCK = "undock"           #   dock 에서 뒤로 빠져나온다 (Undock 트리)
+string ACTION_UNDOCK = "undock"           #   dock 에서 곧게 뒤로 빠져나온다 (Undock 트리)
+string ACTION_UNDOCK_PRECISE = "undock_precise"   # marker 를 보며 dock 축을 따라 물러나 정해진 자리에 선다 (UndockPrecise 트리)
 
 float64 duration                          # inspect 의 작업 시간 [s]
-string target                             # dock: config/aruco_docks.yaml 의 dock 이름 (비우면 처음 보이는 것)
+string target                             # dock, undock_precise: config/docking.yaml 의 dock 이름 (비우면 처음 보이는 것)

@@ -112,6 +112,15 @@ private:
   double control_duration_{0.05};
   rclcpp::Clock::SharedPtr clock_;
   bool rotating_{false};              // 경로 쪽으로 제자리 회전 중 (방향이 맞을 때까지 계속)
+  // goal 의 xy 에 한 번 도착하면 그 goal 에 대해서는 계속 "도착" 으로 본다 (goal checker 의 stateful 과 같다).
+  // 도착해서 goal 방향으로 도는 동안 위치 추정(AMCL)이 1~2 cm 흔들려 허용오차를 넘으면, 남은 몇 cm 를 가려고
+  // goal 점 쪽으로 되돌아 돌았다 (90 도 goal 에서 48 도를 되돌아갔다)
+  bool arrived_{false};
+  Pose2D arrived_goal_;
+  // 경로 끝의 방향 (plan frame). goal 가까이서 carrot 을 goal 너머로 늘이는 데 쓴다
+  bool has_end_dir_{false};
+  double end_dir_{0.0};
+  Pose2D end_dir_goal_;
   bool braking_{false};               // goal 앞에서 감속 중
   bool obstacle_braking_{false};      // 경로 위 장애물 앞에서 감속 중 (또는 서서 기다리는 중)
   bool held_{false};                  // 명령을 내는데 로봇이 서 있다 (collision_monitor, 비상정지 등)

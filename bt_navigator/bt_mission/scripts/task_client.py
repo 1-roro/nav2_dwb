@@ -12,12 +12,13 @@ task_server 에 작업을 액션(execute_task, bt_mission_msgs/action/ExecuteTas
   ros2 run bt_mission task_client.py inspect 0,-1 1.5,-1,90
 
 작업 한 줄의 형식: <action>[:option] x,y[,yaw_deg] [x,y[,yaw_deg] ...]
-  - option: inspect 는 작업 시간 [s] (inspect:5), dock 은 config/aruco_docks.yaml 의 dock 이름
+  - option: inspect 는 작업 시간 [s] (inspect:5), dock 과 undock_precise 는 config/docking.yaml 의 dock 이름
     (dock:dock_a, 비우면 처음 보이는 marker 의 dock)
   - 좌표는 map frame. 로봇은 점마다 멈춰서 위치와 방향을 맞추고(도착) 다음 점으로 간다.
     작업(inspect 의 점검, look_around 의 회전, dock 의 도킹)은 마지막 점에서 한다.
     dock 의 마지막 점은 dock 앞에서 marker 가 보이는 자리(staging)다
-  - undock 은 점 없이 쓴다: 그 자리에서 dock 을 빠져나온다
+  - undock, undock_precise 는 점 없이 쓴다: 그 자리에서 dock 을 빠져나온다 (undock: 곧게 뒤로,
+    undock_precise[:dock]: marker 를 보며 dock 축을 따라 물러나 정해진 자리에 선다)
   - yaw 는 그 점에 도착했을 때 볼 방향 [deg]. 생략하면 중간 점은 다음 점 쪽,
     마지막 점은 직전 점에서 온 방향으로 채운다.
     작업의 첫 점은 직전 작업의 마지막 점(첫 작업이면 로봇 현재 위치)에서 온 것으로 본다
@@ -44,13 +45,14 @@ from bt_mission_msgs.msg import Task
 import tf2_ros
 
 ACTIONS = (Task.ACTION_GO, Task.ACTION_INSPECT, Task.ACTION_SCAN, Task.ACTION_LOOK_AROUND,
-           Task.ACTION_DOCK, Task.ACTION_UNDOCK)
+           Task.ACTION_DOCK, Task.ACTION_UNDOCK, Task.ACTION_UNDOCK_PRECISE)
 DEFAULT_DURATION = 3.0
 
 HELP = '''작업: <action>[:option] x,y[,yaw_deg] [x,y[,yaw_deg] ...]   (map frame)
-  action: go | inspect | scan | look_around | dock | undock. 점마다 멈춰서 도착을 알리고 다음 점으로, 작업은 마지막 점에서
+  action: go | inspect | scan | look_around | dock | undock | undock_precise. 점마다 멈춰서 도착을 알리고 다음 점으로, 작업은 마지막 점에서
   예) inspect:5 0,-1 1.5,-1,90    scan 1.5,1.5 -1,1.5,180    look_around -1,1.5,180    go -2,-1,0
-      dock:dock_a 3.5,1.0,0 (마지막 점 = dock 앞 staging 자리, dock_a = aruco_docks.yaml 의 dock)    undock (점 없음)
+      dock:dock_a 3.85,1.0,0 (마지막 점 = dock 앞 staging 자리, dock_a = docking.yaml 의 dock)
+      undock (점 없음, 곧게 뒤로)    undock_precise:dock_a (점 없음, marker 를 보며 물러남)
   !<작업>: 지금 작업을 멈추고 바로 보냄    cancel: 지금 작업 취소 + 대기 비우기
   help: 이 도움말, quit 또는 Ctrl-D: 끝내기 (남은 작업이 끝날 때까지 기다림), Ctrl-C: 취소하고 끝내기'''
 
@@ -76,10 +78,10 @@ def parse_line(text):
     action, _, option = tokens[0].partition(':')
     if action not in ACTIONS:
         raise ValueError(f"unknown action '{action}' (one of {', '.join(ACTIONS)})")
-    if len(tokens) < 2 and action != Task.ACTION_UNDOCK:
+    if len(tokens) < 2 and action not in (Task.ACTION_UNDOCK, Task.ACTION_UNDOCK_PRECISE):
         raise ValueError('need at least one point')
     duration, target = DEFAULT_DURATION, ''
-    if action == Task.ACTION_DOCK:
+    if action in (Task.ACTION_DOCK, Task.ACTION_UNDOCK_PRECISE):
         target = option
     elif option:
         try:

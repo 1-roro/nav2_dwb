@@ -52,7 +52,9 @@ BT::Blackboard::Ptr createBlackboard(
 
 std::string checkTask(const bt_mission_msgs::msg::Task & task)
 {
-  if (task.waypoints.empty() && task.action != bt_mission_msgs::msg::Task::ACTION_UNDOCK) {
+  if (task.waypoints.empty() && task.action != bt_mission_msgs::msg::Task::ACTION_UNDOCK &&
+    task.action != bt_mission_msgs::msg::Task::ACTION_UNDOCK_PRECISE)
+  {
     return "no waypoints";
   }
   return "";

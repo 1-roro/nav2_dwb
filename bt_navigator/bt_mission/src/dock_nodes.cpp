@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "ament_index_cpp/get_package_share_directory.hpp"
 #include "tf2/exceptions.h"
 #include "tf2/LinearMath/Quaternion.h"
 #include "tf2/utils.h"
@@ -58,6 +59,34 @@ std::optional<dock::Pose2> DockRos::robotPose(const std::string & global, const 
   }
 }
 
+DockingConfig loadDockingConfig(DockRos & ros, bool report)
+{
+  if (!ros.node->has_parameter("docking_config")) {
+    ros.node->declare_parameter("docking_config", std::string());
+  }
+  std::string path = ros.node->get_parameter("docking_config").as_string();
+  if (path.empty()) {
+    try {
+      path = ament_index_cpp::get_package_share_directory("bt_mission") + "/config/docking.yaml";
+    } catch (const std::exception &) {
+      path = "docking.yaml";
+    }
+  }
+  std::string error;
+  const DockingConfig cfg = DockingConfig::fromFile(DockingConfig::expandHome(path), &error);
+  if (!cfg.loaded()) {
+    RCLCPP_WARN(
+      ros.node->get_logger(), "[dock] cannot read the docking config %s (%s): using the built-in defaults",
+      path.c_str(), error.c_str());
+  } else if (report) {
+    RCLCPP_INFO(ros.node->get_logger(), "[dock] config %s", path.c_str());
+    for (const auto & key : cfg.unknownKeys()) {
+      RCLCPP_WARN(ros.node->get_logger(), "[dock] config: unknown name '%s' (typo?) is ignored", key.c_str());
+    }
+  }
+  return cfg;
+}
+
 geometry_msgs::msg::PoseStamped toPoseStamped(const dock::Pose2 & pose, const std::string & frame)
 {
   geometry_msgs::msg::PoseStamped out;
@@ -84,19 +113,17 @@ BackOff::BackOff(const std::string & name, const BT::NodeConfiguration & config)
 
 BT::NodeStatus BackOff::onStart()
 {
-  double distance = 0.4;
-  std::string cmd_topic = "cmd_vel_nav", scan_topic = "scan";
-  getInput("distance", distance);
-  getInput("speed", params_.max_lin);
-  getInput("timeout", timeout_);
-  getInput("scan_topic", scan_topic);
-  getInput("robot_rear", rear_);
-  getInput("robot_half_width", half_width_);
-  getInput("clearance", clearance_);
-  getInput("fail_when_blocked", fail_when_blocked_);
-  getInput("global_frame", global_frame_);
-  getInput("robot_frame", robot_frame_);
-  getInput("cmd_vel_topic", cmd_topic);
+  const DockingConfig cfg = loadDockingConfig(ros_, true);
+  const double distance = cfg.number("undock", "distance", 0.40);
+  params_.max_lin = cfg.number("undock", "speed", 0.05);
+  timeout_ = cfg.number("undock", "timeout", 20.0);
+  clearance_ = cfg.number("undock", "clearance", 0.05);
+  rear_ = cfg.number("robot", "rear", 0.16);
+  half_width_ = cfg.number("robot", "half_width", 0.15);
+  global_frame_ = cfg.text("ros", "odom_frame", "odom");
+  robot_frame_ = cfg.text("ros", "base_frame", "base_footprint");
+  const std::string cmd_topic = cfg.text("ros", "cmd_vel_topic", "cmd_vel_nav");
+  const std::string scan_topic = cfg.text("ros", "scan_topic", "scan");
   if (!cmd_pub_) {
     cmd_pub_ = ros_.node->create_publisher<geometry_msgs::msg::Twist>(cmd_topic, rclcpp::QoS(10));
   }
@@ -210,8 +237,7 @@ BT::NodeStatus BackOff::onRunning()
       return stop(BT::NodeStatus::FAILURE, "no transform for the laser");
     }
     if (behind > 3) {
-      return stop(
-        fail_when_blocked_ ? BT::NodeStatus::FAILURE : BT::NodeStatus::SUCCESS, "something is behind the robot, stopped");
+      return stop(BT::NodeStatus::FAILURE, "something is behind the robot, stopped");
     }
   }
   publish(dock::holonomicStep(error, last_cmd_, params_, std::min(dt, 0.2)));

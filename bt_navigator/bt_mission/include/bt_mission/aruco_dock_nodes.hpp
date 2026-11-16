@@ -6,27 +6,32 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "behaviortree_cpp_v3/action_node.h"
 #include "behaviortree_cpp_v3/bt_factory.h"
 #include "bt_mission/aruco_dock_control.hpp"
 #include "bt_mission/dock_nodes.hpp"
+#include "bt_mission/docking_config.hpp"
 #include "bt_mission_msgs/msg/aruco_detection.hpp"
-#include "sensor_msgs/msg/laser_scan.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/twist.hpp"
+#include "geometry_msgs/msg/vector3_stamped.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "sensor_msgs/msg/laser_scan.hpp"
 
-// ArUco marker 하나를 보고 dock 에 붙는 BT 노드들 (task.xml 의 Dock 트리, DOCKING.md).
+// ArUco marker 하나를 보고 설비(dock)에 붙고 떨어지는 BT 노드들 (task.xml 의 Dock, UndockPrecise 트리, DOCKING.md).
 // 카메라 영상의 marker 는 aruco_detector.py 가 찾아 dock/aruco 로 보낸다: 로봇(base)에서 본 dock 의 바닥 위 자세
 // (x, y, yaw) 후보 1 ~ 2 개와 각각의 공분산, 영상을 찍은 시각.
 //
-//   DetectArucoDock  정지해서 marker 를 여러 번 보고 dock 의 자리(odom)를 잡는다. 설 곳(target)도 정한다:
-//                    가르친 자세(taught_file, 없으면 <taught_dir>/<dock>.yaml)가 있으면 그것, 없으면 dock 앞 docked_distance
-//   ArucoServo       dock 의 자리를 Kalman 필터로 계속 고치며, dock 좌표계에서 깔때기를 따라 메카넘으로 다가간다
+//   DetectArucoDock  지금 자리에서 marker 를 찾아 dock 의 자리(odom)를 잡는다. 설 곳(target)도 정한다
+//   ArucoServo       dock 의 자리를 Kalman 필터로 계속 고치며, dock 좌표계에서 메카넘으로 움직인다.
+//                    stage 가 무엇을 하는지 정한다: approach, insert (다가가기), retreat (정밀 undock)
 //   ArucoRefine      서서 재고(정지 측정) 고치고를 몇 번 되풀이해 마지막 몇 mm 를 맞춘다
-// 물러나기, collision_monitor 끄기, 충전 확인은 dock_nodes.hpp 의 BackOff, MuteCollisionMonitor, CheckCharging.
+//
+// 값(속도, 허용오차, 로봇 치수, 토픽)은 XML 이 아니라 config/docking.yaml 에 있다. XML 에는 순서와 stage 이름만 있다.
+// 물러나기(단순 undock), collision_monitor 끄기는 dock_nodes.hpp 의 BackOff, MuteCollisionMonitor.
 
 namespace bt_mission
 {
@@ -36,7 +41,7 @@ void registerArucoDockNodes(BT::BehaviorTreeFactory & factory);
 // 세 노드가 같이 쓰는 것 (blackboard 의 {aruco_dock})
 struct ArucoDockState
 {
-  std::string dock;                     // config/aruco_docks.yaml 의 dock 이름
+  std::string dock;                     // docking.yaml 의 dock 이름
   std::string global_frame{"odom"};
   std::string robot_frame{"base_footprint"};
   aruco_dock::DockFilter filter;        // dock 좌표계 D 의 자세 (global_frame)
@@ -50,15 +55,33 @@ using ArucoDockStatePtr = std::shared_ptr<ArucoDockState>;
 aruco_dock::Hypotheses arucoMeasurements(
   const tf2_ros::Buffer & tf, const bt_mission_msgs::msg::ArucoDetection & d, const std::string & global);
 
+// 레이저를 받아 두고, 로봇 둘레를 묻는다 (DetectArucoDock 의 제자리 회전, ArucoServo 의 물러나기)
+class ScanWatch
+{
+public:
+  void start(DockRos & ros, const std::string & topic);
+  void stop() {sub_.reset();}
+  bool active() const {return static_cast<bool>(sub_);}
+  // 최근(1 s 안) 레이저의 점들을 로봇 좌표계로. 없으면 why 에 이유
+  std::optional<std::vector<dock::Point2>> points(
+    const tf2_ros::Buffer & tf, const std::string & robot_frame, std::string * why) const;
+
+private:
+  rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr sub_;
+  sensor_msgs::msg::LaserScan::SharedPtr scan_;
+  std::chrono::steady_clock::time_point time_;
+};
+
 // 지금 자리에서 marker 를 찾아 dock 의 자리를 잡는다 -> state (filter 를 초기화). 설 곳(target)도 정한다.
 // 뒤로 물러나지 않는다 (뒤에 무엇이 있을지 모른다):
 //   1. 서서(settle_time) look_time 동안 본다. min_detections 번 보면 끝, look_time 이 지나도 min_found 번 이상이면 끝
-//   2. 못 찾으면 search_angles (처음 방향에서 [deg]) 로 차례로 제자리 회전해서 다시 본다 (메카넘은 제자리에서 돈다).
+//   2. 못 찾으면 (search="true" 일 때) search_angles_deg 로 차례로 제자리 회전해서 다시 본다.
 //      돌기 전에, 그리고 도는 동안 레이저로 몸이 쓸고 갈 원(turn_radius + clearance) 안을 본다. 무엇이 있으면 돌지 않는다.
-//      앞선 시도에서 dock 의 자리를 알고 dock 이 그 원 가까이 있으면 돌지 않는다 (충전대는 낮아서 레이저에 안 보인다).
+//      앞선 시도에서 dock 의 자리를 알고 dock 이 그 원 가까이 있으면 돌지 않는다.
 //      도는 중에 marker 가 보이면 그 자리에 서서 본다
-//   3. 그래도 못 찾으면 FAILURE. 로그에 이유: detector 가 아무것도 안 보냈는지, 다른 dock 만 보였는지, TF 가 없었는지,
-//      너무 적게 보였는지, 돌 수 없었는지
+//   3. 그래도 못 찾으면 FAILURE. 로그에 이유 (DOCKING.md 5-5)
+// 설 곳: 가르친 자세(<taught_dir>/<dock>.yaml, aruco_teach.py)가 있으면 그것, 없으면 도면 값 (dock 의 gap + 로봇 front).
+// 값은 docking.yaml 의 detect, robot, ros, docks
 class DetectArucoDock : public BT::StatefulActionNode
 {
 public:
@@ -67,26 +90,8 @@ public:
   static BT::PortsList providedPorts()
   {
     return {
-      BT::InputPort<std::string>("target", "", "dock name in aruco_docks.yaml (empty: the first one seen)"),
-      BT::InputPort<double>("settle_time", 0.5, "stand still this long before looking [s]"),
-      BT::InputPort<double>("look_time", 3.0, "look this long at each heading [s]"),
-      BT::InputPort<int>("min_detections", 8, "done as soon as this many are seen"),
-      BT::InputPort<int>("min_found", 3, "after look_time, enough if at least this many"),
-      BT::InputPort<std::string>("search_angles", "30;-30;60;-60",
-        "headings to turn to in place when not seen, from the start heading [deg], ';' separated. empty: no turning"),
-      BT::InputPort<double>("search_wz", 0.5, "turning speed [rad/s]"),
-      BT::InputPort<double>("turn_radius", 0.22, "robot center to its farthest corner [m]"),
-      BT::InputPort<double>("clearance", 0.05, "free margin around the turning circle [m]"),
-      BT::InputPort<std::string>("scan_topic", "scan", "laser to check the turning circle. empty: never turn"),
-      BT::InputPort<double>("timeout", 40.0, "[s]"),
-      BT::InputPort<double>("docked_distance", 0.17, "geometric target: robot center in front of the contact face [m]"),
-      BT::InputPort<std::string>("taught_file", "", "yaml from aruco_teach.py (empty: <taught_dir>/<dock>.yaml)"),
-      BT::InputPort<std::string>("taught_dir", "~/.ros/aruco_taught", "where aruco_teach.py saves by default"),
-      BT::InputPort<bool>("use_taught", true, "false: always the geometric target"),
-      BT::InputPort<std::string>("detection_topic", "dock/aruco", ""),
-      BT::InputPort<std::string>("global_frame", "odom", ""),
-      BT::InputPort<std::string>("robot_frame", "base_footprint", ""),
-      BT::InputPort<std::string>("cmd_vel_topic", "cmd_vel_nav", ""),
+      BT::InputPort<std::string>("target", "", "dock name in docking.yaml (empty: the first one seen)"),
+      BT::InputPort<bool>("search", true, "false: never turn in place to look for the marker"),
       BT::BidirectionalPort<ArucoDockStatePtr>("state", "shared with ArucoServo, ArucoRefine (a retry reads the last one)"),
       BT::OutputPort<geometry_msgs::msg::PoseStamped>("dock_pose", "dock frame origin in the global frame"),
     };
@@ -108,11 +113,10 @@ private:
   void chooseTarget();                  // dock 을 안 뒤에 설 곳을 정한다
 
   DockRos ros_;
+  DockingConfig cfg_;
   rclcpp::Subscription<bt_mission_msgs::msg::ArucoDetection>::SharedPtr sub_;
-  rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
-  sensor_msgs::msg::LaserScan::SharedPtr scan_;
-  std::chrono::steady_clock::time_point scan_time_;
+  ScanWatch scan_;
   std::deque<bt_mission_msgs::msg::ArucoDetection> inbox_;
   std::vector<aruco_dock::Hypotheses> seen_;
   ArucoDockStatePtr state_;
@@ -129,11 +133,14 @@ private:
   std::chrono::steady_clock::time_point start_, phase_start_, last_cmd_time_;
 };
 
-// 공통: 메카넘 파라미터 포트
-BT::PortsList mecanumPorts();
-aruco_dock::MecanumParams readMecanumParams(const BT::TreeNode & node);
-
-// dock 좌표계에서 target (+ standoff 만큼 방 쪽) 으로 다가간다. 가며 본 marker 로 dock 의 자리를 고친다
+// dock 좌표계에서 설 곳 + standoff (설비에서 멀어지는 쪽) 로 간다. 가며 본 marker 로 dock 의 자리를 고친다.
+// stage (docking.yaml 의 stages.<stage>) 가 속도, 허용오차, standoff 와 아래 동작을 정한다:
+//   hold_if_closer  설비에서 멀어지는 쪽으로 가지 않는다. 이미 목표보다 가까우면 바로 SUCCESS (다시 시도할 때)
+//   check_behind    뒤로 갈 때 레이저로 뒤를 본다. 막혀 있으면 서서 FAILURE (retreat)
+// 가까이 붙을 때의 안전 (docking.yaml 의 safety):
+//   - marker 를 fresh_detection 초 안에 보았고 화면 끝에서 min_border_px 안쪽일 때만 설비 쪽으로 간다.
+//     아니면 옆과 방향만 고친다 (marker 를 화면 가운데로 되돌린다). lost_timeout 동안 못 보면 FAILURE
+//   - 카메라가 marker 에 min_camera_distance 보다 가까워지면 서서 FAILURE
 class ArucoServo : public BT::StatefulActionNode
 {
 public:
@@ -141,21 +148,10 @@ public:
 
   static BT::PortsList providedPorts()
   {
-    BT::PortsList ports = mecanumPorts();
-    ports.insert(BT::InputPort<ArucoDockStatePtr>("state", ""));
-    ports.insert(BT::InputPort<double>("standoff", 0.0, "stop this far before the target, along the dock normal [m]"));
-    ports.insert(BT::InputPort<bool>("hold_if_closer", false,
-      "true: never move away from the dock. Already closer than the goal (a retry near the dock): succeed at once"));
-    ports.insert(BT::InputPort<double>("lost_timeout", 1.0, "fail if no detection is accepted this long, 0: never [s]"));
-    ports.insert(BT::InputPort<double>("settle", 0.3, "stay within tolerance this long [s]"));
-    ports.insert(BT::InputPort<double>("timeout", 40.0, "[s]"));
-    ports.insert(BT::InputPort<double>("odom_drift", 0.002, "random walk of odom [m/sqrt(s)] (and rad/sqrt(s))"));
-    ports.insert(BT::InputPort<double>("odom_slip", 0.10, "odom position error per distance moved (mecanum slip)"));
-    ports.insert(BT::InputPort<double>("odom_yaw_per_m", 0.05, "odom heading error per metre moved [rad/m]"));
-    ports.insert(BT::InputPort<double>("odom_turn_slip", 0.05, "odom heading error per angle turned"));
-    ports.insert(BT::InputPort<std::string>("detection_topic", "dock/aruco", ""));
-    ports.insert(BT::InputPort<std::string>("cmd_vel_topic", "cmd_vel_nav", ""));
-    return ports;
+    return {
+      BT::InputPort<ArucoDockStatePtr>("state", ""),
+      BT::InputPort<std::string>("stage", "insert", "stages.<name> in docking.yaml: approach | insert | retreat"),
+    };
   }
 
   BT::NodeStatus onStart() override;
@@ -169,23 +165,30 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr estimate_pub_;
   rclcpp::Subscription<bt_mission_msgs::msg::ArucoDetection>::SharedPtr sub_;
+  ScanWatch scan_;
   std::deque<bt_mission_msgs::msg::ArucoDetection> inbox_;
   ArucoDockStatePtr state_;
   aruco_dock::MecanumParams params_;
   dock::Cmd last_cmd_;
   dock::Pose2 goal_;                    // target + standoff (D)
-  double lost_timeout_{1.0}, settle_{0.3}, timeout_{40.0}, drift_{0.002};
+  std::string stage_;
+  double lost_timeout_{2.0}, settle_{0.3}, timeout_{30.0}, drift_{0.002};
   double slip_{0.10}, yaw_per_m_{0.05}, turn_slip_{0.05};
-  bool hold_if_closer_{false};
+  double fresh_{0.5}, min_border_{10.0}, min_camera_distance_{0.10};
+  double rear_{0.16}, half_width_{0.15}, clearance_{0.05};
+  bool hold_if_closer_{false}, check_behind_{false};
+  double last_border_{1e9};
   std::optional<dock::Pose2> last_robot_;   // 지난 예측 때 로봇의 odom 자세 (움직인 만큼 불확실도를 키운다)
-  int accepted_{0}, rejected_{0};
+  int accepted_{0}, rejected_{0}, held_cycles_{0};
   std::chrono::steady_clock::time_point start_, last_seen_, last_cmd_time_, last_predict_;
   std::optional<std::chrono::steady_clock::time_point> settled_since_;
 };
 
 // 서서 재고(measure_time 동안 marker 를 보고 합침), 남은 오차를 odom 으로 고치고, 다시 잰다 (max_iterations 번까지).
 // 움직이는 동안의 영상은 흔들림, 늦음, odom 시각 맞춤 오차가 섞이지만 서서 본 것에는 없다.
-// 메카넘은 옆으로 바로 고칠 수 있어서, 차동 구동처럼 물러났다 다시 들어갈 필요가 없다
+// 재는 동안 측정이 stable_spread 보다 흩어져 있으면 (로봇이 아직 흔들린다) max_measure_time 까지 더 기다린다.
+// 끝나면 마지막으로 잰 오차를 dock/final_error (Vector3Stamped: x 앞뒤 [m], y 옆 [m], z 방향 [rad], frame_id = dock 이름)
+// 로 낸다 (기록, 추이 보기). 값은 docking.yaml 의 stages.<stage> (기본 refine)
 class ArucoRefine : public BT::StatefulActionNode
 {
 public:
@@ -193,19 +196,10 @@ public:
 
   static BT::PortsList providedPorts()
   {
-    BT::PortsList ports = mecanumPorts();
-    ports.insert(BT::InputPort<ArucoDockStatePtr>("state", ""));
-    ports.insert(BT::InputPort<double>("settle_time", 0.5, "wait after stopping before measuring [s]"));
-    ports.insert(BT::InputPort<double>("measure_time", 1.0, "[s]"));
-    ports.insert(BT::InputPort<int>("max_iterations", 3, ""));
-    ports.insert(BT::InputPort<double>("accept_along", 0.005, "if still outside the tolerance after the last iteration,"
-      " succeed when inside these [m]"));
-    ports.insert(BT::InputPort<double>("accept_lat", 0.004, "[m]"));
-    ports.insert(BT::InputPort<double>("accept_yaw", 1.0, "[deg]"));
-    ports.insert(BT::InputPort<double>("move_timeout", 8.0, "[s]"));
-    ports.insert(BT::InputPort<std::string>("detection_topic", "dock/aruco", ""));
-    ports.insert(BT::InputPort<std::string>("cmd_vel_topic", "cmd_vel_nav", ""));
-    return ports;
+    return {
+      BT::InputPort<ArucoDockStatePtr>("state", ""),
+      BT::InputPort<std::string>("stage", "refine", "stages.<name> in docking.yaml"),
+    };
   }
 
   BT::NodeStatus onStart() override;
@@ -216,18 +210,20 @@ private:
   enum class Phase {Settle, Measure, Move};
   void enter(Phase phase);
   aruco_dock::DockErrors errorsNow(const dock::Pose2 & robot) const;
+  BT::NodeStatus done(BT::NodeStatus status, const aruco_dock::DockErrors & e);
 
   DockRos ros_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
+  rclcpp::Publisher<geometry_msgs::msg::Vector3Stamped>::SharedPtr result_pub_;
   rclcpp::Subscription<bt_mission_msgs::msg::ArucoDetection>::SharedPtr sub_;
   std::deque<bt_mission_msgs::msg::ArucoDetection> inbox_;
-  std::vector<aruco_dock::Hypotheses> measured_;
+  std::vector<std::pair<std::chrono::steady_clock::time_point, aruco_dock::Hypotheses>> measured_;
   ArucoDockStatePtr state_;
   aruco_dock::MecanumParams params_;
   dock::Cmd last_cmd_;
   Phase phase_{Phase::Settle};
   int iteration_{0}, max_iterations_{3};
-  double settle_time_{0.5}, measure_time_{1.0}, move_timeout_{8.0};
+  double settle_time_{0.5}, measure_time_{1.0}, max_measure_time_{4.0}, stable_spread_{0.0015}, move_timeout_{8.0};
   double accept_along_{0.005}, accept_lat_{0.004}, accept_yaw_{1.0 * M_PI / 180.0};
   std::chrono::steady_clock::time_point start_, phase_start_, last_cmd_time_;
   std::optional<std::chrono::steady_clock::time_point> settled_since_;
