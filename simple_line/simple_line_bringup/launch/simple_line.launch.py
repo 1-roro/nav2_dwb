@@ -4,7 +4,7 @@
   ros2 launch simple_line_bringup simple_line.launch.py                          # 빈 방, 저장된 지도로 주행
   ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse slam:=True   # 창고 지도 만들기
   ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse         # 창고 지도로 주행
-  # ArUco 도킹 (bt_navigator/DOCKING.md): 4바퀴 메카넘 로봇 + 카메라, 창고 벽에 ArUco dock
+  # ArUco 도킹 (bt_navigator/DOCKING.md): 4바퀴 메카넘 로봇 + 카메라, 창고 벽 앞에 marker 가 붙은 설비 모형
   ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse robot:=mecanum dock:=True
   # 실제 로봇과의 차이를 일부러 넣어 보기
   ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse robot:=mecanum dock:=True \
@@ -21,8 +21,9 @@ robot   waffle    TurtleBot3 waffle (차동 구동, 바퀴 2개 + 캐스터. nav
                   몸체 0.32 x 0.30 m, 45 도 롤러 바퀴 넷, 앞쪽 RealSense, 위 라이다. Gazebo 에서는 planar_move 가
                   vx, vy, wz 를 그대로 몸체 속도로 준다. 내비게이션에 holonomic:=True 를 넘긴다 (params/holonomic.yaml).
                   holonomic 이라고 써도 같다 (예전 이름)
-camera_depth:=True  컬러에 맞춘 깊이 카메라도 켠다 (기본은 끈다: ArUco 도킹은 쓰지 않고, 렌더링과 점구름 계산이 무겁다)
-dock:=True        월드마다 정해 둔 곳에 ArUco marker 가 붙은 dock (models/aruco_dock, tools/make_aruco_dock.py)을
+camera_depth:=True  컬러에 맞춘 깊이 카메라도 켠다 (기본은 끈다: 렌더링과 점구름 계산이 무겁다).
+                    detector 를 use_depth:=True 로 띄워 깊이로 dock 방향을 도울 때 쓴다
+dock:=True        월드마다 정해 둔 곳에 ArUco marker 가 붙은 설비 모형 (models/aruco_dock, tools/make_aruco_dock.py)을
                   놓는다. 지도에는 없는 물체다. robot:=mecanum 이면 marker 검출 노드(bt_mission 의
                   aruco_detector.launch.py)도 같이 띄운다 (aruco_detector:=False 이면 띄우지 않는다: 따로 띄울 때)
 실제 로봇과의 차이를 일부러 넣기 (robot:=mecanum, bt_navigator/DOCKING.md 7장)
@@ -56,8 +57,8 @@ from launch_ros.actions import Node
 
 # 월드마다 로봇을 놓는 곳 (x [m], y [m], yaw [rad])
 SPAWN = {'empty_room': (-2.0, -1.0, 0.0), 'warehouse': (-4.0, -2.5, 0.0)}
-# 월드마다 ArUco dock 을 놓는 곳: 충전 접점 면의 x, y, 방향(방 쪽). 동쪽 벽에 붙여 서쪽을 본다.
-# marker 판이 접점 면 0.3 m 뒤에 있으므로 접점 면은 벽에서 0.45 m 떨어진다
+# 월드마다 설비 모형(ArUco dock)을 놓는 곳: 도킹 면(marker 가 붙은 면)의 x, y, 방향(방 쪽). 동쪽 벽 앞에서 서쪽을 본다.
+# 설비 모형의 깊이가 0.35 m 라 도킹 면은 벽에서 0.45 m 떨어진다
 DOCK = {'empty_room': (2.65, 1.2, math.pi), 'warehouse': (4.55, 1.0, math.pi)}
 
 
