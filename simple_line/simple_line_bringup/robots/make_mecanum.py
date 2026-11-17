@@ -8,7 +8,7 @@
   - 몸체 0.32 x 0.22 m, 바퀴 4개 (반지름 0.04 m, 폭 0.035 m), 바퀴까지 합친 폭 0.30 m.
     제자리에서 돌 때 쓸고 가는 반지름 0.22 m (Nav2 robot_radius 와 같다)
   - 메카넘 바퀴: 둘레에 45 도로 기운 롤러 10개. X 배치 (왼앞, 오른뒤 / 오른앞, 왼뒤가 서로 반대로 기운다)
-  - 앞쪽 가운데에 RealSense (컬러 848 x 480, 69.4 도. 깊이는 같은 자리), 위 가운데에 2D 라이다, 가운데에 IMU
+  - 앞쪽 가운데에 RealSense D455 (컬러 1280 x 720, 가로 화각 90 도. 깊이는 같은 자리), 위 가운데에 2D 라이다, 가운데에 IMU
 
 Gazebo 에서 (simple_line.launch.py robot:=mecanum):
   - 몸 전체가 link 하나다. gazebo_ros_planar_move 가 cmd_vel 의 vx, vy, wz 를 그대로 몸체 속도로 준다 (롤러의 마찰로
@@ -229,10 +229,11 @@ SENSORS = '''
         <update_rate>15</update_rate>
         <pose>{camera}</pose>
         <camera name="color">
-          <horizontal_fov>1.211</horizontal_fov>
+          <!-- RealSense D455 컬러: 가로 화각 약 90 도, 1280 x 720 (fx = 640 px) -->
+          <horizontal_fov>1.5708</horizontal_fov>
           <image>
-            <width>848</width>
-            <height>480</height>
+            <width>1280</width>
+            <height>720</height>
             <format>R8G8B8</format>
           </image>
           <clip>
@@ -260,7 +261,7 @@ SENSORS = '''
         <update_rate>15</update_rate>
         <pose>{camera}</pose>
         <camera name="depth">
-          <horizontal_fov>1.211</horizontal_fov>
+          <horizontal_fov>1.5708</horizontal_fov>
           <image>
             <width>424</width>
             <height>240</height>

@@ -21,11 +21,16 @@ robot   waffle    TurtleBot3 waffle (차동 구동, 바퀴 2개 + 캐스터. nav
                   몸체 0.32 x 0.30 m, 45 도 롤러 바퀴 넷, 앞쪽 RealSense, 위 라이다. Gazebo 에서는 planar_move 가
                   vx, vy, wz 를 그대로 몸체 속도로 준다. 내비게이션에 holonomic:=True 를 넘긴다 (params/holonomic.yaml).
                   holonomic 이라고 써도 같다 (예전 이름)
+camera_resolution:=1280x720  컬러 카메라 해상도 (기본 848x480). 카메라는 RealSense D455 컬러의 화각(가로 90 도)이다.
+                    실제 로봇에서는 1280x720 을 권한다. 시뮬레이션에서는 GPU 없이 그리면 무거워서
+                    (Nav2 가 제어 주기를 놓친다) 기본을 낮게 두었다
 camera_depth:=True  컬러에 맞춘 깊이 카메라도 켠다 (기본은 끈다: 렌더링과 점구름 계산이 무겁다).
                     detector 를 use_depth:=True 로 띄워 깊이로 dock 방향을 도울 때 쓴다
 dock:=True        월드마다 정해 둔 곳에 ArUco marker 가 붙은 설비 모형 (models/aruco_dock, tools/make_aruco_dock.py)을
                   놓는다. 지도에는 없는 물체다. robot:=mecanum 이면 marker 검출 노드(bt_mission 의
                   aruco_detector.launch.py)도 같이 띄운다 (aruco_detector:=False 이면 띄우지 않는다: 따로 띄울 때)
+dock_markers:=2   설비 모형을 marker 둘짜리로 바꾼다 (models/aruco_dock_two = docking.yaml 의 dock_b).
+                  작업은 dock:dock_b ... 로 보낸다
 실제 로봇과의 차이를 일부러 넣기 (robot:=mecanum, bt_navigator/DOCKING.md 13장)
   mecanum_slip:=True       몸체가 명령보다 덜 가고(옆 90 %), 옆으로 가면 조금 돈다. odom 은 바퀴 odom 처럼 명령을
                            적분해서 그만큼 틀린다 (scripts/mecanum_slip_sim.py)
@@ -74,14 +79,18 @@ def perturb_camera(urdf, error):
     return urdf[:m.start()] + new + urdf[m.end():]
 
 
-def holonomic_model(model_file, slip, depth):
-    """시뮬레이션 로봇 모델을 옵션에 맞게 고친 파일 (고칠 것이 없으면 원래 파일).
+def holonomic_model(model_file, slip, depth, resolution):
+    """시뮬레이션 로봇 모델을 옵션에 맞게 고친 파일.
     slip: planar_move 가 cmd_vel_body 를 받고, 참값 odom 을 odom_truth 로 내고, TF 는 내지 않게 (mecanum_slip_sim.py 가 낸다)
-    depth: False 면 깊이 카메라를 뺀다"""
-    if not slip and depth:
-        return model_file
+    depth: False 면 깊이 카메라를 뺀다
+    resolution: 컬러 카메라의 "가로x세로" (화각은 그대로 D455 의 90 도)"""
     with open(model_file) as f:
         sdf = f.read()
+    width, height = (int(v) for v in resolution.lower().split('x'))
+    sdf, n = re.subn(r'(<camera name="color">.*?<width>)\d+(</width>\s*<height>)\d+(</height>)',
+                     rf'\g<1>{width}\g<2>{height}\g<3>', sdf, count=1, flags=re.S)
+    if n != 1:
+        raise RuntimeError('colour camera not found in the holonomic model')
     if slip:
         old = '<remapping>/tf:=tf</remapping>'
         if old not in sdf:
@@ -136,7 +145,7 @@ def launch_setup(context):
     if slip and not holonomic:
         raise RuntimeError('mecanum_slip:=True needs robot:=mecanum')
     if holonomic:
-        model = holonomic_model(model, slip, arg('camera_depth').lower() == 'true')
+        model = holonomic_model(model, slip, arg('camera_depth').lower() == 'true', arg('camera_resolution'))
     model_paths = [os.path.join(here, 'models')]
     try:                                    # 로봇 몸체의 mesh (model://turtlebot3_common)
         model_paths.append(os.path.join(get_package_share_directory('turtlebot3_gazebo'), 'models'))
@@ -160,9 +169,11 @@ def launch_setup(context):
         if name not in DOCK:
             raise RuntimeError(f'{name} 월드에는 dock 자리를 정해 두지 않았다 (DOCK)')
         dx, dy, dyaw = DOCK[name]
+        # dock_markers:=2 이면 marker 둘이 붙은 설비 (docking.yaml 의 dock_b, 2번과 3번), 아니면 하나 (dock_a, 0번)
+        dock_model = 'aruco_dock_two' if arg('dock_markers') == '2' else 'aruco_dock'
         robot.append(Node(
             package='gazebo_ros', executable='spawn_entity.py', name='spawn_dock', output='screen',
-            arguments=['-entity', 'aruco_dock', '-file', os.path.join(here, 'models', 'aruco_dock', 'model.sdf'),
+            arguments=['-entity', 'aruco_dock', '-file', os.path.join(here, 'models', dock_model, 'model.sdf'),
                        '-x', str(dx), '-y', str(dy), '-z', '0', '-Y', str(dyaw)]))
     if holonomic and arg('dock').lower() == 'true' and arg('aruco_detector').lower() == 'true':
         # 도킹 BT 가 받는 dock/aruco. bt_mission 이 이 패키지에 기대므로 패키지 의존은 두지 않고, 있을 때만 띄운다
@@ -219,8 +230,12 @@ def generate_launch_description():
                               description='waffle (차동, 바퀴 2개) | mecanum (4바퀴 메카넘 + 컬러 카메라)'),
         DeclareLaunchArgument('dock', default_value='False',
                               description='True: ArUco marker 가 붙은 dock 을 월드에 놓는다'),
+        DeclareLaunchArgument('dock_markers', default_value='1',
+                              description='1: marker 하나짜리 설비 (dock_a) | 2: marker 둘 (dock_b)'),
         DeclareLaunchArgument('aruco_detector', default_value='True',
                               description='dock:=True robot:=mecanum 일 때 marker 검출 노드도 띄운다'),
+        DeclareLaunchArgument('camera_resolution', default_value='848x480',
+                              description='컬러 카메라 해상도 (robot:=mecanum). 화각은 D455 의 90 도. 실제 로봇의 권장은 1280x720'),
         DeclareLaunchArgument('camera_depth', default_value='False',
                               description='True: 깊이 카메라도 켠다 (robot:=mecanum)'),
         DeclareLaunchArgument('mecanum_slip', default_value='False',

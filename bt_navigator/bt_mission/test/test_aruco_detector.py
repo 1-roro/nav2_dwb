@@ -25,29 +25,45 @@ def load(name, path):
 
 ad = load('aruco_detector', os.path.join(HERE, '..', 'scripts', 'aruco_detector.py'))
 
-W, H = 848, 480
-F = W / 2 / math.tan(1.211 / 2)                  # D435 컬러 848 x 480, 수평 화각 69.4 도
+# RealSense D455 컬러를 1280 x 720 으로: 가로 화각 약 90 도 (fx = 640 px), 세로 약 59 도
+W, H = 1280, 720
+F = W / 2 / math.tan(math.radians(90.0) / 2)
 K = np.array([[F, 0, (W - 1) / 2], [0, F, (H - 1) / 2], [0, 0, 1.0]])
 # 시뮬레이션의 메카넘 (robots/make_mecanum.py): 카메라가 base 앞 0.15, 가운데, 높이 0.13 m. optical: x 오른쪽, y 아래, z 앞
 R_BASE_CAM = np.array([[0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]])
 T_BASE_CAM = np.array([0.15, 0.0, 0.13])
 PPM = 6000.0                                      # marker 그림의 해상도 [px/m]
-SS = 6                                            # 크게 그리는 배수
+SS = 4                                            # 크게 그리는 배수
+QUIET = 0.02                                      # 흰 여백 [m]
 # 붙은 자리: 로봇 앞면이 설비(marker 면) 0.15 m 앞 = 중심은 0.31 m 앞. 카메라 <-> marker 0.16 m
 DOCKED = (0.31, 0.0, math.pi)
+DICTIONARY, ALL_DOCKS = ad.load_docks(DOCKS)
+_plates = {}
+
+
+def plate(dock):
+    """dock 의 marker 를 모두 담은 흰 판의 그림 (한 장에 인쇄한 것과 같다) -> (그림, 왼쪽 끝 y_D, 위쪽 끝 z_D)"""
+    if dock.name not in _plates:
+        y0 = min(m.lateral - m.size / 2 for m in dock.markers) - QUIET
+        y1 = max(m.lateral + m.size / 2 for m in dock.markers) + QUIET
+        z0 = min(m.height - m.size / 2 for m in dock.markers) - QUIET
+        z1 = max(m.height + m.size / 2 for m in dock.markers) + QUIET
+        texture = np.full((int(round((z1 - z0) * PPM)), int(round((y1 - y0) * PPM))), 255, np.uint8)
+        for m in dock.markers:
+            side = int(round(m.size * PPM))
+            col, row = int(round((m.lateral - m.size / 2 - y0) * PPM)), int(round((z1 - m.height - m.size / 2) * PPM))
+            texture[row:row + side, col:col + side] = ad.marker_image(
+                ad.aruco_dictionary(DICTIONARY), m.marker_id, side)
+        _plates[dock.name] = (texture, y0, z1)
+    return _plates[dock.name]
 
 
 @pytest.fixture(scope='module')
 def scene():
-    name, docks = ad.load_docks(DOCKS)
-    marker = docks['dock_a']
-    dictionary = ad.aruco_dictionary(name)
-    side = int(round(marker.size * PPM))
-    quiet = side // 4
-    texture = np.full((side + 2 * quiet, side + 2 * quiet), 255, np.uint8)
-    texture[quiet:quiet + side, quiet:quiet + side] = ad.marker_image(dictionary, marker.marker_id, side)
+    """marker 하나짜리 dock_a: (marker, dock, -, detector, camera)"""
+    dock = ALL_DOCKS['dock_a']
     camera = ad.Camera(K, np.zeros(5), R_BASE_CAM, T_BASE_CAM)
-    return marker, texture, quiet, ad.MarkerDetector(dictionary), camera
+    return dock.markers[0], dock, None, ad.MarkerDetector(ad.aruco_dictionary(DICTIONARY)), camera
 
 
 def dock_in_base(robot):
@@ -57,15 +73,16 @@ def dock_in_base(robot):
     return np.array([-(c * x + s * y), -(-s * x + c * y), ad.angle(-yaw)])
 
 
-def render(scene, robot, seed=0, blur=0.6, noise=2.0):
-    marker, texture, quiet, _, camera = scene
+def render(scene, robot, seed=0, blur=0.6, noise=2.0, dock=None):
+    """로봇이 robot (D 에서 x, y, yaw) 에 있을 때 카메라가 보는 dock 의 marker 판"""
+    camera = scene[4]
+    texture, y0, z1 = plate(dock or scene[1])
+    offset = (dock or scene[1]).markers[0].offset
     q = dock_in_base(robot)
     R_cam_D = camera.R_cam_base @ ad.rot_z(q[2])
     t_cam_D = camera.R_cam_base @ np.array([q[0], q[1], 0.0]) + camera.t_cam_base
-    # 그림의 화소 (u, v) (화소 중심 = 정수) -> D. marker 왼쪽 위 테두리가 u = v = quiet - 0.5
-    y0 = marker.lateral - marker.size / 2 - (quiet - 0.5) / PPM
-    z0 = marker.height + marker.size / 2 + (quiet - 0.5) / PPM
-    A = np.array([[0.0, 0.0, -marker.offset], [1 / PPM, 0.0, y0], [0.0, -1 / PPM, z0]])
+    # 그림의 화소 (u, v) (화소 중심 = 정수) -> D: y = y0 + (u + 0.5) / PPM, z = z1 - (v + 0.5) / PPM
+    A = np.array([[0.0, 0.0, -offset], [1 / PPM, 0.0, y0 + 0.5 / PPM], [0.0, -1 / PPM, z1 - 0.5 / PPM]])
     homography = K @ (R_cam_D @ A + np.column_stack([np.zeros((3, 2)), t_cam_D]))
     S = np.array([[SS, 0, (SS - 1) / 2], [0, SS, (SS - 1) / 2], [0, 0, 1.0]])
     big = cv2.warpPerspective(texture, S @ homography, (W * SS, H * SS), flags=cv2.INTER_LINEAR, borderValue=110)
@@ -83,6 +100,15 @@ def solve(scene, robot, seed=0, camera=None):
     assert marker.marker_id in found
     corners = found[marker.marker_id]
     return corners, ad.estimate(corners, marker, camera or true_camera)
+
+
+def solve_dock(scene, dock, robot, seed=0, only=None):
+    """marker 가 여럿인 dock: 보인 marker 전부로 (only 가 있으면 그 번호만: 나머지가 가려진 경우)"""
+    found = scene[3].detect(render(scene, robot, seed, dock=dock))
+    observations = [(m, found[m.marker_id]) for m in dock.markers
+                    if m.marker_id in found and (only is None or m.marker_id in only)
+                    and ad.usable(found[m.marker_id], W, H, 16.0)[0]]
+    return observations, ad.estimate_dock(observations, scene[4]) if observations else None
 
 
 def lateral_error_at_docked(q, truth):
@@ -152,7 +178,7 @@ def errors(scene, robot, camera, frames=6):
 
 
 def test_floor_prior_stops_the_flip_far_away(scene):
-    # 0.75 m 정면 (marker 61 px): 6자유도 PnP 는 기울기와 방향이 섞여 2 도 가까이 틀린다. 바닥 사전분포가 그것을 줄인다
+    # 0.75 m 정면 (marker 64 px): 6자유도 PnP 는 기울기와 방향이 섞여 2 도 가까이 틀린다. 바닥 사전분포가 그것을 줄인다
     (map_yaw, map_lat), (free_yaw, free_lat) = errors(scene, (0.75, 0.0, math.pi), None, frames=8)
     assert map_yaw < 0.8 * free_yaw and map_lat < 0.8 * free_lat
 
@@ -197,10 +223,10 @@ def test_detects_the_big_marker_up_close_in_gazebo(scene):
 def test_border_distance_says_how_close_the_marker_is_to_leaving_the_image(scene):
     marker, _, _, _, camera = scene
     centred = ad.project_dock(dock_in_base(DOCKED), marker, camera)
-    assert 110 < ad.border_distance(centred, W, H) < 135          # 붙은 자리: 위아래로 125 px 남는다
-    # 옆으로 6 cm 벗어나면 화면 끝으로 간다 (0.16 m 앞에서 1 cm = 38 px)
-    shifted = ad.project_dock(dock_in_base((0.31, 0.06, math.pi)), marker, camera)
-    assert ad.border_distance(shifted, W, H) < 85
+    assert 225 < ad.border_distance(centred, W, H) < 255          # 붙은 자리: 위아래로 240 px (60 mm) 남는다
+    # 옆으로 10 cm 벗어나면 화면 끝으로 간다 (0.16 m 앞에서 1 cm = 40 px. 좌우로는 13 cm 까지 남는다)
+    shifted = ad.project_dock(dock_in_base((0.31, 0.10, math.pi)), marker, camera)
+    assert ad.border_distance(shifted, W, H) < 140
     assert ad.border_distance(shifted, W, H) < ad.border_distance(centred, W, H)
 
 
@@ -219,7 +245,7 @@ def depth_image(scene, robot, noise=0.001, seed=0):
 
 
 def test_depth_plane_gives_the_heading_where_the_marker_is_small(scene):
-    # 0.75 m 앞 (marker 61 px): 모서리 넷으로는 방향이 0.5 도 안팎 틀리고 공분산은 몇 도다.
+    # 0.75 m 앞 (marker 64 px): 모서리 넷으로는 방향이 0.5 도 안팎 틀리고 공분산은 몇 도다.
     # 면의 깊이 점들에 평면을 맞추면 0.3 도 안으로 재고, MAP 에 넣으면 방향 오차와 공분산이 같이 줄어든다
     marker, _, _, _, camera = scene
     robot = (0.75, 0.0, math.pi)
@@ -234,8 +260,76 @@ def test_depth_plane_gives_the_heading_where_the_marker_is_small(scene):
         plain.append((abs(ad.angle(result['hypotheses'][0][0][2] - truth[2])), result['hypotheses'][0][1][2, 2]))
         fused.append((abs(ad.angle(with_depth['hypotheses'][0][0][2] - truth[2])), with_depth['hypotheses'][0][1][2, 2]))
     plain, fused = np.mean(plain, axis=0), np.mean(fused, axis=0)
-    assert fused[0] < 0.5 * plain[0] and math.degrees(fused[0]) < 0.2
+    # (정면에서는 모서리만으로도 0.1 도 안팎이 나올 때가 있어서 비율은 느슨하게 본다)
+    assert fused[0] < 0.8 * plain[0] and math.degrees(fused[0]) < 0.2
     assert fused[1] < 0.05 * plain[1]
     # 붙은 자리 (0.16 m) 는 깊이 카메라가 못 재는 거리다: 버리고 영상만으로 한다
     corners, _ = solve(scene, DOCKED)
     assert ad.depth_plane_yaw(depth_image(scene, DOCKED), corners, W, camera, min_range=0.2) is None
+
+
+# ---------------------------------------------------------------------------------------------
+# marker 가 둘인 dock (docking.yaml 의 dock_b: 60 mm 둘, 중심 간격 160 mm)
+
+def test_config_reads_one_or_several_markers_per_dock(tmp_path):
+    assert ALL_DOCKS['dock_a'].marker_ids == [0]
+    two = ALL_DOCKS['dock_b']
+    assert two.marker_ids == [2, 3]
+    assert [m.lateral for m in two.markers] == [-0.08, 0.08] and all(m.size == 0.06 for m in two.markers)
+    # 왼쪽 marker 의 왼위 모서리: y = -0.08 - 0.03, z = 0.13 + 0.03
+    assert np.allclose(two.markers[0].corners_D[0], [0.0, -0.11, 0.16])
+    # marker 번호가 두 dock 에 겹치면 읽지 않는다 (어느 dock 인지 알 수 없다)
+    bad = tmp_path / 'bad.yaml'
+    bad.write_text('dictionary: DICT_4X4_50\ndocks:\n  a: {marker_id: 1, size: 0.06, height: 0.13}\n'
+                   '  b: {size: 0.06, height: 0.13, markers: [{id: 1, lateral: -0.08}, {id: 2, lateral: 0.08}]}\n')
+    with pytest.raises(ValueError):
+        ad.load_docks(str(bad))
+
+
+def test_two_markers_fit_in_the_view_at_the_docked_pose(scene):
+    # 붙은 자리 (카메라 <-> 면 0.16 m) 에서 가로 시야는 0.32 m. marker 바깥 끝이 가운데에서 0.11 m 이므로 좌우 50 mm (200 px)
+    camera, two = scene[4], ALL_DOCKS['dock_b']
+    for m in two.markers:
+        p = ad.project_dock(dock_in_base(DOCKED), m, camera)
+        assert ad.border_distance(p, W, H) > 180
+    # 옆으로 3 cm, 방향 2 도 틀어져도 둘 다 화면 안
+    for m in two.markers:
+        p = ad.project_dock(dock_in_base((0.31, 0.03, math.pi + math.radians(2.0))), m, camera)
+        assert ad.border_distance(p, W, H) > 30
+    observations, result = solve_dock(scene, two, DOCKED)
+    assert len(observations) == 2 and abs(result['distance'] - 0.16) < 0.003      # 카메라 <-> marker 면
+
+
+def test_two_markers_give_the_heading_one_cannot(scene):
+    two = ALL_DOCKS['dock_b']
+    rng = np.random.default_rng(1)
+    for distance, limit_deg in ((0.75, 0.35), (1.0, 0.8)):
+        single, double = [], []
+        for seed in range(8):
+            robot = (distance, rng.uniform(-0.03, 0.03), math.pi + rng.uniform(-0.12, 0.12))
+            truth = dock_in_base(robot)
+            _, one = solve(scene, robot, seed)
+            observations, both = solve_dock(scene, two, robot, seed)
+            assert len(observations) == 2
+            assert len(both['hypotheses']) == 1                        # 뒤집힌 해가 남지 않는다
+            single.append(ad.angle(one['hypotheses'][0][0][2] - truth[2]))
+            double.append(ad.angle(both['hypotheses'][0][0][2] - truth[2]))
+            # 공분산도 그만큼 작다고 말한다 (필터가 그만큼 믿는다)
+            assert both['hypotheses'][0][1][2, 2] < 0.2 * one['hypotheses'][0][1][2, 2]
+        rms = lambda v: math.degrees(math.sqrt(np.mean(np.square(v))))      # noqa: E731
+        assert rms(double) < limit_deg and rms(double) < 0.5 * rms(single), (distance, rms(single), rms(double))
+
+
+def test_one_of_two_markers_is_enough_to_keep_going(scene):
+    # 하나가 가려지거나 화면 밖으로 나가도 남은 하나로 자세가 나온다 (marker 하나짜리 dock 과 같은 정밀도로)
+    two = ALL_DOCKS['dock_b']
+    for robot in (DOCKED, (0.56, 0.02, math.pi)):
+        truth = dock_in_base(robot)
+        for only in ([2], [3]):
+            observations, result = solve_dock(scene, two, robot, only=only)
+            assert len(observations) == 1
+            q = result['hypotheses'][0][0]
+            assert abs(lateral_error_at_docked(q, truth)) < 0.004 and abs(q[0] - truth[0]) < 0.003
+    # 로봇이 옆으로 12 cm 비껴 있으면 한쪽 marker 는 화면 끝에 걸려 버려지고, 다른 하나로 푼다
+    observations, result = solve_dock(scene, two, (0.31, 0.12, math.pi))
+    assert len(observations) == 1 and result is not None

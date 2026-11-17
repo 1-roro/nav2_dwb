@@ -1,18 +1,21 @@
 # 설비 앞 15 cm 정밀 도킹: ArUco marker 하나, 4바퀴 메카넘
 
-설비(기계)의 도킹 면에 붙인 **ArUco marker 하나(0번, 60 mm)** 를 RealSense 컬러 카메라로 보고, 메카넘 로봇의 앞면을 설비에서 **15 cm** 떨어진 자리에 mm 단위로 세운다. 그 자리에서 설비 작업을 한 뒤 undock 한다. 작업은 `task_client.py` 로 보낸다: `dock:dock_a <staging 자리>`, `undock`, `undock_precise:dock_a`.
+설비(기계)의 도킹 면에 붙인 **ArUco marker (60 mm 하나, 또는 둘)** 를 **RealSense D455** 의 컬러 카메라로 보고, 메카넘 로봇의 앞면을 설비에서 **15 cm** 떨어진 자리에 mm 단위로 세운다. 그 자리에서 설비 작업을 한 뒤 undock 한다. 작업은 `task_client.py` 로 보낸다: `dock:dock_a <staging 자리>`, `undock`, `undock_precise:dock_a`. `dock_a` 는 marker 하나(0번), `dock_b` 는 marker 둘(2번, 3번)을 붙인 설비다.
 
 이 문서 하나에 원리(ArUco marker, 자세 추정), 도킹 메커니즘, 구현 구조, 실제 로봇으로 옮기는 순서, 실험 결과를 모두 정리했다. 미션 BT 의 다른 부분(작업 액션, 장애물 대기)은 [README.md](README.md).
 
 ![mecanum robot docked](../simple_line/doc/mecanum_robot.png)
 
-Gazebo 결과 (참값):
+Gazebo 결과 (참값. 카메라는 D455 의 화각, 848 x 480):
 
-| 조건 | 앞뒤 [mm] | 옆 [mm] | 방향 [°] |
-|---|---|---|---|
-| 실제와의 차이 없음, 도면 값 목표 (4회) | +0.1 ~ +0.7 | -0.2 ~ -0.3 | 0.01 |
-| 차이 넣음 (메카넘 미끄러짐 + 카메라 TF yaw 1.5°, 옆 1 cm + marker 크기 2 %), 도면 값 목표 (3회) | -2.4 ~ -2.7 | **-6.3 ~ -6.5** | **+1.5** |
-| 같은 차이, **가르친 자세** 목표 (5회) | +0.8 ~ +1.5 | -0.1 ~ -0.3 | 0.00 ~ 0.02 |
+| 조건 | marker | 앞뒤 [mm] | 옆 [mm] | 방향 [°] |
+|---|---|---|---|---|
+| 실제와의 차이 없음, 도면 값 목표 | 하나 (3회) | -0.7 ~ +0.9 | -0.3 ~ -0.4 | 0.01 ~ 0.02 |
+| | 둘 (3회) | +0.5 ~ +0.9 | -0.4 | 0.00 |
+| 차이 넣음 (메카넘 미끄러짐 + 카메라 TF yaw 1.5°, 옆 1 cm + marker 크기 2 %), 도면 값 목표 | 하나 (2회) | -2.3 ~ -2.9 | **-5.3 ~ -6.8** | **+1.5 ~ +1.6** |
+| | 둘 (2회) | -0.2 ~ +0.6 | **-6.9 ~ -7.1** | **+1.5** |
+| 같은 차이, **가르친 자세** 목표 | 하나 (2회) | +0.5 ~ +1.4 | -0.5 ~ +0.1 | 0.02 ~ 0.05 |
+| | 둘 (3회) | -0.2 ~ +1.4 | -0.3 ~ -0.6 | 0.00 ~ 0.04 |
 
 ![results](docs/aruco_results.png)
 
@@ -26,7 +29,7 @@ Gazebo 결과 (참값):
 | 코드가 어떻게 나뉘어 있나 | 4, 16 |
 | 시뮬레이션으로 돌려 보기 | 5 |
 | **실제 로봇으로 옮기는 순서** | 6 (설정 파일은 7) |
-| marker 를 얼마나 크게, 어디에 붙이나 | 8 |
+| 카메라(D455)의 화각, marker 를 얼마나 크게 어디에 붙이나, **marker 를 둘로 늘리면** | 8 |
 | 알고리즘의 자세한 설명과 근거 | 9 ~ 12 |
 | 얼마나 정확한가, 실제 로봇에서 어떻게 확인하나 | 13, 14 |
 | 안 될 때 | 15 |
@@ -60,7 +63,12 @@ Gazebo 결과 (참값):
   - [6-3. 안전 영역 (collision_monitor)](#6-3-안전-영역-collision_monitor)
   - [6-4. 옮긴 뒤 무엇을 어디서 바꾸나](#6-4-옮긴-뒤-무엇을-어디서-바꾸나)
 - [7. 설정 파일 하나: docking.yaml](#7-설정-파일-하나-dockingyaml)
-- [8. marker 크기와 15 cm](#8-marker-크기와-15-cm)
+- [8. 카메라(D455)와 marker: 크기, 배치, 15 cm](#8-카메라d455와-marker-크기-배치-15-cm)
+  - [8-1. 카메라: RealSense D455 의 컬러](#8-1-카메라-realsense-d455-의-컬러)
+  - [8-2. marker 하나 (dock_a)](#8-2-marker-하나-dock_a)
+  - [8-3. marker 둘 (dock_b): 크기, 배치, 달라지는 것](#8-3-marker-둘-dock_b-크기-배치-달라지는-것)
+  - [8-4. 인쇄와 부착](#8-4-인쇄와-부착)
+  - [8-5. 15 cm 때문에 바뀐 것](#8-5-15-cm-때문에-바뀐-것)
 - [9. 자세 추정 (aruco_detector.py)](#9-자세-추정-aruco_detectorpy)
   - [9-1. 왜 그냥 PnP 가 아닌가](#9-1-왜-그냥-pnp-가-아닌가)
   - [9-2. 바닥 사전분포를 둔 6자유도 MAP](#9-2-바닥-사전분포를-둔-6자유도-map)
@@ -191,7 +199,7 @@ OpenCV `cv2.aruco.detectMarkers` 가 하는 일이다. 번호는 위 그림과 �
 
 - 그림의 ⑤ 에서 후보는 7개다: marker, 그 옆의 검은 사각형, 흰 판, marker 안의 흰 칸들. ⑥ 을 지나면 marker 하나만 남는다.
 - ⑥ 덕분에 **잘못 찾는 일이 거의 없다**: 우연히 생긴 사각형(명판, 창문, 상자)은 dictionary 에 없는 무늬라 버려진다.
-- 정밀도를 정하는 것은 ⑦ 이다. 이 프로젝트의 모든 mm 는 "네 모서리를 0.1 ~ 0.3 px 로 안다" 에서 나온다 (붙은 자리에서 1 px = 0.26 mm).
+- 정밀도를 정하는 것은 ⑦ 이다. 이 프로젝트의 모든 mm 는 "네 모서리를 0.1 ~ 0.3 px 로 안다" 에서 나온다 (붙은 자리에서 1 px = 0.25 mm).
 - 이 프로젝트에서 바꾼 설정: 모서리 다듬기를 켰다 (기본은 끔). `minDistanceToBorder` 를 0 으로 했다 (기본 3 이면 가까이서 크게 보이는 marker 를 놓쳤다). 대신 모서리가 화면 끝 6 px 안에 걸린 marker, 한 변 16 px 보다 작은 marker 는 직접 버린다 (`aruco_detector.py` 의 `usable`).
 
 ### 2-3. 모서리 넷에서 자세로
@@ -208,20 +216,20 @@ marker 의 **실제 크기 s 를 알면**, marker 좌표계에서 네 모서리�
 
 | 영상에서 보이는 것 | 알게 되는 것 |
 |---|---|
-| marker 가 **얼마나 크게** 보이나 | 거리 (크기 s 를 알기 때문. 60 mm 가 230 px 이면 0.16 m) |
+| marker 가 **얼마나 크게** 보이나 | 거리 (크기 s 를 알기 때문. 60 mm 가 240 px 이면 0.16 m) |
 | marker 가 **화면 어디에** 있나 | 방향각(옆, 위아래 위치) |
 | 사각형이 **얼마나 돌아가** 보이나 | 시선 둘레의 회전 (roll) |
 | 정사각형이 **사다리꼴로 찌그러진** 정도 (원근) | marker 면이 기운 각 (yaw, pitch) |
 
 - 크기 s 가 1 % 틀리면 거리가 1 % 틀린다. 그래서 인쇄한 marker 를 재서 `size` 에 넣는다.
-- 카메라 내부값 K 는 RealSense 가 공장 보정값을 `camera_info` 로 준다.
+- 카메라 내부값 K 는 RealSense 가 공장 보정값을 `camera_info` 로 준다. 코드는 화각을 가정하지 않고 이 값을 쓴다.
 
 ### 2-4. marker 하나의 한계와 이 프로젝트의 대응
 
 위 표의 마지막 줄이 약점이다. **위치는 화소가 직접 말해 주지만, 면의 기울기는 "찌그러진 정도" 로만 보인다.**
 
 1. **해가 둘**: 정사각형 하나의 PnP 는 수학적으로 해가 두 개다 (IPPE). 면이 왼쪽으로 기운 것과 오른쪽으로 기운 것이 영상에서 거의 같게 보인다. 정면에 가깝거나 멀수록 구분이 안 된다.
-2. **방향이 흔들린다**: 60 mm marker 를 0.6 m 에서 보면 61 px 이다. 1° 기울 때 좌우 변의 길이 차이는 0.1 px 남짓이라 모서리 잡음과 같은 크기다. 그래서 한 장으로 잰 방향이 0.6 m 에서 0.5°, 1 m 밖에서는 몇 ° 씩 틀린다 (9-2 의 표).
+2. **방향이 흔들린다**: 60 mm marker 를 0.6 m 에서 보면 64 px 이다 (D455, 1280 x 720). 1° 기울 때 좌우 변의 길이 차이는 0.1 px 남짓이라 모서리 잡음과 같은 크기다. 그래서 한 장으로 잰 방향이 0.6 m 에서 1° 안팎, 1 m 밖에서는 몇 ° 씩 틀린다 (9-2 의 표).
 3. **지렛대**: 방향이 1° 틀리면 0.3 m 떨어진 로봇 자리는 옆으로 5 mm 틀린다.
 
 대응:
@@ -229,7 +237,8 @@ marker 의 **실제 크기 s 를 알면**, marker 좌표계에서 네 모서리�
 | 약점 | 대응 | 장 |
 |---|---|---|
 | 해가 둘, 기울기와 방향이 섞인다 | 설비는 바닥에 서 있으므로 "기울기 0, 높이 0 근처" 라는 사전분포를 넣어 푼다. 두 해가 남으면 필터가 지금까지의 추정에 가까운 쪽을 고른다 | 9-2, 10-1 |
-| 멀리서 본 방향이 부정확하다 | 측정마다 공분산을 계산해 필터가 가까이서 본 것을 크게 반영한다. 다가갈수록 정확해진다. 마지막 판단은 0.16 m 에서 서서 여러 장으로 한다 (옆 0.1 mm, 방향 0.02°) | 10-1, 10-3 |
+| 멀리서 본 방향이 부정확하다 | marker 를 둘로 늘리면 방향이 두 marker 의 위치 차이로 정해진다 (오차가 약 1/7) | 8-3 |
+| | 측정마다 공분산을 계산해 필터가 가까이서 본 것을 크게 반영한다. 다가갈수록 정확해진다. 마지막 판단은 0.16 m 에서 서서 여러 장으로 한다 (옆 0.1 mm, 방향 0.02°) | 10-1, 10-3 |
 | 그래도 접근 초반의 방향이 필요하다 | (선택) 깊이 영상에서 설비 면의 평면을 맞춰 방향을 따로 잰다 | 9-3 |
 | 지렛대 | marker 를 도킹 면에 바로 붙였다 (지렛대 = 로봇까지의 0.31 m 뿐) | 8 |
 
@@ -324,7 +333,7 @@ marker 의 **실제 크기 s 를 알면**, marker 좌표계에서 네 모서리�
 cd ~/ros2_ws && colcon build --packages-select simple_line_planner simple_line_controller simple_line_bringup \
     bt_mission_msgs bt_mission
 source install/setup.bash
-colcon test --packages-select bt_mission && colcon test-result --verbose     # 55 tests, 0 failures
+colcon test --packages-select bt_mission && colcon test-result --verbose     # 60 tests, 0 failures
 ```
 
 필요한 것: ROS 2 Humble, Nav2, `python3-opencv` (4.5.4 이상, aruco 포함), `python3-numpy`, `python3-yaml`, `cv_bridge`, yaml-cpp. 시뮬레이션에는 `gazebo_ros_pkgs`, `turtlebot3_gazebo` 도.
@@ -345,6 +354,16 @@ task> dock:dock_a 3.85,1.25,-15           # 옆 0.25 m, 비스듬히 15 도에�
 task> undock_precise:dock_a               # marker 를 보며 dock 축을 따라 물러난다
 ```
 
+marker 가 둘인 설비 (8-3) 로 바꿔 보려면 `dock_markers:=2` 로 띄우고 작업의 dock 이름을 `dock_b` 로 쓴다:
+
+```bash
+ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse robot:=mecanum dock:=True dock_markers:=2
+task> dock:dock_b 3.85,-2.5 3.85,1.0,0
+task> undock_precise:dock_b
+```
+
+시뮬레이션의 카메라는 D455 컬러의 화각(가로 90°)이고 해상도는 `camera_resolution:=848x480` (기본) 이다. 실제 로봇에서 권하는 `1280x720` 으로도 띄울 수 있지만, GPU 없이 그리는 환경에서는 Gazebo 가 무거워져 Nav2 가 제어 주기를 놓쳤다 (staging 까지 가다가 `Failed to make progress`).
+
 실제 로봇과의 차이를 넣어 보려면 (13장):
 
 ```bash
@@ -357,7 +376,7 @@ RViz: `/dock/aruco_debug` (Image: 찾은 marker, 바닥 위 자세로 다시 그
 
 ![camera](docs/aruco_camera_debug.jpg)
 
-붙은 자리(카메라 ↔ marker 0.16 m)에서 본 `/dock/aruco_debug`. marker 는 230 px 이고 위아래로 125 px 씩 남는다. 초록 = 검출한 모서리, 빨간 점 = 추정한 바닥 위 자세로 다시 그린 모서리. 둘이 겹치고 `tilt 0.0deg z +0mm` 이면 카메라 TF 와 설정이 맞다.
+붙은 자리(카메라 ↔ marker 0.16 m)에서 본 `/dock/aruco_debug` (D455 화각, 1280 x 720). marker 는 240 px 이고 위아래로 240 px, 좌우로 520 px 남는다. 초록 = 검출한 모서리, 빨간 점 = 추정한 바닥 위 자세로 다시 그린 모서리. 둘이 겹치고 `tilt 0.0deg z +0mm` 이면 카메라 TF 와 설정이 맞다. 첫 줄의 `(1/1)` 은 그 dock 의 marker 가운데 몇 개를 보았는지다.
 
 ## 6. 실제 로봇으로 옮기기
 
@@ -391,7 +410,7 @@ RViz: `/dock/aruco_debug` (Image: 찾은 marker, 바닥 위 자세로 다시 그
 | 6 | 안전 영역 | collision_monitor 의 영역 이름을 확인한다 (6-3) | `ros2 param get /collision_monitor Footprint.enabled` 가 값을 준다 |
 | 7 | 첫 도킹 | **`gap: 0.30` 으로 멀찍이**, 비상정지를 잡고 `dock:dock_a <staging>` | 설비 30 cm 앞에 곧게 선다. 로그의 단계가 3-1 의 순서대로 지나간다 |
 | 8 | 보정 | `dock_calibrate.py` 로 배율과 데드밴드를 잰다 (14-3) | 값을 `motion` 에 옮겨 적고 다시 도킹했을 때 끝에서 떨거나 못 미치지 않는다 |
-| 9 | 15 cm | `gap: 0.15` 로 되돌리고 도킹 | 붙은 자리에서 `border_px` 가 100 안팎 (marker 가 화면 가운데). refine 이 한두 번 고치고 끝난다 |
+| 9 | 15 cm | `gap: 0.15` 로 되돌리고 도킹 | 붙은 자리에서 `border_px` 가 240 안팎 (1280 x 720 에서. marker 가 화면 가운데). refine 이 한두 번 고치고 끝난다 |
 | 10 | 가르치기 | 로봇을 정확한 자리에 놓고 `aruco_teach.py` (12장) | 다음 도킹의 로그에 `target (taught ...)` |
 | 11 | 확인 | `dock` → `undock` 을 20번, **영상이 아닌 기준**으로 잰다 (14-4) | 필요한 정밀도 안에서 되풀이된다 |
 | 12 | undock | `undock`, `undock_precise:dock_a` (11장) | 뒤를 막아 놓으면 서는지도 본다 |
@@ -416,10 +435,10 @@ ros2 launch bt_mission aruco_detector.launch.py camera:=/camera/camera config_fi
 
 BT 노드는 작업을 시작할 때마다 파일을 다시 읽으므로 값을 고친 뒤 task_server 를 다시 띄울 필요가 없다. detector 는 시작할 때 한 번 읽으므로 `docks` 를 고치면 detector 를 다시 띄운다.
 
-**4. 카메라** (RealSense. 옵션 이름은 realsense-ros 판마다 조금 다르니 `ros2 launch realsense2_camera rs_launch.py --show-args` 로 확인한다)
+**4. 카메라** (RealSense D455. 해상도와 fps 는 8-1. 옵션 이름은 realsense-ros 판마다 조금 다르니 `ros2 launch realsense2_camera rs_launch.py --show-args` 로 확인한다)
 
 ```bash
-ros2 launch realsense2_camera rs_launch.py rgb_camera.color_profile:=848x480x30 enable_sync:=true \
+ros2 launch realsense2_camera rs_launch.py rgb_camera.color_profile:=1280x720x15 enable_sync:=true \
     align_depth.enable:=true          # 깊이를 쓸 때만 (use_depth:=True)
 # 카메라가 URDF 에 없으면: 줄자로 잰 값으로 시작한다 (x 앞, y 왼쪽, z 위 [m], 각도 [rad])
 ros2 run tf2_ros static_transform_publisher --x 0.15 --y 0 --z 0.13 --yaw 0 --pitch 0 --roll 0 \
@@ -453,7 +472,8 @@ ros2 run tf2_ros static_transform_publisher --x 0.15 --y 0 --z 0.13 --yaw 0 --pi
 | 바꾸고 싶은 것 | 고치는 곳 |
 |---|---|
 | 로봇 치수, 토픽, 속도, 허용오차, 붙는 거리 | `docking.yaml` |
-| 설비를 더한다 (dock_b) | `docking.yaml` 의 `docks` 에 `dock_b` (marker 1번) 를 더하고, marker 를 인쇄해 붙이고, 가르친다. 작업은 `dock:dock_b ...` |
+| 설비를 더한다 | `docking.yaml` 의 `docks` 에 이름과 아직 안 쓴 marker 번호로 더하고, marker 를 인쇄해 붙이고, 가르친다. 작업은 `dock:<이름> ...` |
+| 한 설비의 marker 를 둘로 늘린다 | `docks` 의 그 dock 을 `markers:` 목록으로 (8-3). 한 장에 다시 인쇄하고 다시 가르친다 |
 | 순서: 재시도 횟수, 단계 추가, 도킹 뒤 신호 확인 | `behavior_trees/task.xml` |
 | 안전 영역의 이름 | `task.xml` 의 `MuteCollisionMonitor` (6-3) |
 | 카메라가 다르다 (화각, 해상도) | launch 의 `camera`. marker 크기를 다시 정한다 (8장) |
@@ -466,7 +486,7 @@ ros2 run tf2_ros static_transform_publisher --x 0.15 --y 0 --z 0.13 --yaw 0 --pi
 
 | 구역 | 내용 | 누가 읽나 |
 |---|---|---|
-| `dictionary`, `docks` | [설비] dock 마다 marker 번호, 크기, 높이, 붙는 거리(`gap`: 로봇 앞면 ↔ 도킹 면) | detector, BT, 도구 |
+| `dictionary`, `docks` | [설비] dock 마다 marker (하나: `marker_id`, 여럿: `markers:` 목록), 크기, 높이, 붙는 거리(`gap`: 로봇 앞면 ↔ 도킹 면) | detector, BT, 도구 |
 | `robot` | [로봇] 중심에서 앞/뒤/옆면까지, 제자리 회전 반지름 | BT |
 | `ros` | [로봇] odom/base frame, cmd_vel, 레이저, 검출 토픽 | BT, 도구 |
 | `motion` | 속도 한계, 가속도, 이득, 허용오차, 깔때기. **[측정]** 데드밴드(`min_*`), 배율(`scale_*`), odom 흐름 | BT |
@@ -479,45 +499,131 @@ ros2 run tf2_ros static_transform_publisher --x 0.15 --y 0 --z 0.13 --yaw 0 --pi
 - 파일 안의 주석이 항목마다 뜻과 단위를 적어 두었다. 코드 쪽은 `include/bt_mission/docking_config.hpp` 하나가 파일을 읽는다 (ROS 와 무관, `test_docking_config.cpp`).
 - `task.xml` 을 고칠 일은 순서를 바꿀 때뿐이다 (예: 재시도 횟수, 단계 추가).
 
-## 8. marker 크기와 15 cm
+## 8. 카메라(D455)와 marker: 크기, 배치, 15 cm
+
+### 8-1. 카메라: RealSense D455 의 컬러
+
+| | D455 컬러 | 이 프로젝트에 주는 뜻 |
+|---|---|---|
+| 화각 | 가로 약 90°, 세로 약 65° (1280 x 800). 16:9 (1280 x 720, 848 x 480) 로 받으면 세로 약 59° | 붙은 자리(카메라 ↔ 면 0.16 m)에서 가로 0.32 m, 세로 0.18 m 가 보인다. marker 가 잘릴 걱정이 적고, marker 둘을 나란히 볼 수 있다 |
+| 화소 밀도 | 1280 x 720 에서 fx ≈ 640 px, 848 x 480 에서 fx ≈ 424 px | 화각이 넓은 만큼 같은 해상도에서 marker 가 작게 찍힌다. **1280 x 720 으로 받는다** |
+| 셔터 | global shutter | 움직이며 찍어도 marker 가 찌그러지지 않는다 |
+| 초점 | 고정 초점 | 0.16 m 에서는 조금 흐릴 수 있다 (8-5) |
+| 깊이의 최소 거리 | 약 0.4 ~ 0.5 m (해상도에 따라) | 깊이는 붙은 자리에서 쓸 수 없다. 접근 초반의 방향만 돕는다 (9-3) |
+
+- **해상도는 1280 x 720, 15 fps 를 권한다** (`rgb_camera.color_profile:=1280x720x15`). 848 x 480 으로 받으면 한 장의 방향 오차가 1.2 ~ 4 배다 (9-2 의 표). detector 의 계산은 이 환경에서 1280 x 720 한 장에 약 25 ms 였다 (받기 6, 변환 5, 검출 6, 자세 5 ~ 8 ms. Python). 30 fps 면 CPU 코어 하나의 70 % 쯤이고 15 fps 면 그 절반이다. 도킹은 0.05 ~ 0.15 m/s 로 움직이므로 15 Hz 면 충분하다 (시뮬레이션도 15 Hz 다).
+- **코드는 화각을 가정하지 않는다.** `camera_info` 의 K 와 왜곡 계수를 그대로 쓴다. 위 숫자는 marker 의 크기와 배치를 정하는 데만 썼다. 컬러 화각은 자료마다 90° x 65° 또는 86° x 57° (±3°) 로 적혀 있으므로, 실제 값은 `ros2 topic echo /camera/camera/color/camera_info --once` 의 `k[0]` (fx) 로 확인한다: 가로 화각 = 2 · atan(영상 폭 / 2fx). 아래의 여유는 86° 여도 남는다.
+- D455 는 몸체가 넓고(약 124 mm) 컬러 렌즈가 몸체의 가운데에 있지 않다. TF 는 realsense-ros 가 `camera_link → camera_color_optical_frame` 으로 내 주지만, **marker 는 "붙은 자리에서 컬러 렌즈의 정면" 에 오게 붙인다** (`docks.*.lateral`, `height`).
+
+### 8-2. marker 하나 (dock_a)
 
 ![marker](docs/aruco_marker_dock_a.png)
 
-**marker: DICT_4X4_50 의 0번, 검은 테두리 바깥 한 변 60 mm, 흰 여백 20 mm (종이 100 x 100 mm).**
+**DICT_4X4_50 의 0번, 검은 테두리 바깥 한 변 60 mm, 흰 여백 20 mm (종이 100 x 100 mm).** 카메라가 D455 로 정해진 뒤에도 그대로 쓴다.
 
-크기는 "붙은 자리에서 화면에 다 들어오고, 조금 어긋나도 잘리지 않는 가장 큰 것" 으로 정했다.
-
-| | 값 | 근거 |
+| | 값 (D455, 1280 x 720) | 근거 |
 |---|---|---|
 | 붙은 자리의 카메라 ↔ marker | 0.16 m | 로봇 앞면 ↔ 설비 0.15 m, 카메라는 앞면 1 cm 안쪽 |
-| 그 거리에서 보이는 범위 (D435 컬러, 69° x 42°) | 가로 0.22 m, 세로 0.12 m | 세로가 좁다 |
-| 60 mm marker 의 크기 | 230 px (848 x 480) | 세로 480 px 의 48 % |
-| 남는 여유 | 위아래 125 px (33 mm), 좌우 310 px (81 mm) | 높이가 ±1.5 cm, 옆이 ±7 cm 틀려도 화면 안 |
-| 붙은 자리의 정밀도 (합성 영상) | 옆 0.1 mm, 방향 0.02° | 9-2 |
-| 찾을 수 있는 거리 | 한 변 16 px 이상 = 약 2.2 m. **방향까지 믿을 만한 것은 0.8 m 안** | staging 은 설비 면에서 로봇 중심 0.6 ~ 0.9 m |
+| 그 거리에서 보이는 범위 | 가로 0.32 m, 세로 0.18 m | 가로 90°, 세로 59° |
+| 60 mm marker 의 크기 | 240 px | 세로 720 px 의 1/3 |
+| 남는 여유 | 위아래 240 px (60 mm), 좌우 520 px (130 mm) | 높이가 ±4 cm, 옆이 ±10 cm 틀려도 화면 안 |
+| 붙은 자리에서 한 장의 정밀도 (합성 영상) | 옆 0.4 mm, 방향 0.08° | 9-2. 서서 여러 장을 합치면 더 작다 |
+| 찾을 수 있는 거리 | 한 변 16 px 이상 = 약 2.4 m. **방향까지 믿을 만한 것은 0.8 m 안** | staging 은 설비 면에서 로봇 중심 0.6 ~ 0.9 m |
 
-- **더 크게 하면** 붙은 자리에서 여유가 줄어든다 (80 mm 면 위아래 17 mm). 접근 중 로봇이 앞뒤로 기울거나 높이가 틀리면 잘린다. **더 작게 하면** 멀리서 방향이 나빠진다 (같은 거리에서 화소 수에 비례).
-- 다른 카메라, 다른 거리면: **한 변 ≈ 0.38 x (붙은 자리의 카메라 ↔ marker 거리)** (세로 화각 42° 에서 화면 높이의 절반). 세로 화각이 넓은 카메라(D455 컬러 65°)면 0.6 배까지 키울 수 있다.
-- 컬러를 1280 x 720 으로 받으면 화소가 1.5 배라 먼 거리의 방향이 그만큼 좋아진다 (detector 계산은 2.3 배 무겁다).
+- **더 크게 해도 된다.** 세로 여유가 60 mm 라 80 mm 까지는 붙은 자리에서 잘리지 않는다 (여유 50 mm). 80 mm 면 1 m 에서 본 한 장의 방향이 3° 에서 0.8° 로 좋아진다 (9-2). staging 을 1 m 밖에 둘 수밖에 없거나 848 x 480 으로 받아야 하면 80 mm 로 인쇄하고 `size: 0.08` 로 적는다. 그보다 방향이 더 필요하면 크기를 키우지 말고 marker 를 둘로 늘린다 (8-3).
+- 다른 거리에 붙는다면: **한 변 ≤ 0.5 x (붙은 자리의 카메라 ↔ marker 거리)**. 세로로 보이는 범위의 절반에서 여유를 뺀 값이다.
 
-인쇄와 부착:
+### 8-3. marker 둘 (dock_b): 크기, 배치, 달라지는 것
 
-1. `python3 tools/make_aruco_dock.py config/docking.yaml dock_a marker_dock_a` → `marker_dock_a.svg` (mm 단위). 브라우저나 Inkscape 에서 **실제 크기(100 %)** 로 인쇄한다 ("용지에 맞춤" 을 끈다). 같이 찍히는 50 mm 눈금을 자로 재서 배율을 확인한다.
+marker 하나의 약점은 방향이다 (2-4). 정사각형 하나가 찌그러진 정도로만 방향을 알 수 있어서다. marker 둘을 가로로 벌려 붙이면 방향이 **두 marker 의 위치 차이**로 정해진다.
+
+![two markers](docs/aruco_marker_dock_b.png)
+
+**권장: 60 mm marker 둘을 같은 높이에 가로로 나란히, 중심 간격 160 mm, A4 가로 한 장에 인쇄.** `docking.yaml` 의 `dock_b` 가 이 배치다.
+
+```yaml
+docks:
+  dock_b:
+    size: 0.06
+    height: 0.13                      # marker 중심 = 카메라 렌즈 높이
+    gap: 0.15
+    markers:
+      - {id: 2, lateral: -0.08}       # 로봇이 볼 때 왼쪽
+      - {id: 3, lateral: 0.08}        # 오른쪽. 가운데(lateral 0) = 붙은 자리에서 카메라 렌즈의 정면
+```
+
+| 정한 것 | 값 | 근거 |
+|---|---|---|
+| 놓는 방향 | 가로로 나란히, 같은 높이 | 필요한 것은 바닥 위의 방향(yaw)이다. 세로로 벌리면 pitch 만 좋아진다 |
+| 중심 간격 | 160 mm | 붙은 자리에서 가로로 0.32 m 가 보인다. marker 의 바깥 끝이 가운데에서 110 mm 이므로 좌우로 50 mm (200 px) 씩 남는다. 화각이 86° 여도 39 mm 남는다. 간격이 넓을수록 방향이 좋아지지만 붙은 자리에서 잘린다 |
+| 크기 | 60 mm 그대로 | 방향은 간격이 정하므로 키울 필요가 없다. 50 mm 를 180 mm 간격으로 놓은 것은 가까이서는 비슷하고 멀리서는 더 나빴다 (1.5 m 에서 3.9° 와 2.5°) |
+| 인쇄 | 한 장에 (종이 260 x 100 mm, A4 가로) | 두 marker 의 간격이 인쇄로 정해진다. 따로 붙이면 0.5 mm 만 어긋나도 방향 0.2° 의 고정 오차가 된다 |
+| 번호 | 한 dock 안에서도, dock 끼리도 겹치지 않게 | `dock_b` 는 2번과 3번. 1번은 `dock_a` 에 하나 더 붙일 때를 위해 비워 두었다 |
+
+![two markers at the docked pose](docs/aruco_camera_debug_two.jpg)
+
+붙은 자리에서 본 `/dock/aruco_debug` (Gazebo, D455 화각, 1280 x 720). 둘 다 화면 안에 있고 좌우로 200 px 씩 남는다. 한 장으로 잰 방향의 σ 가 marker 하나일 때 0.64° 에서 0.07° 로 줄었다 (5장의 그림과 비교).
+
+**얼마나 좋아지나**
+
+| | marker 하나 (60 mm) | marker 둘 (60 mm, 간격 160 mm) |
+|---|---|---|
+| 한 장의 방향 오차, 0.75 m (staging), 합성 영상 | 1.11° | 0.16° |
+| 같은 것, 1.0 m | 3.1°. 30장 가운데 6장에서 뒤집힌 후보가 같이 나옴 | 0.38°. 뒤집힌 후보 없음 |
+| 같은 것, 붙은 자리 | 0.08° | 0.01° |
+| Gazebo: 처음 찾았을 때 dock 방향의 σ | 0.8 ~ 3.5° | 0.2 ~ 0.7° |
+| Gazebo: 붙은 자리의 참값 오차 | 1 mm, 0.02° 안 | 1 mm, 0.01° 안 |
+| marker 하나가 가려지면 | 도킹할 수 없다 | 남은 하나로 접근하고 진입한다 (13장) |
+
+- **좋아지는 것**: 멀리서 본 방향 (접근 초반에 좌우로 흔들리며 방향을 찾는 일이 줄고, staging 을 더 멀리, 더 비스듬히 둘 수 있다), 뒤집힌 해가 없어진다, 한쪽이 가려지거나 반사로 안 보여도 계속 간다, 붙은 자리에서 한 장의 정밀도가 좋아져 흔들림이나 조명이 나쁠 때 여유가 생긴다.
+- **그대로인 것**: 카메라 TF 처럼 늘 같은 방향으로 틀리는 고정 오차. marker 둘로도 도면 값 목표는 옆 -7 mm, 1.5° 가 남았다 (13장). 가르친 자세가 여전히 필요하다. 그리고 시뮬레이션에서는 marker 하나로도 마지막에 1 mm 안에 서므로, 끝난 자리의 숫자는 달라지지 않는다.
+
+**로직에서 달라지는 것**
+
+| 곳 | marker 하나 | marker 둘 이상 |
+|---|---|---|
+| 설정 (`docks`) | `marker_id: 0` | `markers: [{id, lateral}, ...]`. `size`, `height`, `offset` 은 dock 에 한 번 적거나 marker 마다 |
+| 자세 추정 (detector) | marker 의 모서리 4개로 | dock 마다 자세 하나: 보인 marker 의 모서리를 모두 한 번에 맞춘다 (9-2 의 식에서 모서리 8개). 시작점은 marker 마다의 IPPE 해 |
+| 메시지 (`ArucoDetection`) | | `marker_ids` (자세에 쓴 marker), `markers_total` (그 dock 의 marker 수) 가 더해졌다 |
+| 화면 끝 여유 `border_px` | 그 marker 의 여유 | 가장 여유 있는 marker 의 값. 하나가 화면 밖으로 나가도 다른 하나로 자세가 나오기 때문이다 |
+| `camera_distance` | | 카메라에서 marker 가 붙은 면까지의 수직 거리로 바꿨다. marker 가 정면에 없으면 marker 중심까지의 거리는 면까지의 거리보다 길다 |
+| 필터, 접근, 진입 (BT 노드) | | **바뀌지 않는다.** 받는 것은 여전히 "dock 의 자세와 공분산" 이다. 공분산이 작아진 만큼 필터가 저절로 더 믿는다 |
+| 서서 재기 (`ArucoRefine`) | | 전부 보인 영상만 쓴다 (`stages.refine.all_markers: true`). 일부만 보고 푼 자세는 가르칠 때(전부 보고)와 다른 고정 오차를 가진다. 전부 보이지 않으면 실패한다. 하나로도 끝내게 하려면 `false` |
+| 가르치기 (`aruco_teach.py`) | | 전부 보인 영상만 쓰고, 본 marker 번호를 파일에 적는다. dock 의 marker 구성이 달라지면 그 파일은 쓰이지 않는다 |
+| 깊이 평면 (선택) | marker 둘레 | 두 marker 를 감싸는 영역 |
+| 인쇄 도구 | | dock 의 marker 를 한 장에 모두 찍는다 |
+
+**dock_a 의 marker 를 둘로 늘리는 순서**
+
+1. `docking.yaml` 에서 `dock_a` 의 `marker_id: 0`, `lateral: 0.0` 두 줄을 `markers: [{id: 0, lateral: -0.08}, {id: 1, lateral: 0.08}]` 로 바꾼다.
+2. `python3 tools/make_aruco_dock.py config/docking.yaml dock_a marker_dock_a` → A4 가로에 100 % 로 인쇄한다. 50 mm 눈금과 marker 한 변, 두 marker 의 중심 간격(160.0 mm)을 잰다.
+3. 수평으로, 종이의 가운데가 붙은 자리의 카메라 렌즈 정면에 오게 붙인다. 가운데가 틀리면 한쪽 여유가 줄어든다.
+4. detector 를 다시 띄운다 (`docks` 는 시작할 때 읽는다).
+5. `/dock/aruco_debug` 의 첫 줄이 `dock_a id 0,1 (2/2)` 인지, 붙은 자리에서도 `(2/2)` 인지 본다.
+6. 다시 가르친다 (12장). 전에 가르친 파일은 marker 구성이 달라 쓰이지 않는다.
+
+**셋 이상은**: 같은 형식으로 `markers` 에 더하면 코드는 그대로 돈다. 다만 15 cm 에서는 가로로 0.32 m 만 보여서 더 벌릴 수 없고, 위아래(세로 0.18 m)로 더하면 pitch 만 좋아진다. 15 cm 도킹에서는 둘이 실질적인 최대다. 더 멀리 붙는 설비라면 간격을 넓힌다: marker 의 바깥 끝이 "붙은 자리에서 가로로 보이는 범위의 절반 - 50 mm" 안에 오게.
+
+### 8-4. 인쇄와 부착
+
+1. `python3 tools/make_aruco_dock.py config/docking.yaml dock_a marker_dock_a` → `marker_dock_a.svg` (mm 단위). 브라우저나 Inkscape 에서 **실제 크기(100 %)** 로 인쇄한다 ("용지에 맞춤" 을 끈다). 같이 찍히는 50 mm 눈금을 자로 재서 배율을 확인한다. marker 가 둘인 dock 은 A4 가로 한 장에 나온다.
 2. marker 한 변을 캘리퍼로 잰다. 60.0 mm 가 아니면 `docking.yaml` 의 `size` 를 잰 값으로 고친다 (1 % 틀리면 거리가 1 % 틀린다).
 3. 무광 용지에 레이저 프린터로. 단단하고 평평한 판(아크릴, 알루미늄 복합판)에 붙이거나 설비의 평평한 면에 바로 붙인다. 휘거나 들뜨면 그만큼 자세가 틀린다. 흰 여백을 자르지 않는다.
-4. 높이: marker 중심 = 카메라 렌즈 높이 (`docks.dock_a.height`). 수준기로 수평을 맞춘다.
+4. 높이: marker 중심 = 카메라 렌즈 높이 (`docks.*.height`). 수준기로 수평을 맞춘다.
 5. 로봇 그림자가 marker 를 덮으므로 설비 쪽 조명이 일정한지 본다. 반사되는 코팅지, 유리 뒤는 피한다.
 
-**15 cm 때문에 바뀐 것** (거리 값 말고):
+### 8-5. 15 cm 때문에 바뀐 것
+
+거리 값 말고 달라진 것들이다.
 
 | 걱정 | 한 것 |
 |---|---|
-| 가까워서 marker 가 화면 밖으로 나간다 | marker 크기와 높이를 위처럼 정했다. 접근 중에는 "깔때기" 가 옆과 방향을 먼저 맞추므로 (10-2) marker 가 화면 가운데로 온다 |
+| 가까워서 marker 가 화면 밖으로 나간다 | marker 크기, 간격, 높이를 위처럼 정했다. 접근 중에는 "깔때기" 가 옆과 방향을 먼저 맞추므로 (10-2) marker 가 화면 가운데로 온다 |
 | 잘린 marker 로 틀린 자세를 낸다 | detector 는 모서리가 화면 끝 6 px 안에 걸린 marker 를 버린다. 검출마다 화면 끝까지의 여유(`border_px`)를 같이 보낸다 |
 | marker 를 못 보는데 설비 쪽으로 계속 간다 | **설비 쪽으로 가는 것은 marker 를 0.5 초 안에 보았고 화면 끝에서 10 px 안쪽일 때만.** 아니면 옆과 방향만 고쳐서 marker 를 화면 가운데로 되돌린다. 2 초 동안 못 보면 멈추고 그 자리에서 다시 본다 (`safety.fresh_detection`, `min_border_px`, `stages.*.lost_timeout`) |
-| 설비에 부딪힌다 | 카메라가 marker 에 `safety.min_camera_distance` (0.10 m) 보다 가까워지면 멈추고 실패한다. 마지막 구간은 0.05 m/s, 지나치면 그만큼만 되돌린다 |
-| 깊이 카메라가 가까이서 못 잰다 | 스테레오 깊이는 최소 거리가 있다 (D435 는 848 x 480 에서 약 0.2 m). 붙은 자리의 판단은 컬러 영상만으로 한다. 깊이는 멀리서 방향을 돕는 데만 쓴다 (9-3) |
-| 컬러 카메라 초점 | D435 계열 컬러는 고정 초점이라 0.16 m 에서 조금 흐리다. 칸이 10 mm 인 4x4 marker 는 흐려도 읽힌다. 흐림 때문에 생기는 모서리 편향은 고정 오차라 가르친 자세가 지운다 (12장) |
+| 설비에 부딪힌다 | 카메라가 marker 가 붙은 면에 `safety.min_camera_distance` (0.10 m) 보다 가까워지면 멈추고 실패한다. 마지막 구간은 0.05 m/s, 지나치면 그만큼만 되돌린다 |
+| 깊이 카메라가 가까이서 못 잰다 | D455 의 깊이는 약 0.4 ~ 0.5 m 부터 나온다. 붙은 자리의 판단은 컬러 영상만으로 한다. 깊이는 멀리서 방향을 돕는 데만 쓴다 (9-3) |
+| 컬러 카메라 초점 | D455 의 컬러는 고정 초점이라 0.16 m 에서 조금 흐릴 수 있다 (실제 카메라에서 확인하지 못했다). 칸이 10 mm 인 4x4 marker 는 흐려도 읽힌다. 흐림 때문에 생기는 모서리 편향은 고정 오차라 가르친 자세가 지운다 (12장) |
 
 ## 9. 자세 추정 (aruco_detector.py)
 
@@ -534,10 +640,10 @@ dock 좌표계 D: 원점 = 바닥에서 도킹 면의 가운데, x = 설비에�
 설비는 바닥에 서 있고, 카메라가 로봇 어디에 달렸는지(TF)와 marker 의 높이를 안다. 그렇다고 "기울기 0, 높이 0" 을 못박으면(3자유도) 카메라 TF 의 높이가 1 cm, pitch 가 1° 만 틀려도 풀이가 방향을 비틀어 옆으로 수 cm 틀린다 (이전 구성의 실험에서 2 ~ 15 cm). 그래서 6자유도 p = (x, y, yaw, z, roll, pitch) 를 풀되 "바닥에 서 있다" 를 **사전분포**로 둔다:
 
 ```
-p* = argmin_p   Σᵢ ‖ π(K, T_cam←base · T_base←D(p) · cᵢ) − uᵢ ‖² / σ_px²      (모서리 4개 = 식 8개)
+p* = argmin_p   Σᵢ ‖ π(K, T_cam←base · T_base←D(p) · cᵢ) − uᵢ ‖² / σ_px²      (모서리 4개 = 식 8개. marker 가 둘이면 8개 = 식 16개)
              +  z² / σ_z²  +  roll² / σ_tilt²  +  pitch² / σ_tilt²             (사전분포: σ_z 1 cm, σ_tilt 1.5°)
              +  (yaw − yaw_depth)² / σ_depth²                                   (깊이를 쓸 때만, 9-3)
-풀이: Levenberg-Marquardt. 시작점은 IPPE 의 두 해
+풀이: Levenberg-Marquardt. 시작점은 IPPE 의 두 해 (marker 가 여럿이면 marker 마다의 해 가운데 전체 오차가 작은 것과, 그것과 다른 골짜기의 것 하나)
 ```
 
 - 가까이서 영상이 기울기를 잘 말해 주면 영상이 이긴다 (TF 가 틀려도 따라간다). 멀거나 정면이라 말해 주지 못하면 사전분포가 뒤집힌 해와 기울기-방향 섞임을 막는다.
@@ -545,29 +651,41 @@ p* = argmin_p   Σᵢ ‖ π(K, T_cam←base · T_base←D(p) · cᵢ) − uᵢ 
 - 공분산: 정보 행렬 JᵀJ 를 뒤집어 (x, y, yaw) 부분을 꺼낸다. 멀면 크고 가까우면 작다. 필터가 측정마다 무게를 다르게 주는 근거다.
 - 진단: 추정한 dock 의 기울기(`tilt_deg`)와 바닥 높이(`height_offset`). 가까이서 늘 3°, 1.5 cm 를 넘으면 경고한다 (카메라 TF, marker 높이 점검).
 
-합성 영상(848 x 480, 블러, 잡음)으로 잰 60 mm marker 의 오차. "옆" = 그 추정으로 붙었을 때 로봇이 옆으로 어긋날 거리, 6장의 평균:
+합성 영상(D455: 가로 90°, 블러, 잡음)으로 잰 오차. 거리마다 로봇을 옆과 방향으로 조금씩 흩어 놓은 30장의 RMS 이고, "옆" 은 그 추정 한 장으로 붙었을 때 로봇이 옆으로 어긋날 거리다. 괄호는 30장 가운데 뒤집힌 후보가 같이 나온 장 수다.
 
-| 로봇 중심 ↔ 설비 (카메라 ↔ marker) | marker | MAP: 옆 [mm] / 방향 [°] | 6자유도 PnP |
-|---|---|---|---|
-| 붙은 자리 0.31 m (0.16 m) | 230 px | **0.09 / 0.02** | 1.94 / 0.35 |
-| 같은 자리, 카메라 TF 높이 1 cm 또는 pitch 1° 틀림 | | **0.09 / 0.02** | 1.94 / 0.35 |
-| 0.40 m (0.25 m) | 147 px | **0.30 / 0.05** | 0.66 / 0.12 |
-| 0.56 m (0.41 m) = approach 가 끝나는 곳 | 89 px | **0.64 / 0.12** | 3.70 / 0.68 |
-| 0.75 m (0.60 m) = staging | 61 px | **2.5 / 0.46** | 9.5 / 1.74 |
-| 1.0 m (0.85 m) | 43 px | 9.2 / 1.66 | 10.7 / 1.95 |
-| 1.5 m (1.35 m) | 26 px | 66 / 12 | 54 / 10 |
+1280 x 720 (fx 640 px), 방향 [°] / 옆 [mm]:
 
-- 붙은 자리에서는 옆 0.1 mm, 방향 0.02°. 마지막 판단은 여기서 한다.
-- **1 m 밖에서 본 한 장은 방향을 믿을 수 없다** (60 mm marker 의 한계). 그래서 staging 은 설비에서 0.6 ~ 0.9 m 에 두고, 한 장으로 정하지 않고 다가가며 정확해지는 측정을 필터로 합친다 (10-1).
+| 로봇 중심 ↔ 설비 | 60 mm 의 크기 | 하나, 60 mm | 하나, 80 mm | **둘, 60 mm, 간격 160 mm** |
+|---|---|---|---|---|
+| 붙은 자리 0.31 m | 240 px | 0.08 / 0.44 | 0.06 / 0.34 | **0.01 / 0.06** |
+| 0.56 m = approach 가 끝나는 곳 | 94 px | 0.63 / 3.5 | 0.37 / 2.1 | **0.05 / 0.26** |
+| 0.75 m = staging | 64 px | 1.11 / 6.0 | 0.81 / 4.5 | **0.16 / 0.87** |
+| 1.0 m | 45 px | 3.1 / 17 (6) | 0.78 / 4.2 | **0.38 / 2.1** |
+| 1.5 m | 28 px | 10.7 / 57 (20) | 4.2 / 23 (9) | 2.5 / 13 (0) |
+
+848 x 480 (fx 424 px) 으로 받으면:
+
+| 로봇 중심 ↔ 설비 | 60 mm 의 크기 | 하나, 60 mm | 하나, 80 mm | 둘, 60 mm, 간격 160 mm |
+|---|---|---|---|---|
+| 붙은 자리 0.31 m | 159 px | 0.16 / 0.88 | 0.09 / 0.52 | 0.02 / 0.10 |
+| 0.56 m | 62 px | 0.98 / 5.4 | 0.49 / 2.7 | 0.10 / 0.55 |
+| 0.75 m | 42 px | 1.30 / 7.0 | 1.13 / 6.1 | 0.38 / 2.1 |
+| 1.0 m | 30 px | 11.9 / 64 (13) | 3.4 / 19 (4) | 1.6 / 8.8 (0) |
+
+- 한 장의 값이다. 접근하며 필터가 수십 장을 합치고, 마지막에는 붙은 자리에서 서서 10장 넘게 합치므로 실제로 남는 오차는 이보다 훨씬 작다 (13장).
+- **marker 하나로는 1 m 밖에서 본 한 장의 방향을 믿을 수 없다.** 그래서 staging 은 설비에서 0.6 ~ 0.9 m 에 두고, 한 장으로 정하지 않고 다가가며 정확해지는 측정을 필터로 합친다 (10-1).
+- **marker 둘은 1 m 안의 모든 거리에서 방향 오차가 하나일 때의 1/5 ~ 1/12 이고, 뒤집힌 후보가 나오지 않는다** (8-3).
+- 해상도: 848 x 480 은 1280 x 720 보다 오차가 1.2 ~ 4 배다. D455 는 1280 x 720 으로 받는다 (8-1).
+- 사전분포의 효과 (marker 하나, `test_aruco_detector.py`): 0.75 m 에서 6자유도 PnP 를 그대로 쓰는 것보다 방향과 옆 오차가 작고, 카메라 TF 의 높이가 1 cm, pitch 가 1° 틀려도 붙은 자리의 추정이 0.3°, 3 mm 안에 머문다.
 
 ### 9-3. 깊이로 방향 돕기 (선택, `use_depth:=True`)
 
-RealSense 의 컬러에 맞춘 깊이(`aligned_depth_to_color`)에서 marker 둘레 면의 점들에 평면을 맞춰 방향을 재고, MAP 에 관측 한 줄로 더한다. 모서리 넷의 원근 대신 수백 ~ 수천 점으로 재므로 marker 가 작게 보이는 거리에서 방향이 좋아진다.
+RealSense 의 컬러에 맞춘 깊이(`aligned_depth_to_color`)에서 marker 둘레 면(marker 가 둘이면 둘을 감싸는 영역)의 점들에 평면을 맞춰 방향을 재고, MAP 에 관측 한 줄로 더한다. 모서리 넷의 원근 대신 수백 ~ 수천 점으로 재므로 marker 가 작게 보이는 거리에서 방향이 좋아진다.
 
-- Gazebo: staging(카메라 0.55 m)에서 잡은 dock 방향의 σ 가 2.8° → 0.10°.
-- 깊이가 유효하지 않은 거리(`depth_min_range`, 기본 0.2 m 안)에서는 저절로 빠지고 컬러만 쓴다. 붙은 자리의 정밀도는 깊이와 무관하다.
+- Gazebo: staging(카메라 0.55 m)에서 잡은 dock 방향의 σ 가 2.8° → 0.10° (marker 하나, 카메라를 D455 화각으로 바꾸기 전에 잰 값).
+- 깊이가 유효하지 않은 거리(`depth_min_range`, 기본 0.4 m 안. D455 의 깊이는 약 0.4 ~ 0.5 m 부터 나온다)에서는 저절로 빠지고 컬러만 쓴다. 즉 깊이는 staging 에서 approach 가 끝날 때까지만 돕는다. 붙은 자리의 정밀도는 깊이와 무관하다.
 - marker 가 붙은 면이 평평해야 한다 (종이보다 넓게, 10 cm 사방). 깊이의 고정 편향이 있으므로 σ 를 0.3° 아래로는 믿지 않는다 (`depth_yaw_sigma_deg`).
-- 실제 깊이 카메라에서는 확인하지 못했다. 처음에는 끄고(`use_depth:=False`) 쓰다가, 접근 초반에 로봇이 좌우로 흔들리며 방향을 찾는 것이 보이면 켠다.
+- 실제 깊이 카메라에서는 확인하지 못했다. 처음에는 끄고(`use_depth:=False`) 쓴다. 접근 초반에 로봇이 좌우로 흔들리며 방향을 찾는 것이 보이면 marker 를 둘로 늘리는 쪽(8-3)이 먼저다: 컬러만으로 되고 가까이서도 듣는다.
 
 그 밖에: OpenCV 4.5 (Ubuntu 22.04 의 `python3-opencv`) 와 4.7 이상을 모두 쓴다. `stamp_offset` 은 영상 stamp 에 더하는 시간이다 (드라이버의 stamp 가 실제 찍은 때보다 늦으면 음수).
 
@@ -620,6 +738,7 @@ advance: marker 를 방금 보았고 화면 안쪽에 있으면 1, 아니면 0 (
 반복 (최대 3번):
   서기 0.5 s
   1 s 동안 marker 를 보고 합친다. 그동안 측정이 1.5 mm 넘게 흩어져 있으면 (아직 흔들린다) 4 s 까지 더 기다린다
+  (marker 가 둘인 dock 은 둘 다 보인 영상만 쓴다: all_markers)
   남은 오차가 1.5 mm, 1.5 mm, 0.2° 안이면 끝
   아니면 odom 으로 그만큼 고친다 (0.03 m/s)
 끝나면 서서 잰 마지막 오차를 dock/final_error 로 낸다 (기록해서 추이를 본다)
@@ -631,7 +750,7 @@ advance: marker 를 방금 보았고 화면 안쪽에 있으면 1, 아니면 0 (
 
 물러나도 더 잘 보이는 것이 아니고 (못 찾는 이유는 대개 방향이나 잠깐 가려짐), 뒤에 레이저보다 낮은 물건이 있을 수 있다. 그래서 그 자리에서 해결한다.
 
-- **처음 찾기** (`find_marker`): 서서 3 s 본다. 안 보이면 처음 방향에서 +30°, -30°, +60°, -60° 로 제자리 회전하며 다시 본다 (화각 69° 와 합쳐 ±95°). 돌기 전과 도는 동안 레이저로 몸이 쓸고 갈 원 (`robot.turn_radius` + `detect.clearance`) 안을 보고, 무엇이 있으면 돌지 않는다. detector 가 아예 없으면 바로 실패한다.
+- **처음 찾기** (`find_marker`): 서서 3 s 본다. 안 보이면 처음 방향에서 +30°, -30°, +60°, -60° 로 제자리 회전하며 다시 본다 (화각 90° 와 합쳐 ±105°). 돌기 전과 도는 동안 레이저로 몸이 쓸고 갈 원 (`robot.turn_radius` + `detect.clearance`) 안을 보고, 무엇이 있으면 돌지 않는다. detector 가 아예 없으면 바로 실패한다.
 - **들어가다 놓쳤을 때** (`look_again`): 그 자리에 서서 다시 본다 (돌지 않는다). 다음 시도의 approach 는 `hold_if_closer` 라 이미 더 가까우면 건너뛰고, 설비에서 멀어지는 쪽 명령은 내지 않는다.
 
 ## 11. undock 두 가지
@@ -646,7 +765,7 @@ advance: marker 를 방금 보았고 화면 안쪽에 있으면 1, 아니면 0 (
 
 ![UndockPrecise BT](bt_mission/doc/undock.png)
 
-Gazebo (미끄러짐 + 카메라 TF + marker 크기 오차를 넣은 조건, 참값):
+Gazebo (미끄러짐 + 카메라 TF + marker 크기 오차를 넣은 조건, 참값. marker 하나, 카메라를 D455 화각으로 바꾸기 전에 잰 값):
 
 | | 선 자리 (설비 면에서 로봇 중심) | 옆 | 방향 |
 |---|---|---|---|
@@ -655,6 +774,7 @@ Gazebo (미끄러짐 + 카메라 TF + marker 크기 오차를 넣은 조건, 참
 | `undock`, 도면 값으로 붙은 뒤 (옆 -6 mm, 1.5° 틀린 채) 2회 | 689.0 ~ 690.7 mm | **+3.5 ~ +3.7 mm** | **1.5°** |
 
 - 단순 undock 은 곧게 뒤로 가므로 붙어 있던 자세의 오차가 그대로 남고(방향 1.5° 면 0.4 m 뒤에서 옆 1 cm), 앞뒤는 미끄러진 만큼 덜 간다.
+- marker 둘 (dock_b, 차이 없는 조건, D455 화각) 의 `undock_precise` 한 번: 705.0 mm (목표 710, 허용오차 5 mm), 옆 -1.2 mm, 방향 0.00°.
 - 정밀 undock 은 선 자리가 0.6 mm 안에서 되풀이된다. 710 mm 가 아니라 698 mm 에 선 것은 넣어 둔 marker 크기 오차 2 % 때문이다 (늘 같은 값이라 되풀이에는 영향이 없다. 실제로는 marker 를 재서 `size` 를 맞춘다).
 
 ## 12. 가르친 자세: 고정 오차 지우기
@@ -675,7 +795,8 @@ detector 가 보는 것      q = f(로봇 자세; TF, marker 치수, 내부값, 
 - "정확한 도킹 자리" 는 설비 작업이 실제로 되는 자리다 (지그, 게이지 블록, 설비의 기준면으로 맞춘다). 가르친 자세의 정밀도는 이때 로봇을 얼마나 잘 놓았는지가 정한다.
 - `DetectArucoDock` 는 `~/.ros/aruco_taught/<dock>.yaml` 이 있으면 그것을 설 곳으로 쓴다 (없으면 도면 값). 로그의 `target (taught ...)` 로 확인한다.
 - 카메라를 다시 달거나 marker 를 다시 붙이면 다시 가르친다. dock 마다 가르친다.
-- `aruco_teach.py` 가 적는 `robot_in_dock` 과 도면 값 (0.31 m, 0, 180°) 의 차이가 TF 와 치수의 오차다. 13장에서는 "313.4 mm, +6.3 mm, 178.50°" 로, 넣은 오차가 그대로 드러났다.
+- marker 가 여럿인 dock 은 전부 보인 영상으로만 가르치고, 그때 본 marker 번호를 파일에 적는다 (`marker_ids`). dock 의 marker 구성을 바꾸면 그 파일은 쓰지 않고 (`taught target not used ... other markers`) 도면 값으로 가면서 다시 가르치라고 알린다.
+- `aruco_teach.py` 가 적는 `robot_in_dock` 과 도면 값 (0.31 m, 0, 180°) 의 차이가 TF 와 치수의 오차다. 13장에서는 "313.6 mm, +6.4 mm, 178.50°" (marker 둘이면 311.0 mm, +6.4 mm, 178.50°) 로, 넣은 오차가 그대로 드러났다.
 
 ## 13. 시뮬레이션 실험
 
@@ -687,19 +808,24 @@ detector 가 보는 것      q = f(로봇 자세; TF, marker 치수, 내부값, 
 | 카메라 TF | `camera_tf_error:=1.5,0.0,0.01`. TF 의 카메라 자리만 바꾼다 | yaw 1.5°, 옆 1 cm |
 | marker 크기 | `marker_scale:=1.02`. detector 가 marker 를 실제보다 2 % 크다고 믿는다 | 2 % |
 
-staging 세 곳(로봇 중심이 설비 면 0.70 ~ 0.80 m 앞, 옆 ±0.25 m, ±20°)에서 `dock` → 끝난 자리를 Gazebo 참값으로 잼 → `undock` 을 되풀이했다.
+staging 세 곳(로봇 중심이 설비 면 0.70 ~ 0.75 m 앞, 옆 0 ~ 0.25 m, 방향 0 ~ 15° 틀어짐)에서 `dock` → 끝난 자리를 Gazebo 참값으로 잼 → `undock` 을 되풀이했다. 카메라는 D455 의 화각에 848 x 480 이다 (1280 x 720 은 이 환경에서 Gazebo 가 무거워 주행이 끊겼다. 실제 권장보다 불리한 조건이다).
 
-| | 조건 | 횟수 | 앞뒤 [mm] (+ 덜 감) | 옆 [mm] | 방향 [°] |
-|---|---|---|---|---|---|
-| E0 | 차이 없음, 도면 값 | 4 | +0.1 ~ +0.7 | -0.2 ~ -0.3 | 0.01 |
-| E1 | 차이 넣음, 도면 값 | 3 | -2.4 ~ -2.7 | **-6.3 ~ -6.5** | **+1.50 ~ +1.53** |
-| E2 | 차이 넣음, 가르친 자세 | 5 | +0.8 ~ +1.5 | -0.1 ~ -0.3 | 0.00 ~ 0.02 |
+| | 조건 | marker | 횟수 | 앞뒤 [mm] (+ 덜 감) | 옆 [mm] | 방향 [°] |
+|---|---|---|---|---|---|---|
+| E0 | 차이 없음, 도면 값 | 하나 | 3 | -0.7 ~ +0.9 | -0.3 ~ -0.4 | 0.01 ~ 0.02 |
+| | | 둘 | 3 | +0.5 ~ +0.9 | -0.4 | 0.00 |
+| E1 | 차이 넣음, 도면 값 | 하나 | 2 | -2.3 ~ -2.9 | **-5.3 ~ -6.8** | **+1.48 ~ +1.64** |
+| | | 둘 | 2 | -0.2 ~ +0.6 | **-6.9 ~ -7.1** | **+1.45 ~ +1.48** |
+| E2 | 차이 넣음, 가르친 자세 | 하나 | 2 | +0.5 ~ +1.4 | -0.5 ~ +0.1 | 0.02 ~ 0.05 |
+| | | 둘 | 3 | -0.2 ~ +1.4 | -0.3 ~ -0.6 | 0.00 ~ 0.04 |
 
 1. **미끄러짐은 거의 영향이 없다.** marker 를 끝까지 보며 닫힌 제어를 하므로 앞뒤 1 mm 안팎에 선다.
-2. **고정 오차는 로봇이 스스로 보지 못한다.** E1 에서 로봇은 서서 재고 허용오차 안이라고 판단했지만 참값은 옆 6.5 mm, 1.5° 였다. 실제 로봇의 정밀도는 반드시 **영상이 아닌 기준**으로 재야 한다 (14-4).
+2. **고정 오차는 로봇이 스스로 보지 못한다.** E1 에서 로봇은 서서 재고 허용오차 안이라고 판단했지만 참값은 옆 5 ~ 7 mm, 1.5° 였다. 실제 로봇의 정밀도는 반드시 **영상이 아닌 기준**으로 재야 한다 (14-4).
 3. **가르친 자세가 고정 오차를 지운다** (E2).
+4. **marker 를 둘로 늘려도 고정 오차는 그대로다** (E1 의 둘: 옆 -7 mm, 1.5°). 카메라 TF 가 틀리면 marker 를 아무리 정확히 봐도 "로봇에서 본 dock" 이 그만큼 돌아가 있기 때문이다. marker 둘이 줄이는 것은 무작위 오차다: 처음 찾았을 때(`find_marker`) dock 방향의 불확실도 σ 가 하나일 때 0.9 ~ 3.4° 에서 둘일 때 0.2 ~ 0.7° 로, 붙은 자리에서 한 장의 σ 가 0.64° 에서 0.07° 로 줄었다. 시뮬레이션에서는 하나로도 마지막에 1 mm 안에 서므로 끝난 자리의 차이는 보이지 않는다. 차이가 나는 것은 영상이 나쁠 때(흔들림, 조명, 멀거나 비스듬한 staging)와 한쪽이 가려졌을 때다.
+5. E1 의 앞뒤가 marker 둘에서 작은 것(-0.2 ~ +0.6)은 실험의 한계다: `marker_scale` 은 marker 의 크기만 2 % 키우고 둘 사이의 간격은 그대로 둔다. 실제 인쇄 배율이 틀리면 간격도 같이 틀려서 하나일 때처럼 앞뒤 오차가 난다.
 
-그 밖에 확인한 것:
+그 밖에 확인한 것 (marker 둘에 관한 두 줄 말고는 카메라를 D455 화각으로 바꾸기 전에 잰 것이다):
 
 | 경우 | 결과 |
 |---|---|
@@ -708,6 +834,8 @@ staging 세 곳(로봇 중심이 설비 면 0.70 ~ 0.80 m 앞, 옆 ±0.25 m, ±2
 | 설정 파일을 `docking_config` 로 바꿔 주고 이름 하나를 틀리게 | 그 파일을 읽고 `unknown name 'motion.max_vxx' (typo?)` 경고 |
 | 깊이 (`camera_depth:=True`, `use_depth:=True`) | staging 에서 dock 방향 σ 2.8° → 0.10°. 붙은 자리 +0.7 mm, -0.3 mm (깊이 없이와 같다) |
 | `dock_calibrate.py` (미끄러짐 조건) | scale_vx 0.995, scale_vy 1.093, scale_wz 1.053, odom_yaw_per_m 0.044 (넣은 값: 1.02, 1.11, 1.04, 0.044. marker 크기 오차 2 % 만큼 작게 나온다) |
+| marker 둘 가운데 하나를 상자로 가림 | 남은 하나로 찾고, 접근하고, 진입했다 (참값 +1.8 mm, -0.3 mm, 0.03°). 서서 재기는 "둘 다 보인 영상이 없다" 로 실패했다 (`stages.refine.all_markers: true`). `false` 로 바꾸면 하나로 끝까지: +0.9 mm, -0.5 mm, -0.01° |
+| marker 둘로 가르친 파일의 `marker_ids` 를 하나로 바꿔 놓음 | 그 파일을 쓰지 않고 경고와 함께 도면 값으로 도킹 |
 | marker 가 화면 밖 (70° 비껴 봄), 옆에 상자, detector 없음 | 10-4 의 동작 (제자리에서 찾음 / 돌지 않고 실패 / 이유와 함께 바로 실패) |
 
 시뮬레이션이 보여 주지 못한 것: 영상의 흔들림과 모션 블러, 노출과 조명, 카메라와 odom 의 시각 어긋남, 고정 초점의 흐림, 바닥에 따라 바뀌는 미끄러짐, 실제 깊이 영상. 14장의 순서로 실제 로봇에서 재고 맞춘다.
@@ -718,8 +846,8 @@ staging 세 곳(로봇 중심이 설비 면 0.70 ~ 0.80 m 앞, 옆 ±0.25 m, ±2
 
 | 오차의 근원 | 크기 (이 구성) | 성질 | 다루는 곳 |
 |---|---|---|---|
-| 모서리 위치 잡음 | 0.1 ~ 0.3 px (붙은 자리에서 1 px = 0.26 mm) | 무작위 | 여러 장 합치기, 서서 재기 (10-3) |
-| marker 의 방향 | 붙은 자리 0.02°, 0.6 m 에서 0.5°, 1 m 밖은 못 믿음 | 무작위 + 뒤집힘 | MAP (9-2), 필터 (10-1), 깊이 (9-3) |
+| 모서리 위치 잡음 | 0.1 ~ 0.3 px (붙은 자리에서 1 px = 0.25 mm) | 무작위 | 여러 장 합치기, 서서 재기 (10-3) |
+| marker 의 방향 | 한 장으로: 붙은 자리 0.1°, 0.6 m 에서 1°, 1 m 밖은 못 믿음. marker 둘이면 그 1/7 | 무작위 + 뒤집힘 | MAP (9-2), 필터 (10-1), marker 둘 (8-3), 깊이 (9-3) |
 | 카메라 TF (extrinsic) | yaw 1.5°, 옆 1 cm → 옆 6.5 mm, 방향 1.5° | **고정** | 가르친 자세 (12장) |
 | marker 크기, 붙인 자리 | 2 % → 앞뒤 3 mm | **고정** | 캘리퍼로 재기, 가르친 자세 |
 | 서브픽셀 모서리 편향, 초점 흐림 | 안쪽으로 0.1 ~ 0.3 px | **고정** | 가르친 자세 |
@@ -760,9 +888,9 @@ ros2 run bt_mission dock_calibrate.py --ros-args -p deadband:=True     # 데드�
 
 ### 14-5. 더 높이려면
 
-1. marker 를 2개로 (가로로 0.2 m 떨어뜨려): 방향이 원근이 아니라 두 marker 의 위치 차이로 정해져서, 멀리서도 방향이 정확해진다. 지금 구조에서 `docks` 와 detector 의 자세 추정만 늘리면 된다.
+1. marker 를 둘로 (8-3). 구현되어 있다: `docks` 의 `markers:` 목록. 방향이 원근이 아니라 두 marker 의 위치 차이로 정해져서 멀리서도 방향이 정확하다.
 2. 깊이 (9-3) 또는 레이저로 설비 면의 직선을 맞춰 방향을 따로 잰다.
-3. 컬러 1280 x 720, global shutter (D435 의 IR 영상, D455 의 컬러).
+3. 컬러 1280 x 720 (8-1). D455 의 컬러는 global shutter 라 움직이며 찍어도 찌그러지지 않는다.
 4. IMU 와 섞은 odom (robot_localization): 접근 중 방향 흐름이 준다.
 5. 기계적 마무리: 설비 쪽 V 자 가이드나 핀이 남은 1 ~ 2 mm 를 받아 준다.
 
@@ -780,16 +908,17 @@ ros2 run bt_mission dock_calibrate.py --ros-args -p deadband:=True     # 데드�
 | `only N usable detections` | 너무 느리다 | `ros2 topic hz /dock/aruco`. `detect.look_time` 을 늘리거나 `min_found` 를 줄인다 |
 | `Did not turn to search: ...` | 옆에 무엇이 있어 돌지 않았다 | 그 이유를 치우거나 staging 자리를 옮긴다 |
 
-들어가는 중의 실패는 `[aruco] insert: ...` 줄에 이유가 있다: `lost the marker` (2 초 못 봄), `camera too close to the marker` (`safety.min_camera_distance`), `timed out`. `[dock] could not switch off collision_monitor/Footprint` 는 안전 영역을 끄지 못한 것이다 (6-3).
+들어가는 중의 실패는 `[aruco] insert: ...` 줄에 이유가 있다: `lost the marker` (2 초 못 봄), `camera too close to the marker` (`safety.min_camera_distance`), `timed out`. `[dock] could not switch off collision_monitor/Footprint` 는 안전 영역을 끄지 못한 것이다 (6-3). `[aruco] refine: marker not seen while standing (... only part of the dock's markers ...)` 는 marker 가 여럿인 dock 에서 붙은 자리에 전부 보이지 않은 것이다: `/dock/aruco_debug` 의 `(1/2)` 로 어느 것이 안 보이는지 보고, 가린 것을 치우거나 marker 의 `lateral` 과 간격을 확인한다 (8-3).
 
 ## 16. 파일
 
 ```
 bt_navigator/
 ├── DOCKING.md                                    이 문서
-├── docs/aruco_marker_dock_a.svg, .png            인쇄용 marker (SVG 를 100 % 로)
+├── docs/aruco_marker_dock_a.svg, .png            인쇄용 marker 하나 (SVG 를 100 % 로)
+├── docs/aruco_marker_dock_b.svg, .png            인쇄용 marker 둘, A4 가로 한 장
 ├── docs/aruco_principle.png, docking_overview.png    원리와 구조 그림 (2장, 1-3)
-├── docs/aruco_results.png, aruco_camera_debug.jpg    결과, 붙은 자리의 카메라 영상
+├── docs/aruco_results.png, aruco_camera_debug.jpg, aruco_camera_debug_two.jpg    결과, 붙은 자리의 카메라 영상
 ├── bt_mission_msgs/msg/ArucoDetection.msg        marker 하나: 후보(DockHypothesis), 화면 끝 여유, 진단
 └── bt_mission/
     ├── config/docking.yaml                       ★ 로봇, 카메라, 설비마다 고치는 값 전부
@@ -811,14 +940,15 @@ bt_navigator/
 
 simple_line/simple_line_bringup/
 ├── robots/make_mecanum.py, mecanum.urdf, mecanum.model   4바퀴 메카넘 로봇
-├── models/aruco_dock/                            설비 모형 (make_aruco_dock.py)
+├── models/aruco_dock/, aruco_dock_two/           설비 모형: marker 하나 (dock_a), 둘 (dock_b, dock_markers:=2)
 ├── scripts/mecanum_slip_sim.py                   메카넘 미끄러짐과 바퀴 odom 흉내 (mecanum_slip:=True)
-└── launch/simple_line.launch.py                  robot:=mecanum, dock:=True, camera_depth, mecanum_slip, camera_tf_error
+└── launch/simple_line.launch.py                  robot:=mecanum, dock:=True, dock_markers, camera_resolution, camera_depth, mecanum_slip, camera_tf_error
 ```
 
 ## 참고 자료
 
 - Nav2 docking 서버 (opennav_docking): staging 자세 → 외부 검출 자세 → 필터 → 제어의 구조. [index.ros.org/r/opennav_docking](https://index.ros.org/r/opennav_docking/), [docs.nav2.org: Docking Server](https://docs.nav2.org/configuration/packages/configuring-docking-server.html)
+- RealSense D455 의 사양 (화각, 해상도, 깊이의 최소 거리): [intelrealsense.com: Depth Camera D455](https://intelrealsense.com/depth-camera-d455/), [store.intelrealsense.com](https://store.intelrealsense.com/buy-intel-realsense-depth-camera-d455.html). 컬러 화각을 86° x 57° (±3°) 로 적은 곳도 있다: [mouser.co.uk](https://www.mouser.co.uk/new/intel/intel-realsense-depth-camera-d455)
 - ArUco marker: S. Garrido-Jurado 외, "Automatic generation and detection of highly reliable fiducial markers under occlusion", Pattern Recognition 2014. [doi:10.1016/j.patcog.2014.01.005](https://doi.org/10.1016/j.patcog.2014.01.005)
 - OpenCV ArUco 검출: [docs.opencv.org: Detection of ArUco Markers](https://docs.opencv.org/4.x/d5/dae/tutorial_aruco_detection.html)
 - OpenCV PnP: [docs.opencv.org: Perspective-n-Point (PnP) pose computation](https://docs.opencv.org/4.x/d5/d1f/calib3d_solvePnP.html)

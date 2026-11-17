@@ -163,6 +163,23 @@ std::optional<dock::Pose2> DetectArucoDock::taughtTarget(const std::string & fil
     *why = file + " was taught for dock '" + y["dock"].as<std::string>() + "', not '" + state_->dock + "'";
     return std::nullopt;
   }
+  // marker 가 여럿인 dock: 가르칠 때 본 marker 와 지금 설정의 marker 가 같아야 한다 (marker 를 더 붙였으면 다시 가르친다)
+  if (const auto configured = cfg_.dock(state_->dock)) {
+    std::vector<int> expected = configured->marker_ids, taught;
+    if (y["marker_ids"] && y["marker_ids"].IsSequence()) {
+      for (const auto & id : y["marker_ids"]) {
+        taught.push_back(id.as<int>());
+      }
+    } else if (expected.size() == 1) {
+      taught = expected;                               // 예전 파일 (marker 하나)
+    }
+    std::sort(expected.begin(), expected.end());
+    std::sort(taught.begin(), taught.end());
+    if (taught != expected) {
+      *why = file + " was taught with other markers than the dock has now";
+      return std::nullopt;
+    }
+  }
   const dock::Pose2 dock_in_base{d["x"].as<double>(), d["y"].as<double>(), d["yaw_deg"].as<double>() * M_PI / 180.0};
   return ad::inverse(dock_in_base);
 }
@@ -703,6 +720,8 @@ BT::NodeStatus ArucoRefine::onStart()
   measure_time_ = cfg.stageNumber(stage, "measure_time", 1.0);
   max_measure_time_ = cfg.stageNumber(stage, "max_measure_time", 4.0);
   stable_spread_ = cfg.stageNumber(stage, "stable_spread", 0.0015);
+  all_markers_ = cfg.stageFlag(stage, "all_markers", true);
+  partial_ = 0;
   max_iterations_ = static_cast<int>(cfg.stageNumber(stage, "max_iterations", 3));
   move_timeout_ = cfg.stageNumber(stage, "move_timeout", 8.0);
   accept_along_ = cfg.stageNumber(stage, "accept_along", 0.005);
@@ -754,6 +773,12 @@ BT::NodeStatus ArucoRefine::onRunning()
       if (d.dock != state_->dock) {
         continue;
       }
+      // marker 가 여럿인 dock: 마지막 판단은 전부 보인 영상으로만 한다. 일부만 보고 푼 자세는 가르칠 때(전부 보고)와
+      // 다른 고정 오차를 가진다 (marker 마다 붙인 자리의 오차)
+      if (all_markers_ && d.marker_ids.size() < d.markers_total) {
+        ++partial_;
+        continue;
+      }
       const auto hs = arucoMeasurements(*ros_.tf, d, state_->global_frame);
       if (!hs.empty()) {
         measured_.emplace_back(now, hs);
@@ -791,8 +816,9 @@ BT::NodeStatus ArucoRefine::onRunning()
     if (!fused || used < 3 || !robot) {
       sub_.reset();
       RCLCPP_WARN(
-        ros_.node->get_logger(), "[aruco] %s: marker not seen while standing (%zu detections)", name().c_str(),
-        measured_.size());
+        ros_.node->get_logger(), "[aruco] %s: marker not seen while standing (%zu detections%s)", name().c_str(),
+        measured_.size(),
+        partial_ > 0 ? ", others showed only part of the dock's markers: stages.refine.all_markers" : "");
       return BT::NodeStatus::FAILURE;
     }
     state_->filter.reset(fused->pose, fused->cov);   // 서서 잰 것으로 dock 의 자리를 다시

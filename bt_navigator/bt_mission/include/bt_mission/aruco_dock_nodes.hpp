@@ -224,6 +224,8 @@ private:
   Phase phase_{Phase::Settle};
   int iteration_{0}, max_iterations_{3};
   double settle_time_{0.5}, measure_time_{1.0}, max_measure_time_{4.0}, stable_spread_{0.0015}, move_timeout_{8.0};
+  bool all_markers_{true};          // marker 가 여럿인 dock: 전부 보인 영상만 쓴다
+  int partial_{0};
   double accept_along_{0.005}, accept_lat_{0.004}, accept_yaw_{1.0 * M_PI / 180.0};
   std::chrono::steady_clock::time_point start_, phase_start_, last_cmd_time_;
   std::optional<std::chrono::steady_clock::time_point> settled_since_;

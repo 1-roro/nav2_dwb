@@ -7,7 +7,7 @@
 - **작업 하나** = 들를 점들 + 할 일 (`go`, `inspect`, `scan`, `look_around`, `dock`, `undock`, `undock_precise`)
 - 로봇은 **점마다 멈춰서** 위치와 방향을 맞추고, 도착을 알린 뒤 다음 점으로 간다.
 - 작업은 **액션**(`execute_task`)으로 받는다. 결과, 진행 상황(BT 상태 포함), 취소, 선점이 있다.
-- **ArUco 도킹 (mm 단위)**: dock 앞까지 Nav2 로 간 뒤, RealSense 로 dock 의 ArUco marker 하나를 보며 메카넘으로 붙는다. 바닥 사전분포를 둔 자세 추정(MAP), Kalman 필터, dock 좌표계의 깔때기 제어, 서서 재고 고치기, 가르친 자세로 실제 로봇의 고정 오차까지 지운다. marker 의 원리부터 실제 로봇으로 옮기는 순서까지 [DOCKING.md](DOCKING.md) 한 문서에 정리했다.
+- **ArUco 도킹 (mm 단위)**: dock 앞까지 Nav2 로 간 뒤, RealSense D455 로 dock 의 ArUco marker (하나, 또는 방향을 더 정확히 보려고 둘) 를 보며 메카넘으로 붙는다. 바닥 사전분포를 둔 자세 추정(MAP), Kalman 필터, dock 좌표계의 깔때기 제어, 서서 재고 고치기, 가르친 자세로 실제 로봇의 고정 오차까지 지운다. marker 의 원리부터 실제 로봇으로 옮기는 순서까지 [DOCKING.md](DOCKING.md) 한 문서에 정리했다.
 - 길에 장애물이 있으면 **감속해서 멈춰 기다렸다가** 치우면 다시 간다 (stop & go). Nav2 goal 은 그대로 두고 속도만 0 으로 한다. controller 가 감속해서 서고, 갑자기 나타나면 collision_monitor 가 비상 감속한다 (6장).
 
 ![stop and go in the warehouse](docs/warehouse_stop_and_go.gif)
@@ -27,7 +27,7 @@ bt_navigator/
 | 점과 작업을 실행 중에 액션으로 맡기기 (결과, 진행 상황, 취소, 선점) | `task_server` (`task.xml`)<br>+ `task_client.py` | 4 |
 | 위와 같되, 서버를 Nav2 의 `BtActionServer` 와 lifecycle 노드로 | `task_server_lifecycle.launch.py`<br>+ `task_client.py` | 5 |
 | 장애물이 있으면 멈췄다가 치우면 가기. 시뮬레이션에서 장애물을 놓고 치워 보기 | `simple_line.launch.py` 에 들어 있다<br>+ `obstacle.py click` | 6 |
-| ArUco marker 를 보고 설비 앞 15 cm 에 mm 단위로 붙고 떨어지기 (메카넘, RealSense), 실제 로봇으로 옮기기 | `dock:<dock> <staging 점>`, `undock`, `undock_precise:<dock>`<br>+ `config/docking.yaml`, `aruco_teach.py`, `dock_calibrate.py` | [DOCKING.md](DOCKING.md) |
+| ArUco marker 를 보고 설비 앞 15 cm 에 mm 단위로 붙고 떨어지기 (메카넘, RealSense D455, marker 하나 또는 둘), 실제 로봇으로 옮기기 | `dock:<dock> <staging 점>`, `undock`, `undock_precise:<dock>`<br>+ `config/docking.yaml`, `aruco_teach.py`, `dock_calibrate.py` | [DOCKING.md](DOCKING.md) |
 
 - **명령 내리는 법**(입력 형식과 예시)은 [4-5](#4-5-명령-내리기-입력-형식과-예시) 에 모아 두었다.
 - 아래층(planner, controller, 시뮬레이션 launch)은 [`simple_line/`](../simple_line/README.md) 것을 그대로 쓴다.
@@ -1264,7 +1264,7 @@ navigation BT 는 Nav2 기본 트리에서 제자리 회전, 후진 recovery 를
 
 ### 7-4. ArUco 도킹 (Gazebo)
 
-[DOCKING.md 13장](DOCKING.md#13-시뮬레이션-실험): staging 세 곳에서 도킹 12회와 undock 7회를 Gazebo 참값으로 쟀다. 실제 로봇과의 차이(메카넘 미끄러짐, 카메라 TF 오차, marker 크기 오차)를 넣고 도면 값 목표와 가르친 자세 목표, 단순 undock 과 정밀 undock 을 비교했다. 단위 테스트: `test_aruco_dock_control` (12개), `test_aruco_detector` (합성 영상과 Gazebo 영상, 9개), `test_dock_control` (8개), `test_docking_config` (3개).
+[DOCKING.md 13장](DOCKING.md#13-시뮬레이션-실험): staging 세 곳에서 marker 하나와 둘로 도킹 15회를 Gazebo 참값으로 쟀다 (카메라는 D455 의 화각). 실제 로봇과의 차이(메카넘 미끄러짐, 카메라 TF 오차, marker 크기 오차)를 넣고 도면 값 목표와 가르친 자세 목표, 단순 undock 과 정밀 undock 을 비교했다. 단위 테스트: `test_aruco_dock_control` (12개), `test_aruco_detector` (합성 영상과 Gazebo 영상, marker 하나와 둘, 13개), `test_dock_control` (8개), `test_docking_config` (4개).
 
 ---
 

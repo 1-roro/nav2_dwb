@@ -67,9 +67,15 @@ def main():
     output = os.path.expanduser(output)
     duration = node.declare_parameter('duration', 3.0).value
     samples = []
+    seen = {'ids': [], 'total': 0, 'partial': 0}
 
     def on_detection(m):
         if m.dock == dock and m.hypotheses:
+            # marker 가 여럿인 dock 은 전부 보인 영상만 쓴다 (도킹의 마지막 판단도 그렇게 한다)
+            if len(m.marker_ids) < m.markers_total:
+                seen['partial'] += 1
+                return
+            seen['ids'], seen['total'] = sorted(int(i) for i in m.marker_ids), int(m.markers_total)
             samples.append((m.header.frame_id, [(np.array([h.x, h.y, h.yaw]), np.array(h.covariance).reshape(3, 3))
                                                 for h in m.hypotheses]))
 
@@ -83,7 +89,9 @@ def main():
     while time.time() < end:
         rclpy.spin_once(node, timeout_sec=0.05)
     if len(samples) < 5:
-        node.get_logger().error(f'only {len(samples)} detections of {dock}: is the marker in view?')
+        node.get_logger().error(
+            f'only {len(samples)} detections of {dock}: is the marker in view?'
+            + (f" ({seen['partial']} detections showed only part of the dock's markers)" if seen['partial'] else ''))
         rclpy.try_shutdown()
         os._exit(1)
     q, cov, used = fuse([s[1] for s in samples])
@@ -96,6 +104,7 @@ def main():
     robot = [-(c * q[0] + s * q[1]), -(-s * q[0] + c * q[1]), angle(-q[2])]
     out = {
         'dock': dock,
+        'marker_ids': seen['ids'],                     # 가르칠 때 본 marker (dock 의 marker 를 바꾸면 다시 가르친다)
         'base_frame': samples[0][0],
         'dock_in_base': {'x': float(q[0]), 'y': float(q[1]), 'yaw_deg': float(math.degrees(q[2]))},
         # 확인용: 로봇이 dock 좌표계에서 어디 있나 (도면 값, 예: 0.17 m 앞과 다르면 그만큼이 도면/TF 와 실제의 차이)

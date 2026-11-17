@@ -58,3 +58,22 @@ TEST(DockingConfig, MissingFileGivesDefaultsAndTyposAreReported)
   EXPECT_EQ(c.text("ros", "scan_topic", "scan"), "");        // 일부러 비운 것은 빈 값 (레이저 없음)
   EXPECT_EQ(c.numbers("detect", "search_angles_deg", {30.0}).size(), 1u);
 }
+
+TEST(DockingConfig, ADockCanCarrySeveralMarkers)
+{
+  std::string error;
+  const auto shipped = DockingConfig::fromFile(DOCKING_YAML, &error);
+  ASSERT_TRUE(shipped.loaded()) << error;
+  EXPECT_EQ(shipped.dock("dock_a")->marker_ids, std::vector<int>({0}));
+  const auto two = shipped.dock("dock_b");
+  ASSERT_TRUE(two);
+  EXPECT_EQ(two->marker_ids, std::vector<int>({2, 3}));
+  EXPECT_NEAR(shipped.dockedDistance("dock_b"), 0.31, 1e-12);
+  // markers 안의 오타도 찾는다
+  const auto c = DockingConfig::fromString(
+    "docks:\n"
+    "  d: {size: 0.06, height: 0.13, gap: 0.2, markers: [{id: 4, lateral: -0.08}, {id: 5, laterl: 0.08}]}\n");
+  EXPECT_EQ(c.dock("d")->marker_ids, std::vector<int>({4, 5}));
+  ASSERT_EQ(c.unknownKeys().size(), 1u);
+  EXPECT_EQ(c.unknownKeys().front(), "docks.d.markers.laterl");
+}
