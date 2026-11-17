@@ -1,0 +1,9 @@
+# 시나리오 2: 설비 두 대를 차례로. A 는 marker 하나 (dock_a), B 는 marker 둘 (dock_b)
+# 창고 월드, robot:=mecanum dock:=True dock_markers:=both (bt_navigator/DOCKING.md 16-3)
+dock:dock_a 4.0,-2.5 3.85,1.0,0      # 설비 A
+wait 10                              # 작업
+undock_precise:dock_a                # A 의 축을 따라 물러난다
+dock:dock_b 4.0,0.0 3.85,-2.0,0      # 남쪽으로 3 m 가서 설비 B (선반 B 끝에서 떨어져 (4.0, 0) 을 거친다)
+wait 10                              # 작업
+undock                               # B 에서는 곧게 뒤로 (단순 undock)
+go 3.85,-2.5 -4.0,-2.5,0             # 출발점으로

@@ -399,6 +399,18 @@ geometry_msgs::msg::TwistStamped SimpleLineController::computeVelocityCommands(
     arrived_goal_ = g;
   } else if (arrived_ && goal_dist > std::max(3.0 * goal_tolerance, goal_tolerance + 0.10)) {
     arrived_ = false;                 // 밀려났다 (추정이 크게 바뀌었다): 다시 간다
+  } else if (arrived_ && arrived_idle_since_ && (now - *arrived_idle_since_).seconds() > 2.0) {
+    // 도착해서 goal 방향까지 맞추고 서 있는데 2 s 넘게 끝나지 않는다: goal checker 가 받아 주지 않는다 (위치가
+    // 허용오차 밖). 도착한 뒤 위치 추정이 바뀌었는데 Nav2 가 같은 goal 로 다시 시작해 goal checker 가 처음부터
+    // 보거나 (Failed to make progress 뒤), undock 처럼 Nav2 밖에서 움직인 뒤 같은 goal 을 받았을 때다.
+    // 그대로 두면 서로 기다리며 멈춰 있었다 (bt_navigator/DOCKING.md 16-12). 다시 다가간다
+    arrived_ = false;
+    RCLCPP_INFO(
+      logger_, "goal is %.3f m away and not accepted (tolerance %.3f m): approaching it again", goal_dist,
+      goal_tolerance);
+  }
+  if (!arrived_) {
+    arrived_idle_since_.reset();
   }
 
   double w = 0.0;
@@ -409,7 +421,13 @@ geometry_msgs::msg::TwistStamped SimpleLineController::computeVelocityCommands(
     m = stepToward(m, 0.0, lin, dt);
     // goal checker 허용오차의 절반 안이면 더 맞추지 않고 선다. 1 도 남짓을 마저 맞추려다 지나쳐서
     // (위치 추정의 방향도 그만큼 흔들린다) 끝에서 좌우로 떨었다
-    w = std::fabs(goal_yaw_err) <= 0.5 * goal_yaw_tolerance ? limit_w(0.0) : rotate_w(goal_yaw_err);
+    const bool aligned = std::fabs(goal_yaw_err) <= 0.5 * goal_yaw_tolerance;
+    w = aligned ? limit_w(0.0) : rotate_w(goal_yaw_err);
+    if (!aligned || std::fabs(w) > 1e-3) {
+      arrived_idle_since_.reset();
+    } else if (!arrived_idle_since_) {
+      arrived_idle_since_ = now;      // 할 일을 다 했다. 이제부터 goal checker 가 받아 주기를 기다린다
+    }
   } else if (rotating_) {
     // 경로 쪽으로 제자리 회전. 달리던 중이면 먼저 곧게 서고, 방향이 맞았으면 회전이 멈출 때까지 0 을 낸다
     m = stepToward(m, 0.0, lin, dt);

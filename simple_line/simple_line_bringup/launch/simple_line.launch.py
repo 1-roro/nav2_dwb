@@ -31,6 +31,10 @@ dock:=True        월드마다 정해 둔 곳에 ArUco marker 가 붙은 설비 
                   aruco_detector.launch.py)도 같이 띄운다 (aruco_detector:=False 이면 띄우지 않는다: 따로 띄울 때)
 dock_markers:=2   설비 모형을 marker 둘짜리로 바꾼다 (models/aruco_dock_two = docking.yaml 의 dock_b).
                   작업은 dock:dock_b ... 로 보낸다
+dock_markers:=both  설비 두 대: marker 하나짜리 dock_a 는 원래 자리에, marker 둘짜리 dock_b 는 DOCK_B 자리에
+                  (창고: 동쪽 벽, y = -2.0). 시나리오 시험(bt_navigator/DOCKING.md 16장)이 쓴다
+Gazebo 의 모형 이름은 dock 이름과 같다 (dock_a, dock_b). 로봇은 turtlebot3_waffle.
+scripts/dock_truth.py 가 이 이름으로 참값을 읽는다
 실제 로봇과의 차이를 일부러 넣기 (robot:=mecanum, bt_navigator/DOCKING.md 13장)
   mecanum_slip:=True       몸체가 명령보다 덜 가고(옆 90 %), 옆으로 가면 조금 돈다. odom 은 바퀴 odom 처럼 명령을
                            적분해서 그만큼 틀린다 (scripts/mecanum_slip_sim.py)
@@ -65,6 +69,8 @@ SPAWN = {'empty_room': (-2.0, -1.0, 0.0), 'warehouse': (-4.0, -2.5, 0.0)}
 # 월드마다 설비 모형(ArUco dock)을 놓는 곳: 도킹 면(marker 가 붙은 면)의 x, y, 방향(방 쪽). 동쪽 벽 앞에서 서쪽을 본다.
 # 설비 모형의 깊이가 0.35 m 라 도킹 면은 벽에서 0.45 m 떨어진다
 DOCK = {'empty_room': (2.65, 1.2, math.pi), 'warehouse': (4.55, 1.0, math.pi)}
+# dock_markers:=both 일 때 둘째 설비(marker 둘, dock_b)의 자리. 같은 동쪽 벽, 선반 B 의 끝과 남쪽 벽 사이
+DOCK_B = {'warehouse': (4.55, -2.0, math.pi)}
 
 
 def perturb_camera(urdf, error):
@@ -168,13 +174,21 @@ def launch_setup(context):
     if arg('dock').lower() == 'true':
         if name not in DOCK:
             raise RuntimeError(f'{name} 월드에는 dock 자리를 정해 두지 않았다 (DOCK)')
-        dx, dy, dyaw = DOCK[name]
-        # dock_markers:=2 이면 marker 둘이 붙은 설비 (docking.yaml 의 dock_b, 2번과 3번), 아니면 하나 (dock_a, 0번)
-        dock_model = 'aruco_dock_two' if arg('dock_markers') == '2' else 'aruco_dock'
-        robot.append(Node(
-            package='gazebo_ros', executable='spawn_entity.py', name='spawn_dock', output='screen',
-            arguments=['-entity', 'aruco_dock', '-file', os.path.join(here, 'models', dock_model, 'model.sdf'),
-                       '-x', str(dx), '-y', str(dy), '-z', '0', '-Y', str(dyaw)]))
+        # (모형 이름 = docking.yaml 의 dock 이름, 모형 폴더, 자리)
+        #   1: marker 하나 (dock_a, 0번), 2: 같은 자리에 marker 둘 (dock_b, 2번과 3번), both: 둘 다 (dock_b 는 DOCK_B)
+        which = arg('dock_markers')
+        if which not in ('1', '2', 'both'):
+            raise RuntimeError(f"dock_markers:={which}: 1, 2, both 가운데 하나")
+        if which == 'both' and name not in DOCK_B:
+            raise RuntimeError(f'{name} 월드에는 둘째 설비 자리를 정해 두지 않았다 (DOCK_B)')
+        docks = {'1': [('dock_a', 'aruco_dock', DOCK[name])],
+                 '2': [('dock_b', 'aruco_dock_two', DOCK[name])],
+                 'both': [('dock_a', 'aruco_dock', DOCK[name]), ('dock_b', 'aruco_dock_two', DOCK_B.get(name))]}[which]
+        for entity, folder, (dx, dy, dyaw) in docks:
+            robot.append(Node(
+                package='gazebo_ros', executable='spawn_entity.py', name=f'spawn_{entity}', output='screen',
+                arguments=['-entity', entity, '-file', os.path.join(here, 'models', folder, 'model.sdf'),
+                           '-x', str(dx), '-y', str(dy), '-z', '0', '-Y', str(dyaw)]))
     if holonomic and arg('dock').lower() == 'true' and arg('aruco_detector').lower() == 'true':
         # 도킹 BT 가 받는 dock/aruco. bt_mission 이 이 패키지에 기대므로 패키지 의존은 두지 않고, 있을 때만 띄운다
         try:
@@ -231,7 +245,7 @@ def generate_launch_description():
         DeclareLaunchArgument('dock', default_value='False',
                               description='True: ArUco marker 가 붙은 dock 을 월드에 놓는다'),
         DeclareLaunchArgument('dock_markers', default_value='1',
-                              description='1: marker 하나짜리 설비 (dock_a) | 2: marker 둘 (dock_b)'),
+                              description='1: marker 하나짜리 설비 (dock_a) | 2: marker 둘 (dock_b) | both: 둘 다 (다른 자리)'),
         DeclareLaunchArgument('aruco_detector', default_value='True',
                               description='dock:=True robot:=mecanum 일 때 marker 검출 노드도 띄운다'),
         DeclareLaunchArgument('camera_resolution', default_value='848x480',

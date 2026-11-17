@@ -117,6 +117,7 @@ private:
   // goal 점 쪽으로 되돌아 돌았다 (90 도 goal 에서 48 도를 되돌아갔다)
   bool arrived_{false};
   Pose2D arrived_goal_;
+  std::optional<rclcpp::Time> arrived_idle_since_;   // 도착해서 할 일을 다 하고 goal checker 를 기다리기 시작한 때
   // 경로 끝의 방향 (plan frame). goal 가까이서 carrot 을 goal 너머로 늘이는 데 쓴다
   bool has_end_dir_{false};
   double end_dir_{0.0};

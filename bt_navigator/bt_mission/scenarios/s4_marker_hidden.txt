@@ -1,0 +1,9 @@
+# 시나리오 4: 들어가는 도중 marker 가 가려진다 (사람, 공구, 케이블). 멈췄다가, 다시 보이면 그 자리에서 이어서 붙는다
+# 창고 월드, robot:=mecanum dock:=True dock_markers:=both (bt_navigator/DOCKING.md 16-5)
+# 다른 터미널에서, 로봇이 insert 를 시작하면 (이 터미널에 "RUNNING insert") marker 앞에 가는 기둥을 세우고 몇 초 뒤 치운다:
+#   ros2 run simple_line_bringup obstacle.py put 4.47,1.0 --radius 0.05
+#   ros2 run simple_line_bringup obstacle.py remove
+dock:dock_a 4.0,-2.5 3.85,1.0,0
+wait 5
+undock_precise:dock_a
+go 4.0,0.0 4.0,-2.5 -4.0,-2.5,0

@@ -86,7 +86,7 @@ install(TARGETS task_server task_server_lifecycle DESTINATION lib/${PROJECT_NAME
 install(PROGRAMS scripts/task_client.py scripts/aruco_detector.py scripts/aruco_teach.py scripts/dock_calibrate.py
   tools/make_aruco_dock.py DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY include/ DESTINATION include)
-install(DIRECTORY behavior_trees launch config DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY behavior_trees launch config scenarios DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)

@@ -2,7 +2,7 @@
 
 설비(기계)의 도킹 면에 붙인 **ArUco marker (60 mm 하나, 또는 둘)** 를 **RealSense D455** 의 컬러 카메라로 보고, 메카넘 로봇의 앞면을 설비에서 **15 cm** 떨어진 자리에 mm 단위로 세운다. 그 자리에서 설비 작업을 한 뒤 undock 한다. 작업은 `task_client.py` 로 보낸다: `dock:dock_a <staging 자리>`, `undock`, `undock_precise:dock_a`. `dock_a` 는 marker 하나(0번), `dock_b` 는 marker 둘(2번, 3번)을 붙인 설비다.
 
-이 문서 하나에 원리(ArUco marker, 자세 추정), 도킹 메커니즘, 구현 구조, 실제 로봇으로 옮기는 순서, 실험 결과를 모두 정리했다. 미션 BT 의 다른 부분(작업 액션, 장애물 대기)은 [README.md](README.md).
+이 문서 하나에 원리(ArUco marker, 자세 추정), 도킹 메커니즘, 구현 구조, 실제 로봇으로 옮기는 순서, 실험 결과, 시험 시나리오를 모두 정리했다. 미션 BT 의 다른 부분(작업 액션, 장애물 대기)은 [README.md](README.md).
 
 ![mecanum robot docked](../simple_line/doc/mecanum_robot.png)
 
@@ -26,12 +26,13 @@ Gazebo 결과 (참값. 카메라는 D455 의 화각, 848 x 480):
 | 전체가 어떻게 생겼나, 무엇이 무엇과 이어지나 | 1 |
 | ArUco marker 가 무엇이고 어떻게 자세가 나오나 | 2 |
 | marker 를 본 것이 어떻게 "15 cm 앞에 서기" 가 되나 | 3 |
-| 코드가 어떻게 나뉘어 있나 | 4, 16 |
+| 코드가 어떻게 나뉘어 있나 | 4, 17 |
 | 시뮬레이션으로 돌려 보기 | 5 |
 | **실제 로봇으로 옮기는 순서** | 6 (설정 파일은 7) |
 | 카메라(D455)의 화각, marker 를 얼마나 크게 어디에 붙이나, **marker 를 둘로 늘리면** | 8 |
 | 알고리즘의 자세한 설명과 근거 | 9 ~ 12 |
 | 얼마나 정확한가, 실제 로봇에서 어떻게 확인하나 | 13, 14 |
+| 여러 기능을 잇고 일부러 문제를 넣어 시험하기 (시나리오) | 16 |
 | 안 될 때 | 15 |
 
 목차
@@ -88,7 +89,20 @@ Gazebo 결과 (참값. 카메라는 D455 의 화각, 848 x 480):
   - [14-4. 확인 순서](#14-4-확인-순서)
   - [14-5. 더 높이려면](#14-5-더-높이려면)
 - [15. find_marker 가 실패할 때](#15-find_marker-가-실패할-때)
-- [16. 파일](#16-파일)
+- [16. 시나리오로 시험하기](#16-시나리오로-시험하기)
+  - [16-1. 준비](#16-1-준비)
+  - [16-2. S1: 점검 순회 → 도킹 → 작업 → 정밀 undock → 복귀](#16-2-s1-점검-순회--도킹--작업--정밀-undock--복귀)
+  - [16-3. S2: 설비 두 대를 차례로](#16-3-s2-설비-두-대를-차례로)
+  - [16-4. S3: staging 에서 marker 가 화면 밖](#16-4-s3-staging-에서-marker-가-화면-밖)
+  - [16-5. S4: 들어가는 도중 marker 가 가려짐](#16-5-s4-들어가는-도중-marker-가-가려짐)
+  - [16-6. S5: 도킹 중 취소와 선점](#16-6-s5-도킹-중-취소와-선점)
+  - [16-7. S6: 붙어 있는 동안 뒤가 막힘](#16-7-s6-붙어-있는-동안-뒤가-막힘)
+  - [16-8. S7: staging 으로 가는 길의 장애물](#16-8-s7-staging-으로-가는-길의-장애물)
+  - [16-9. S8: 실제 로봇과의 차이, 가르치기, 되풀이](#16-9-s8-실제-로봇과의-차이-가르치기-되풀이)
+  - [16-10. S9: 틀린 입력](#16-10-s9-틀린-입력)
+  - [16-11. 실제 로봇에서](#16-11-실제-로봇에서)
+  - [16-12. 시나리오가 찾아낸 것](#16-12-시나리오가-찾아낸-것)
+- [17. 파일](#17-파일)
 - [참고 자료](#참고-자료)
 
 ---
@@ -377,6 +391,8 @@ RViz: `/dock/aruco_debug` (Image: 찾은 marker, 바닥 위 자세로 다시 그
 ![camera](docs/aruco_camera_debug.jpg)
 
 붙은 자리(카메라 ↔ marker 0.16 m)에서 본 `/dock/aruco_debug` (D455 화각, 1280 x 720). marker 는 240 px 이고 위아래로 240 px, 좌우로 520 px 남는다. 초록 = 검출한 모서리, 빨간 점 = 추정한 바닥 위 자세로 다시 그린 모서리. 둘이 겹치고 `tilt 0.0deg z +0mm` 이면 카메라 TF 와 설정이 맞다. 첫 줄의 `(1/1)` 은 그 dock 의 marker 가운데 몇 개를 보았는지다.
+
+여러 작업을 잇고 장애물, 가림, 취소 같은 문제를 일부러 넣어 보는 시나리오 아홉 개는 16장에 있다 (`task_client.py --file`, 설비 두 대 `dock_markers:=both`, 참값 판정 `dock_truth.py`).
 
 ## 6. 실제 로봇으로 옮기기
 
@@ -838,6 +854,8 @@ staging 세 곳(로봇 중심이 설비 면 0.70 ~ 0.75 m 앞, 옆 0 ~ 0.25 m, �
 | marker 둘로 가르친 파일의 `marker_ids` 를 하나로 바꿔 놓음 | 그 파일을 쓰지 않고 경고와 함께 도면 값으로 도킹 |
 | marker 가 화면 밖 (70° 비껴 봄), 옆에 상자, detector 없음 | 10-4 의 동작 (제자리에서 찾음 / 돌지 않고 실패 / 이유와 함께 바로 실패) |
 
+여러 기능을 잇고 문제를 넣은 시험은 16장에 있다.
+
 시뮬레이션이 보여 주지 못한 것: 영상의 흔들림과 모션 블러, 노출과 조명, 카메라와 odom 의 시각 어긋남, 고정 초점의 흐림, 바닥에 따라 바뀌는 미끄러짐, 실제 깊이 영상. 14장의 순서로 실제 로봇에서 재고 맞춘다.
 
 ## 14. 실제 로봇에서의 정밀도
@@ -910,7 +928,286 @@ ros2 run bt_mission dock_calibrate.py --ros-args -p deadband:=True     # 데드�
 
 들어가는 중의 실패는 `[aruco] insert: ...` 줄에 이유가 있다: `lost the marker` (2 초 못 봄), `camera too close to the marker` (`safety.min_camera_distance`), `timed out`. `[dock] could not switch off collision_monitor/Footprint` 는 안전 영역을 끄지 못한 것이다 (6-3). `[aruco] refine: marker not seen while standing (... only part of the dock's markers ...)` 는 marker 가 여럿인 dock 에서 붙은 자리에 전부 보이지 않은 것이다: `/dock/aruco_debug` 의 `(1/2)` 로 어느 것이 안 보이는지 보고, 가린 것을 치우거나 marker 의 `lateral` 과 간격을 확인한다 (8-3).
 
-## 16. 파일
+## 16. 시나리오로 시험하기
+
+5장의 예는 기능을 하나씩 보여 준다. 이 장의 시나리오는 실제 작업처럼 **여러 기능을 잇고**, 일부러 **문제를 넣어** 로봇이 안전하게 대처하는지 본다. 모두 창고 월드에서 돌려 보았고, 끝난 자리는 Gazebo 의 참값으로 판정했다. 시나리오가 찾아낸 문제를 고치는 동안(16-12) 돌린 결과도 있다. 도킹 쪽(marker 를 보고 붙는 부분)은 S4 의 수정 뒤로 바뀌지 않았고, controller 의 도착 판정은 세 번 바꿨다. 마지막 판으로는 S2, S6 과 도착 시험을 다시 돌렸다. 실제 로봇에서는 좌표만 바꿔 같은 순서로 한다 (16-11).
+
+![scenario map](docs/scenario_map.png)
+
+| | 시나리오 | 이어지는 기능 | 넣는 문제 | 실행 | Gazebo 결과 |
+|---|---|---|---|---|---|
+| S1 | 점검 순회 → 도킹 → 작업 → 정밀 undock → 복귀 | inspect, scan, dock, wait, undock_precise, look_around, go | | 파일 | 두 번 모두 6개 작업 성공 (약 2분 50초). 붙은 자리 +0.3 ~ +0.5 / -0.4 mm, 0.00° |
+| S2 | 설비 두 대를 차례로 (marker 하나 → 둘) | dock 두 번, undock_precise, undock | | 파일 | 두 번 모두 성공. A +0.1 ~ +0.2 / -0.0 ~ -0.3 mm, 0.05° 안, B +0.6 ~ +0.8 / -0.4 mm, 0.00° |
+| S3 | staging 에서 marker 가 화면 밖 | 제자리에서 돌며 찾기, 비스듬하고 먼 접근 | 시야 | 파일 | 두 번 모두 세 번 돌아 찾음 (18.8 ~ 18.9 s). +0.4 ~ +0.9 / -0.4 ~ -0.6 mm, 0.03° 안 |
+| S4 | 들어가는 도중 marker 가 가려짐 | 놓침 → 멈춤 → 다시 보기 → 이어서 붙기 | 기둥 | 파일 + 손 | 가려진 6 s 동안 그 자리에 섬. 치우자 이어서 +0.5 mm |
+| S5 | 도킹 중 취소, 선점 | 안전 영역 되켜기 | 사람의 명령 | 대화형 | 1 s 안에 다시 켜지고 로봇은 섬 |
+| S6 | 붙어 있는 동안 뒤가 막힘 | undock 의 레이저 뒤 확인 | 기둥 | 파일 + 손 | 0.1 ~ 0.2 s 만에 섬 (움직이지 않음). 치운 뒤 물러남 |
+| S7 | staging 으로 가는 길의 장애물 | stop & go, 도킹 | 기둥 | 파일 + 손 | 0.53 m 앞에서 섬, 치우고 2 s 뒤 출발, 도킹 성공 |
+| S8 | 실제 로봇과의 차이 + 가르치기 + 되풀이 | aruco_teach, 정밀도 | 미끄러짐, 카메라 TF, marker 크기 | 스크립트 | 도면 값: 옆 -6.3 mm, 1.54° (차이가 남음). 가르친 뒤 4번 모두 1.4 mm, 0.03° 안 |
+| S9 | 틀린 입력 | 실패 이유, 안전한 실패 | 없는 dock, 다른 설비, 틀린 형식 | 파일 | 기대대로 실패하고 이유를 알려 줌 |
+
+### 16-1. 준비
+
+```bash
+# 터미널 1: 창고 + 메카넘 + 설비 두 대 (dock_a: marker 하나, dock_b: marker 둘) + marker 검출
+ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse robot:=mecanum dock:=True dock_markers:=both
+# 터미널 2
+ros2 run bt_mission task_server
+# 터미널 3: 시나리오 파일을 돌린다
+SC=$(ros2 pkg prefix bt_mission)/share/bt_mission/scenarios
+ros2 run bt_mission task_client.py --file $SC/s1_patrol_dock.txt
+# 터미널 4: 장애물을 놓고 치우기, 참값 보기
+ros2 run simple_line_bringup obstacle.py put 4.47,1.0 --radius 0.05
+ros2 run simple_line_bringup dock_truth.py dock_a
+```
+
+| 도구 | 하는 일 |
+|---|---|
+| `task_client.py --file <파일>` | 파일의 줄을 차례로 한다. 줄의 형식은 대화형과 같다 (작업 한 줄, `wait <초>`, `#` 주석). **하나라도 실패하면 남은 줄은 하지 않는다** (`--keep-going` 이면 계속). 끝에 작업마다 결과와 걸린 시간, 종료 코드 0 = 모두 성공. `task_client.py < 파일` 로 넣어도 같다 |
+| `wait <초>` | 앞 작업이 끝난 뒤 그만큼 기다린다 (설비 작업 흉내). 대화형에서도 쓴다 |
+| `dock_truth.py <dock>` (simple_line_bringup) | Gazebo 참값으로 로봇이 dock 좌표계의 어디에 섰는지. 허용오차(`--tol`, 기본 3 mm, 3 mm, 0.5°) 안이면 `PASS` 와 종료 코드 0. `--target 0.71,0,180` 은 undock 뒤의 자리, `--place` 는 로봇을 그 자리에 옮겨 놓는다 (가르치기) |
+| `obstacle.py put x,y [--radius r]`, `remove` | Gazebo 에 기둥을 놓고 치운다 ([README.md](README.md) 6-1). 뜨는 데 몇 초 걸린다 |
+| `dock_markers:=both` | 설비 두 대. Gazebo 의 모형 이름이 dock 이름과 같다 (`dock_a`, `dock_b`) |
+
+시나리오 파일은 `bt_mission/scenarios/` 에 있다. 파일 끝의 요약은 이렇게 나온다 (S1):
+
+```
+summary:
+  t1   inspect                SUCCEEDED    31.6 s  done
+  t2   scan                   SUCCEEDED    27.5 s  done
+  t3   dock:dock_a            SUCCEEDED    21.8 s  done
+  t4   undock_precise:dock_a  SUCCEEDED     8.6 s  done
+  t5   look_around            SUCCEEDED    18.9 s  done
+  t6   go                     SUCCEEDED    46.1 s  done
+  ALL SUCCEEDED
+```
+
+- 시나리오는 출발점 (-4, -2.5) 에서 시작해 거기로 돌아온다 (S6 만 붙은 자리에서 멈춘다). 이어서 돌려도 된다.
+- 이 시뮬레이션의 planner 는 점과 점을 직선으로 잇고, 그 선이 물체에 닿으면 실패한다. 점은 선이 물체에서 0.4 m 넘게 떨어지게 골랐다. 동쪽 통로는 x = 4.0 으로 지난다: 처음에는 staging 과 같은 x = 3.85 로 했는데, 선반 B 끝에서 0.35 m 라 위치 추정이 몇 cm 흐르는 조건(S8 의 미끄러짐)에서 controller 가 선반 모서리를 길 위의 장애물로 보고 섰다. 좌표를 바꿀 때는 두 점 사이의 직선과 그 여유를 확인한다.
+- 설비 모형은 지도에 없다. 그래서 설비 앞에서는 AMCL 의 위치가 참값과 5 ~ 7 cm 틀렸다 (레이저가 벽 대신 설비를 본다). staging 은 그 정도 틀려도 된다 (도킹은 marker 로 한다). 실제 현장의 설비도 지도에 넣는 것이 좋다.
+
+### 16-2. S1: 점검 순회 → 도킹 → 작업 → 정밀 undock → 복귀
+
+하루 일과 한 바퀴. 내비게이션 작업과 도킹 작업이 섞여도 서로 방해하지 않는지 본다.
+
+```
+inspect:5 -1.0,-2.5 1.5,-2.0,90      # 선반 B 앞에서 선반을 보고 5 초 점검
+scan 4.0,-2.5 4.0,0.0                # 동쪽 통로를 지나며 0.5 m 마다 스캔
+dock:dock_a 3.85,1.0,0               # 설비 A 앞 staging 에서 도킹
+wait 10                              # 설비 작업 10 초
+undock_precise:dock_a                # marker 를 보며 물러나 설비 기준 0.4 m 뒤에 선다
+look_around 2.0,0.3                  # 선반 사이 빈 곳에서 한 바퀴
+go -1.0,0.0 -1.0,-2.5 -4.0,-2.5,0    # 선반 B 를 돌아 출발점으로
+```
+
+| 합격 기준 | 확인한 결과 |
+|---|---|
+| 요약이 `ALL SUCCEEDED` | 두 번 모두 6개 성공. 점검 31.5 s, 스캔 27.5 s, 도킹 22 ~ 24 s, undock 9 s, 둘러보기 19 s, 복귀 46 ~ 53 s |
+| `wait 10` 동안 `dock_truth.py dock_a` 가 PASS | +0.5 mm, -0.4 mm, 0.00° 와 +0.3 mm, -0.4 mm, 0.00° |
+| undock 뒤 collision_monitor 가 다시 켜짐 (`[dock] collision_monitor: Footprint on again`) | 켜짐 |
+
+### 16-3. S2: 설비 두 대를 차례로
+
+marker 하나짜리 설비 A 와 marker 둘짜리 설비 B 를 한 작업 묶음에서 차례로 들른다. 다른 설비의 marker 가 섞이지 않는지, 정밀 undock 뒤 바로 다음 설비로 가는 이동이 되는지 본다.
+
+```
+dock:dock_a 4.0,-2.5 3.85,1.0,0      # 설비 A
+wait 10
+undock_precise:dock_a
+dock:dock_b 4.0,0.0 3.85,-2.0,0      # 남쪽으로 3 m 가서 설비 B
+wait 10
+undock                               # B 에서는 곧게 뒤로
+go 3.85,-2.5 -4.0,-2.5,0
+```
+
+| 합격 기준 | 확인한 결과 |
+|---|---|
+| `ALL SUCCEEDED` | 두 번 모두 5개 성공 (도킹 A 67 s 안팎, B 40 ~ 45 s) |
+| 두 번의 `wait 10` 동안 각각 `dock_truth.py dock_a`, `dock_truth.py dock_b` 가 PASS | A: +0.2 mm, -0.0 mm, 0.05° / +0.1 mm, -0.3 mm, 0.01°. B: +0.8 mm, -0.4 mm, 0.00° / +0.6 mm, -0.4 mm, 0.00° |
+| B 에서는 두 marker 를 다 보고 붙는다 (`/dock/aruco_debug` 첫 줄이 `dock_b id 2,3 (2/2)`) | 붙은 자리의 화면은 8-3 의 그림과 같다 |
+
+처음 돌렸을 때 이 시나리오는 설비 B 의 staging 에서 멈춰 450 s 뒤 실패했다. controller 의 문제였고 고쳤다 (16-12).
+
+### 16-4. S3: staging 에서 marker 가 화면 밖
+
+staging 이 비스듬하고(-50°) 조금 멀어서(설비 면에서 0.9 m, 옆 0.4 m) 도착했을 때 marker 가 화면 밖에 있다. 뒤로 물러나지 않고 그 자리에서 레이저로 주변을 확인한 뒤 돌며 찾는지(10-4) 본다.
+
+```
+dock:dock_a 4.0,-2.5 4.0,0.0 3.65,0.6,-50     # 선반 B 모서리를 피해 (4.0, 0) 을 거친다
+undock_precise:dock_a
+go 4.0,0.0 4.0,-2.5 -4.0,-2.5,0
+```
+
+| 합격 기준 | 확인한 결과 |
+|---|---|
+| `ALL SUCCEEDED` | 두 번 모두 성공 |
+| 로그에 `not seen: turning in place to +30 deg` ... `seen while turning: stopping here to look` | +30°, -30° 에서는 안 보이고 +60° 로 도는 도중 보여서 멈춤. `found 'dock_a' ... (8 of 8, 3 turn(s), 18.9 s)` (두 번째 18.8 s) |
+| 붙은 자리 PASS | +0.9 mm, -0.4 mm, 0.01° 와 +0.4 mm, -0.6 mm, 0.03° |
+
+두 번째 실행에서 이어지는 `undock_precise` 가 한 번 `only 1 usable detections` 로 marker 를 잡지 못하고, 설계대로 단순 undock 으로 곧게 물러났다 (성공). 그 순간 참값을 기록하는 프로세스 둘이 같이 떠서 시뮬레이션이 느려졌던 때다. 실제 로봇에서 이 줄이 자주 보이면 `ros2 topic hz /dock/aruco` 로 검출 빈도를 본다 (15장).
+
+옆에 물건이 있어 돌 수 없을 때(레이저가 몸이 쓸고 갈 원 안에 무엇을 보면 돌지 않고 `Did not turn to search: ...` 로 실패한다)는 13장에서 확인했다. 이 창고에서 그대로 만들기는 어렵다: 돌 원(0.27 m) 안의 물건은 collision_monitor 의 원(0.3 m) 안에도 들어서, 로봇이 staging 에 닿기 전에 collision_monitor 가 먼저 세운다.
+
+### 16-5. S4: 들어가는 도중 marker 가 가려짐
+
+사람이나 케이블이 잠깐 marker 앞을 가린다. 가려진 동안 설비 쪽으로 가지 않고(8-5 의 안전), 다시 보이면 뒤로 물러나지 않고 그 자리에서 이어서 붙는지 본다.
+
+```bash
+ros2 run bt_mission task_client.py --file $SC/s4_marker_hidden.txt
+# 터미널 3 에 "RUNNING insert" 가 나오면, 터미널 4 에서 marker 앞 7 cm 에 가는 기둥을 세운다
+ros2 run simple_line_bringup obstacle.py put 4.47,1.0 --radius 0.05
+# 5 ~ 10 초 뒤 치운다
+ros2 run simple_line_bringup obstacle.py remove
+```
+
+기대하는 흐름 (`task_server` 로그):
+
+```
+[aruco] insert: lost the marker in 3.4 s, along +174.2 mm, ... (held 1.4 s for the marker)   2 s 동안 못 봄 -> 멈추고 실패
+[dock] collision_monitor: Footprint on again
+[aruco] look_again: looking for dock 'dock_a' from here                                      그 자리에 서서 다시 본다 (돌지 않는다)
+[aruco] dock 'dock_a' not found (not seen from here) after 3.5 s                            아직 가려져 있다 -> 다음 시도
+[aruco] approach: already 76 mm closer than its goal, not backing up                         물러나지 않는다
+[aruco] insert (stage insert): ...                                                           기둥을 치우면 여기서 이어서
+[aruco] insert: reached in 7.3 s, along +2.1 mm, ...
+[aruco] refine: done after 1 correction(s), 3.4 s
+```
+
+| 합격 기준 | 확인한 결과 |
+|---|---|
+| 가려진 동안 설비 쪽으로 가지 않음 (참값을 0.25 s 마다 잼) | 가려진 6 s 동안 설비 면에서 482.8 mm 에 그대로 섬 |
+| 치운 뒤 그 자리에서 이어서 붙음 (3번 시도 안에) | 두 번째 시도에서 붙음. 310.5 mm (+0.5 mm) |
+| 너무 오래 가려 두면 (세 번 다 실패) 작업이 실패하고 로봇은 그 자리에 섬 | 돌려 보지 않았다. 시도마다 약 6 s (놓침 2 s + 다시 보기 3.5 s) 이므로 15 ~ 20 s 넘게 가리면 실패한다 |
+
+처음 돌렸을 때는 가려진 채 두 번째 시도를 시작하면서 로봇이 설비 쪽으로 25 mm 더 갔다. 고쳤다 (16-12).
+
+### 16-6. S5: 도킹 중 취소와 선점
+
+collision_monitor 를 끈 채 설비 앞에 붙는 도중에 사람이 작업을 취소하거나 다른 작업을 보낸다. 로봇이 서고, **안전 영역이 다시 켜지는지** 본다. 키보드로 하는 대화형 시나리오다.
+
+```bash
+ros2 run bt_mission task_client.py
+task> dock:dock_a 4.0,-2.5 3.85,1.0,0
+# "RUNNING insert" 가 나오면 (collision_monitor 가 꺼져 있다)
+task> cancel
+# 다른 터미널에서
+ros2 param get /collision_monitor Footprint.enabled        # True 여야 한다
+ros2 run simple_line_bringup dock_truth.py dock_a --tol 1000,50,10   # 두 번 재서 같으면 서 있는 것
+task> dock:dock_a 3.85,1.0,0                                # staging 으로 돌아가 다시 붙는다
+# 또는 선점: 붙는 도중에 다른 작업을 바로 보낸다
+task> !go 3.0,0.3,180
+```
+
+| 합격 기준 | 확인한 결과 |
+|---|---|
+| 취소: 결과 `CANCELED`, 1 s 안에 `Footprint on again`, 로봇이 섬 | `t1 CANCELED`. 1 s 안에 다시 켜짐 (`Footprint.enabled = True`). 설비 면에서 374.0 mm 에 서서 움직이지 않음 |
+| 취소 뒤 다시 보낸 도킹이 붙음 | 성공 (25.8 s). 설비 앞 0.21 m 에서 돌아 staging 으로 갔다가 다시 들어갔다 (돌 원이 설비에 닿지 않는 거리) |
+| 선점: 앞 작업이 `ABORTED: preempted by ...`, 1 s 안에 다시 켜지고 새 작업이 돎 | `t1 ABORTED preempted by t2`, 1 s 안에 다시 켜짐, `go` 성공 |
+
+### 16-7. S6: 붙어 있는 동안 뒤가 막힘
+
+설비 작업 중에 로봇 뒤에 대차나 상자가 놓였다. 단순 undock 과 정밀 undock 이 모두 뒤를 보고 서는지 본다 (collision_monitor 는 undock 동안 꺼져 있으므로 이것이 유일한 보호다).
+
+```bash
+ros2 run bt_mission task_client.py --file $SC/s6_blocked_undock.txt     # dock -> wait 20 -> undock
+# 도킹이 끝나 wait 20 이 도는 동안 (꼭 붙은 뒤에. 붙기 전에 놓으면 로봇과 겹친다)
+ros2 run simple_line_bringup obstacle.py put 3.90,1.0 --radius 0.06    # 로봇 뒷면에서 12 cm
+# undock 이 실패하고 파일이 멈춘다. 정밀 undock 도 해 본다
+ros2 run bt_mission task_client.py undock_precise:dock_a               # 이것도 실패해야 한다
+ros2 run simple_line_bringup obstacle.py remove
+ros2 run bt_mission task_client.py undock                              # 이제 물러난다
+```
+
+| 합격 기준 | 확인한 결과 |
+|---|---|
+| `undock`: `something is behind the robot, stopped`, 로봇이 움직이지 않음 | 0.2 s 만에 섬. 참값 310.4 mm 그대로 |
+| `undock_precise`: 같다 (`retreat: something is behind the robot, stopped`) | 0.1 s 만에 섬. 310.8 mm 그대로 |
+| 치운 뒤 undock 이 됨 | `undock` 701.6 mm (목표 710 mm), `undock_precise` 701.3 mm |
+
+### 16-8. S7: staging 으로 가는 길의 장애물
+
+지나가는 사람이나 대차 때문에 staging 으로 가다 선다. 치우면 다시 가서 평소처럼 도킹하는지 본다 (README 의 stop & go + 도킹).
+
+```bash
+ros2 run bt_mission task_client.py --file $SC/s7_obstacle_on_route.txt
+# 로봇이 출발하면 (5 s 뒤쯤) 길 위에 기둥
+ros2 run simple_line_bringup obstacle.py put 0.0,-2.5
+# 로봇이 그 앞에 선 것을 보고 (Gazebo, RViz) 치운다
+ros2 run simple_line_bringup obstacle.py remove
+```
+
+| 합격 기준 | 확인한 결과 |
+|---|---|
+| 장애물 앞에서 감속해 섬 (`obstacle on the path ... slowing down to stop`) | 0.53 m 앞에서 섬 |
+| 치우면 다시 감 (`path clear, going again`) | 치우고 2 s 뒤 출발 |
+| `ALL SUCCEEDED` (기다린 시간이 30 s 를 넘지 않게) | 도킹 80.2 s (기다림 포함), undock, 복귀 모두 성공 |
+
+30 s 넘게 막혀 있으면 Nav2 가 재시도를 시작한다 (README 6-3).
+
+### 16-9. S8: 실제 로봇과의 차이, 가르치기, 되풀이
+
+13장의 실험을 스크립트 하나로. 실제 로봇에서 생길 차이를 넣은 시뮬레이션에서 (1) 도면 값으로 붙어 차이가 남는 것을 보고, (2) 정확한 자리에서 가르치고, (3) staging 을 바꿔 가며 되풀이해 정밀도를 잰다.
+
+```bash
+ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse robot:=mecanum dock:=True \
+    dock_markers:=both mecanum_slip:=True camera_tf_error:=1.5,0.0,0.01 aruco_detector:=False
+ros2 launch bt_mission aruco_detector.launch.py use_sim_time:=True marker_scale:=1.02
+ros2 run bt_mission task_server
+bash $(ros2 pkg prefix bt_mission)/share/bt_mission/scenarios/s8_repeat.sh dock_a 4     # dock, 횟수, [허용오차]
+```
+
+스크립트가 하는 일과 확인한 결과:
+
+| 단계 | 하는 일 | 합격 기준 | 확인한 결과 |
+|---|---|---|---|
+| 1 | 가르친 자세 없이(있으면 `.bak` 으로 옮긴다) 도면 값 목표로 도킹하고 참값을 잰다 | 실패가 정상이다: 넣은 차이가 그대로 남는다 | -2.5 mm, **-6.3 mm, +1.54°** (FAIL) |
+| 2 | `dock_truth.py --place` 로 로봇을 정확한 붙은 자리에 옮기고 `aruco_teach.py` | `robot_in_dock` 이 도면 값과 차이를 보인다 (그만큼이 TF 와 치수의 오차) | 313.6 mm, +6.5 mm, 178.50° (도면 값 310, 0, 180) |
+| 3 | staging 세 곳을 돌아가며 `undock` → `dock` 을 되풀이하고 매번 참값 | 모두 허용오차(기본 2 mm, 2 mm, 0.3°) 안, 종료 코드 0 | 4번 모두 PASS: +0.6 ~ +1.4 mm, -0.1 ~ -0.3 mm, 0.00 ~ 0.03° |
+
+`dock_b` 로도 돌릴 수 있다 (`s8_repeat.sh dock_b 4`). 횟수를 늘려 실제 로봇의 확인(14-4)과 같은 20번을 해 볼 수 있다 (한 번에 약 1분).
+
+### 16-10. S9: 틀린 입력
+
+사람이 틀리게 보낸 작업이 위험하지 않게, 이유를 알려 주며 실패하는지 본다. 실패가 정상인 파일이라 `--keep-going` 으로 돌린다.
+
+```
+dock:dock_c 4.0,-2.5 3.85,1.0,0      # docking.yaml 에 없는 dock
+dock:dock_b 3.85,1.0,0               # 다른 설비(A) 앞에서 B 를 찾음
+undock_precise:dock_b                # 붙어 있지 않은데 정밀 undock (B 가 안 보임)
+inspect:abc 1,1                      # 형식이 틀린 줄
+go 4.0,0.0 4.0,-2.5 -4.0,-2.5,0      # 출발점으로
+```
+
+| 줄 | 기대 | 확인한 결과 |
+|---|---|---|
+| `dock:dock_c` | `find_marker failed`. 돌며 찾아본 뒤 이유를 알려 줌 | `'dock_c' not found (looked everywhere it could) after 30.9 s, 4 turn(s): saw only other docks: 'dock_a'. Check the dock name ...` |
+| `dock:dock_b` (A 앞) | 같은 이유로 실패. A 에 붙지 않는다 | 같은 메시지 (`saw only other docks: 'dock_a'`) |
+| `undock_precise:dock_b` | B 가 안 보이므로 단순 undock 으로 0.4 m | `undock_without_marker: back off 0.40 m`, 성공 |
+| `inspect:abc` | 보내지 않음 | `! duration 'abc' is not a number`, 요약에 `(1 line(s) could not be read)` |
+| 요약 | `FAILED`, 종료 코드 1 | 그렇다 |
+
+### 16-11. 실제 로봇에서
+
+| 시나리오 | 바꿀 것 | 판정 |
+|---|---|---|
+| 모두 | 좌표 (출발점, staging, 점검 자리)를 현장의 지도에 맞춰 파일을 복사해 고친다. dock 이름은 `docking.yaml` 의 것 | `dock_truth.py` 대신 바깥 기준: 설비 기준면과 다이얼 게이지, 바닥 눈금, 작업 결과 (14-4). `ros2 topic echo /dock/final_error` 를 같이 기록 |
+| S4 | 기둥 대신 종이나 손으로 marker 를 가린다 | 가린 동안 로봇이 설비 쪽으로 오지 않는지 (줄자, 바닥 표시) |
+| S5, S6 | 비상정지를 손에 쥔다. S6 은 가볍고 무르고 레이저 높이에 걸리는 물건 (빈 상자) | S6 이 실패하면 **현장에서 쓰지 않는다**: `ros.scan_topic`, 레이저 TF, 레이저가 로봇 뒤를 보는지 (뒤가 가려지는 로봇이면 undock 거리를 줄이거나 뒤 센서를 단다) |
+| S7 | 사람이 지나가거나 상자를 놓는다 | collision_monitor 와 controller 의 장애물 감속이 로봇에 맞게 설정되어 있는지 |
+| S8 | `dock_truth.py --place` 대신 손(조이스틱)으로 정확한 자리에 놓고 `aruco_teach.py` | 14-4 의 20회 반복 |
+
+권하는 순서: S9 (안전한 실패) → S6 (뒤 확인) → S5 (취소) → S1 (한 대) → S3 → S4 → S7 → S2 (두 대) → S8 (정밀도). 앞의 셋은 로봇이 설비에 붙기 전, 사람이 옆에 있을 때 먼저 확인할 안전 항목이다.
+
+### 16-12. 시나리오가 찾아낸 것
+
+한 기능씩 볼 때는 드러나지 않던 문제 두 개를 시나리오가 찾았고, 고쳤다.
+
+| 찾은 시나리오 | 문제 | 원인 | 고친 것 |
+|---|---|---|---|
+| S2 (설비 B 의 staging), S6 (undock 뒤 같은 staging 으로 다시) | 로봇이 staging 근처에서 움직이지 않고 Nav2 가 `Failed to make progress` 로 끝내 실패했다 (450 s) | controller 의 "도착 고정": 허용오차(5 cm) 안에 한 번 들면 15 cm 밖으로 밀려나기 전에는 위치를 더 맞추지 않는다 (도착 뒤 위치 추정이 흔들릴 때 움찔하지 않게 넣은 것). 그런데 goal checker 가 처음부터 다시 볼 때 (Failed to make progress 뒤 Nav2 가 같은 goal 로 다시 시작, undock 처럼 Nav2 밖에서 움직인 뒤 같은 goal) 로봇이 5 ~ 15 cm 에 있으면, goal checker 는 "아직", controller 는 "도착" 이라 서로 기다렸다 | `simple_line_controller`: 도착해서 방향까지 맞추고 섰는데 2 s 넘게 끝나지 않고 위치가 허용오차 밖이면 다시 다가간다 (`approaching it again`). 정상적인 도착은 그 전에 끝나므로 평소 움직임은 그대로다. 같은 상황(도착 뒤 로봇을 뒤로 5.5 cm, 옆으로 8 cm 옮기고 같은 goal)을 만들어 두 번 모두 2 s 뒤 다시 다가가 도착하는 것을 확인했다. 그 뒤의 S2, S6, 도착 회전 시험(goal 6개, 방향 오차가 다시 커진 양 2.1° 이하)에서는 한 번도 풀리지 않았다. 처음에는 "허용오차의 절반 안에 들어야 도착" 으로 고쳤는데, 옆으로 3 ~ 5 cm 비껴 들어온 로봇이 goal 점을 향해 제자리에서 도는 움직임이 다시 생기고 (도착 회전 시험에서 146°), 경유점을 지나쳐 서는 일(한 번은 45 cm 지나 설비 B 아래 벽 쪽)이 생겨서 되돌렸다 |
+| S4 | marker 가 가려진 채 다음 시도를 시작하면, 처음 0.5 s 동안 설비 쪽으로 갔다 (시도마다 약 25 mm) | 진입 단계(`ArucoServo`)가 시작할 때 "마지막으로 marker 를 본 때" 를 지금으로 두어서, 아직 한 번도 못 봤는데 "방금 봤다" 로 판정했다 | 그 노드에서 marker 를 실제로 받아들인 뒤에만 설비 쪽으로 간다. 놓침 판정(2 s)은 시작한 때부터 센다. 고친 뒤 가려진 6 s 동안 로봇이 0.1 mm 도 움직이지 않았다 |
+
+## 17. 파일
 
 ```
 bt_navigator/
@@ -918,6 +1215,7 @@ bt_navigator/
 ├── docs/aruco_marker_dock_a.svg, .png            인쇄용 marker 하나 (SVG 를 100 % 로)
 ├── docs/aruco_marker_dock_b.svg, .png            인쇄용 marker 둘, A4 가로 한 장
 ├── docs/aruco_principle.png, docking_overview.png    원리와 구조 그림 (2장, 1-3)
+├── docs/scenario_map.png                        시나리오의 경로와 장애물 자리 (16장)
 ├── docs/aruco_results.png, aruco_camera_debug.jpg, aruco_camera_debug_two.jpg    결과, 붙은 자리의 카메라 영상
 ├── bt_mission_msgs/msg/ArucoDetection.msg        marker 하나: 후보(DockHypothesis), 화면 끝 여유, 진단
 └── bt_mission/
@@ -935,6 +1233,7 @@ bt_navigator/
     ├── scripts/dock_calibrate.py                 배율, 데드밴드 재기
     ├── launch/aruco_detector.launch.py
     ├── tools/make_aruco_dock.py                  인쇄용 SVG/PNG, Gazebo 설비 모형
+    ├── scenarios/                                시험 시나리오 (task_client.py --file), s8_repeat.sh (16장)
     └── test/                                     test_docking_config, test_aruco_dock_control, test_dock_control (gtest),
                                                   test_aruco_detector.py (합성 영상, Gazebo 영상)
 
@@ -942,6 +1241,7 @@ simple_line/simple_line_bringup/
 ├── robots/make_mecanum.py, mecanum.urdf, mecanum.model   4바퀴 메카넘 로봇
 ├── models/aruco_dock/, aruco_dock_two/           설비 모형: marker 하나 (dock_a), 둘 (dock_b, dock_markers:=2)
 ├── scripts/mecanum_slip_sim.py                   메카넘 미끄러짐과 바퀴 odom 흉내 (mecanum_slip:=True)
+├── scripts/dock_truth.py                         Gazebo 참값으로 붙은 자리 판정, 로봇 옮겨 놓기 (16장)
 └── launch/simple_line.launch.py                  robot:=mecanum, dock:=True, dock_markers, camera_resolution, camera_depth, mecanum_slip, camera_tf_error
 ```
 
