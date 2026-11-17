@@ -143,6 +143,8 @@ ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse slam:=Tru
   모양과 센서 자리는 `simple_line_bringup/robots/make_mecanum.py` 한 곳에서 정하고, 그것이 URDF(TF, RViz)와
   Gazebo 모델을 같이 만든다. Gazebo 에서는 `planar_move` 가 명령한 속도를 몸체에 그대로 주고(롤러 마찰을 물리로 풀지 않는다)
   바퀴는 돌지 않는다. RViz 에서는 odom 의 속도로 바퀴가 돈다. 도킹은 [bt_navigator/DOCKING.md](../bt_navigator/DOCKING.md).
+  메카넘 바퀴의 구조와 원리(롤러의 X 배치, 바퀴 속도의 식, 실제 로봇의 베이스 드라이버가 할 일)는
+  [bt_navigator/MECANUM_STUDY.md](../bt_navigator/MECANUM_STUDY.md).
 
   ![mecanum robot](doc/mecanum_robot.png)
 - RViz 의 **Nav2 Goal** 로 목표를 찍으면 된다. 1초마다 현재 위치에서 직선을 다시 긋는다.

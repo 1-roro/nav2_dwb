@@ -46,52 +46,52 @@
         <material><ambient>0.55 0.55 0.55 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_front_left_roller_0">
-        <pose>0.141 0.1325 0.04 -0.7854 0 0</pose>
+        <pose>0.141 0.1325 0.04 0.7854 0 0</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_front_left_roller_1">
-        <pose>0.13508 0.1325 0.05822 -0.7854 -0.62832 0</pose>
+        <pose>0.13508 0.1325 0.05822 0.7854 -0.62832 0</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_front_left_roller_2">
-        <pose>0.11958 0.1325 0.06948 -0.7854 -1.25664 0</pose>
+        <pose>0.11958 0.1325 0.06948 0.7854 -1.25664 0</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_front_left_roller_3">
-        <pose>0.10042 0.1325 0.06948 2.35619 -1.25664 3.14159</pose>
+        <pose>0.10042 0.1325 0.06948 -2.35619 -1.25664 3.14159</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_front_left_roller_4">
-        <pose>0.08492 0.1325 0.05822 2.35619 -0.62832 3.14159</pose>
+        <pose>0.08492 0.1325 0.05822 -2.35619 -0.62832 3.14159</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_front_left_roller_5">
-        <pose>0.079 0.1325 0.04 2.35619 0 3.14159</pose>
+        <pose>0.079 0.1325 0.04 -2.35619 0 3.14159</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_front_left_roller_6">
-        <pose>0.08492 0.1325 0.02178 2.35619 0.62832 3.14159</pose>
+        <pose>0.08492 0.1325 0.02178 -2.35619 0.62832 3.14159</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_front_left_roller_7">
-        <pose>0.10042 0.1325 0.01052 2.35619 1.25664 3.14159</pose>
+        <pose>0.10042 0.1325 0.01052 -2.35619 1.25664 3.14159</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_front_left_roller_8">
-        <pose>0.11958 0.1325 0.01052 -0.7854 1.25664 0</pose>
+        <pose>0.11958 0.1325 0.01052 0.7854 1.25664 0</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_front_left_roller_9">
-        <pose>0.13508 0.1325 0.02178 -0.7854 0.62832 0</pose>
+        <pose>0.13508 0.1325 0.02178 0.7854 0.62832 0</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
@@ -106,52 +106,52 @@
         <material><ambient>0.55 0.55 0.55 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_front_right_roller_0">
-        <pose>0.141 -0.1325 0.04 0.7854 0 0</pose>
+        <pose>0.141 -0.1325 0.04 -0.7854 0 0</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_front_right_roller_1">
-        <pose>0.13508 -0.1325 0.05822 0.7854 -0.62832 0</pose>
+        <pose>0.13508 -0.1325 0.05822 -0.7854 -0.62832 0</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_front_right_roller_2">
-        <pose>0.11958 -0.1325 0.06948 0.7854 -1.25664 0</pose>
+        <pose>0.11958 -0.1325 0.06948 -0.7854 -1.25664 0</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_front_right_roller_3">
-        <pose>0.10042 -0.1325 0.06948 -2.35619 -1.25664 3.14159</pose>
+        <pose>0.10042 -0.1325 0.06948 2.35619 -1.25664 3.14159</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_front_right_roller_4">
-        <pose>0.08492 -0.1325 0.05822 -2.35619 -0.62832 3.14159</pose>
+        <pose>0.08492 -0.1325 0.05822 2.35619 -0.62832 3.14159</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_front_right_roller_5">
-        <pose>0.079 -0.1325 0.04 -2.35619 0 3.14159</pose>
+        <pose>0.079 -0.1325 0.04 2.35619 0 3.14159</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_front_right_roller_6">
-        <pose>0.08492 -0.1325 0.02178 -2.35619 0.62832 3.14159</pose>
+        <pose>0.08492 -0.1325 0.02178 2.35619 0.62832 3.14159</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_front_right_roller_7">
-        <pose>0.10042 -0.1325 0.01052 -2.35619 1.25664 3.14159</pose>
+        <pose>0.10042 -0.1325 0.01052 2.35619 1.25664 3.14159</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_front_right_roller_8">
-        <pose>0.11958 -0.1325 0.01052 0.7854 1.25664 0</pose>
+        <pose>0.11958 -0.1325 0.01052 -0.7854 1.25664 0</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_front_right_roller_9">
-        <pose>0.13508 -0.1325 0.02178 0.7854 0.62832 0</pose>
+        <pose>0.13508 -0.1325 0.02178 -0.7854 0.62832 0</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
@@ -166,52 +166,52 @@
         <material><ambient>0.55 0.55 0.55 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_rear_left_roller_0">
-        <pose>-0.079 0.1325 0.04 0.7854 0 0</pose>
+        <pose>-0.079 0.1325 0.04 -0.7854 0 0</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_rear_left_roller_1">
-        <pose>-0.08492 0.1325 0.05822 0.7854 -0.62832 0</pose>
+        <pose>-0.08492 0.1325 0.05822 -0.7854 -0.62832 0</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_rear_left_roller_2">
-        <pose>-0.10042 0.1325 0.06948 0.7854 -1.25664 0</pose>
+        <pose>-0.10042 0.1325 0.06948 -0.7854 -1.25664 0</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_rear_left_roller_3">
-        <pose>-0.11958 0.1325 0.06948 -2.35619 -1.25664 3.14159</pose>
+        <pose>-0.11958 0.1325 0.06948 2.35619 -1.25664 3.14159</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_rear_left_roller_4">
-        <pose>-0.13508 0.1325 0.05822 -2.35619 -0.62832 3.14159</pose>
+        <pose>-0.13508 0.1325 0.05822 2.35619 -0.62832 3.14159</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_rear_left_roller_5">
-        <pose>-0.141 0.1325 0.04 -2.35619 0 3.14159</pose>
+        <pose>-0.141 0.1325 0.04 2.35619 0 3.14159</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_rear_left_roller_6">
-        <pose>-0.13508 0.1325 0.02178 -2.35619 0.62832 3.14159</pose>
+        <pose>-0.13508 0.1325 0.02178 2.35619 0.62832 3.14159</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_rear_left_roller_7">
-        <pose>-0.11958 0.1325 0.01052 -2.35619 1.25664 3.14159</pose>
+        <pose>-0.11958 0.1325 0.01052 2.35619 1.25664 3.14159</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_rear_left_roller_8">
-        <pose>-0.10042 0.1325 0.01052 0.7854 1.25664 0</pose>
+        <pose>-0.10042 0.1325 0.01052 -0.7854 1.25664 0</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_rear_left_roller_9">
-        <pose>-0.08492 0.1325 0.02178 0.7854 0.62832 0</pose>
+        <pose>-0.08492 0.1325 0.02178 -0.7854 0.62832 0</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
@@ -226,52 +226,52 @@
         <material><ambient>0.55 0.55 0.55 1</ambient><diffuse>0.55 0.55 0.55 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_rear_right_roller_0">
-        <pose>-0.079 -0.1325 0.04 -0.7854 0 0</pose>
+        <pose>-0.079 -0.1325 0.04 0.7854 0 0</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_rear_right_roller_1">
-        <pose>-0.08492 -0.1325 0.05822 -0.7854 -0.62832 0</pose>
+        <pose>-0.08492 -0.1325 0.05822 0.7854 -0.62832 0</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_rear_right_roller_2">
-        <pose>-0.10042 -0.1325 0.06948 -0.7854 -1.25664 0</pose>
+        <pose>-0.10042 -0.1325 0.06948 0.7854 -1.25664 0</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_rear_right_roller_3">
-        <pose>-0.11958 -0.1325 0.06948 2.35619 -1.25664 3.14159</pose>
+        <pose>-0.11958 -0.1325 0.06948 -2.35619 -1.25664 3.14159</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_rear_right_roller_4">
-        <pose>-0.13508 -0.1325 0.05822 2.35619 -0.62832 3.14159</pose>
+        <pose>-0.13508 -0.1325 0.05822 -2.35619 -0.62832 3.14159</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_rear_right_roller_5">
-        <pose>-0.141 -0.1325 0.04 2.35619 0 3.14159</pose>
+        <pose>-0.141 -0.1325 0.04 -2.35619 0 3.14159</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_rear_right_roller_6">
-        <pose>-0.13508 -0.1325 0.02178 2.35619 0.62832 3.14159</pose>
+        <pose>-0.13508 -0.1325 0.02178 -2.35619 0.62832 3.14159</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_rear_right_roller_7">
-        <pose>-0.11958 -0.1325 0.01052 2.35619 1.25664 3.14159</pose>
+        <pose>-0.11958 -0.1325 0.01052 -2.35619 1.25664 3.14159</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_rear_right_roller_8">
-        <pose>-0.10042 -0.1325 0.01052 -0.7854 1.25664 0</pose>
+        <pose>-0.10042 -0.1325 0.01052 0.7854 1.25664 0</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
       <visual name="wheel_rear_right_roller_9">
-        <pose>-0.08492 -0.1325 0.02178 -0.7854 0.62832 0</pose>
+        <pose>-0.08492 -0.1325 0.02178 0.7854 0.62832 0</pose>
         <geometry><cylinder><radius>0.009</radius><length>0.02435</length></cylinder></geometry>
         <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse><specular>0.1 0.1 0.1 1</specular></material>
       </visual>
