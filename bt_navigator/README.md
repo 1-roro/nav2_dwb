@@ -587,6 +587,7 @@ void TaskServer::finish(Outcome outcome, const std::string & message)
 |---|---|---|
 | `task_client.py` (대화형) | 터미널에서 여러 작업을 차례로, 선점, 취소 | 4-5-1 ~ 4-5-3 |
 | `task_client.py <작업>` (한 번) | 스크립트에서 작업 하나를 보내고 결과를 종료 코드로 | 4-5-4 |
+| `task_client.py --file <파일>` (시나리오) | 여러 작업을 파일로. 실패하면 멈추고 끝에 요약 | 4-5-4, [DOCKING.md 16장](DOCKING.md#16-시나리오로-시험하기) |
 | `ros2 action send_goal` | 클라이언트 없이 메시지를 직접 | 4-5-5 |
 
 #### 4-5-1. 한 줄 형식
@@ -707,9 +708,13 @@ task> go 0,-1 0,1.5 -2,1.5 -2,-1,0
 # 끝날 때까지 기다렸다가 종료. 종료 코드 0 = SUCCEEDED, 1 = 그 외
 ros2 run bt_mission task_client.py inspect 0,-1 1.5,-1,90 && echo ok
 
-# 여러 작업을 파일에서 (한 줄에 하나, 차례대로 실행하고 모두 끝나면 종료)
-ros2 run bt_mission task_client.py < tasks.txt
+# 여러 작업을 파일에서 (시나리오): 한 줄에 하나, 차례대로. 하나라도 실패하면 남은 줄은 하지 않고 (--keep-going 이면 계속),
+# 끝에 작업마다 결과와 걸린 시간을 낸다. 종료 코드 0 = 모두 SUCCEEDED
+ros2 run bt_mission task_client.py --file tasks.txt
+ros2 run bt_mission task_client.py < tasks.txt          # 파이프로 넣어도 같다
 ```
+
+파일의 줄은 대화형과 같은 형식이고, `wait <초>` 로 작업 사이에 기다릴 수 있다 (앞 작업이 끝난 뒤부터 센다. 설비 작업 시간 흉내). 점검, 도킹, 두 설비, 장애물, 취소를 잇는 시나리오 파일과 합격 기준은 `bt_mission/scenarios/` 와 [DOCKING.md 16장](DOCKING.md#16-시나리오로-시험하기).
 
 #### 4-5-5. `ros2 action send_goal` 로 직접
 
@@ -1266,6 +1271,8 @@ navigation BT 는 Nav2 기본 트리에서 제자리 회전, 후진 recovery 를
 
 [DOCKING.md 13장](DOCKING.md#13-시뮬레이션-실험): staging 세 곳에서 marker 하나와 둘로 도킹 15회를 Gazebo 참값으로 쟀다 (카메라는 D455 의 화각). 실제 로봇과의 차이(메카넘 미끄러짐, 카메라 TF 오차, marker 크기 오차)를 넣고 도면 값 목표와 가르친 자세 목표, 단순 undock 과 정밀 undock 을 비교했다. 단위 테스트: `test_aruco_dock_control` (12개), `test_aruco_detector` (합성 영상과 Gazebo 영상, marker 하나와 둘, 13개), `test_dock_control` (8개), `test_docking_config` (4개).
 
+[DOCKING.md 16장](DOCKING.md#16-시나리오로-시험하기): 여러 기능을 잇고 일부러 문제를 넣는 시나리오 아홉 개 (점검 + 도킹 + 복귀, 설비 두 대, 시야 밖 staging, 들어가는 도중 marker 가림, 취소와 선점, 뒤가 막힌 undock, 길 위의 장애물, 실제 로봇과의 차이 + 가르치기 + 되풀이, 틀린 입력)를 돌려 모두 기대대로 끝났다. 그 과정에서 controller 의 도착 판정과 진입 단계의 시작 직후 전진, 두 가지 문제를 찾아 고쳤다.
+
 ---
 
 ## 8. 어떤 방법을 쓸까
@@ -1330,7 +1337,7 @@ bt_navigator/
     │   ├── task_server_lifecycle_main.cpp   task_server_lifecycle 실행 노드
     │   └── bt_plugin.cpp                    직접 만든 BT 노드를 플러그인 bt_mission_plugin 으로 (5장)
     ├── launch/task_server_lifecycle.launch.py   task_server_lifecycle + lifecycle_manager
-    ├── scripts/task_client.py               액션 클라이언트: 한 줄 형식 해석, 대기열, 선점(!), cancel, 도착 출력
+    ├── scripts/task_client.py               액션 클라이언트: 한 줄 형식 해석, 대기열, 선점(!), cancel, wait, 시나리오 파일(--file), 도착 출력
     ├── scripts/aruco_detector.py            ArUco marker 검출, IPPE + 바닥 사전분포 MAP, 공분산 → dock/aruco
     ├── scripts/aruco_teach.py               가르친 자세 남기기
     ├── scripts/dock_calibrate.py            미끄러짐 배율, 데드밴드 재기 (실제 로봇)
@@ -1347,6 +1354,7 @@ bt_navigator/
     │   └── test_fakes.hpp / .cpp            테스트가 같이 쓰는 가짜 Nav2 노드 (플러그인 test_fake_nav2)
     ├── tools/draw_bt.py                     XML → 그림 (graphviz)
     ├── tools/make_aruco_dock.py             ArUco marker 인쇄용 SVG/PNG 와 Gazebo 설비 모형
+    ├── scenarios/                           시험 시나리오 (task_client.py --file), s8_repeat.sh (DOCKING.md 16장)
     └── doc/
         ├── task.png                         BT 그림 (draw_bt.py 로 생성)
         ├── dock.png                         도킹 BT 그림
@@ -1358,7 +1366,8 @@ docs/                                        시뮬레이션 기록 (README.md �
 ├── warehouse_rviz_path.png                  RViz: 경로와 웨이포인트
 ├── warehouse_gazebo_obstacle_stop.png       Gazebo: 통로의 장애물 앞에서 대기
 ├── aruco_*.png / .jpg / .svg                ArUco 도킹: marker 의 원리, 실험 결과, 인쇄용 marker, 카메라 화면 (DOCKING.md)
-└── docking_overview.png                     도킹 구조: 좌표계, 단계, 지나가는 길 (DOCKING.md)
+├── docking_overview.png                     도킹 구조: 좌표계, 단계, 지나가는 길 (DOCKING.md)
+└── scenario_map.png                         시험 시나리오의 경로와 장애물 자리 (DOCKING.md 16장)
 DOCKING.md                                   ArUco 도킹: 원리, 메커니즘, 구현, 옮기는 순서, 실험
 ```
 

@@ -45,7 +45,11 @@ simple_line/
    남은 경로 중 local costmap 범위(기본 3m x 3m → 반경 1.5m) 안의 점만 로봇 좌표계로 바꾼다.
 2. **carrot 선택**: 로봇에서 `lookahead_dist` 이상 떨어진 첫 점. 없으면 마지막 점.
 3. **명령 계산** (위에서부터 먼저 맞는 것):
-   - goal 까지 남은 **경로 길이** ≤ goal checker 의 xy 허용오차 → 제자리에서 goal yaw 로 회전
+   - goal 까지 남은 **경로 길이** ≤ goal checker 의 xy 허용오차 → 도착: 제자리에서 goal yaw 로 회전. 한 번 도착하면
+     위치가 조금 흔들려도 회전만 한다. 다만 방향까지 맞추고 섰는데 2 s 넘게 끝나지 않고 위치가 허용오차 밖이면
+     (goal checker 가 받아 주지 않는다: 도착 뒤 AMCL 이 위치를 고친 다음 Nav2 가 같은 goal 로 다시 시작했거나,
+     undock 처럼 Nav2 밖에서 움직인 뒤 같은 goal 을 받았다) 다시 다가간다. 예전에는 이때 서로 기다리며 멈춰 있었다
+     ([DOCKING.md 16-12](../bt_navigator/DOCKING.md#16-12-시나리오가-찾아낸-것))
    - 제자리 회전 중 → carrot 쪽으로 계속 회전. 방향 오차가 `rotate_to_heading_tolerance` 안으로 들어오고
      회전이 멈추면(`rotate_settled_angular_vel` 이하) 끝낸다
    - 그 외 → pure pursuit: 곡률 `k = 2·y / L²` (carrot 의 로봇 좌표 (x, y), `L² = x² + y²`), `w = v·k`

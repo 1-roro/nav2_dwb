@@ -1,0 +1,9 @@
+# 시나리오 7: staging 으로 가는 길에 장애물. 멈췄다가, 치우면 다시 가서 도킹한다 (stop & go + 도킹)
+# 창고 월드, robot:=mecanum dock:=True dock_markers:=both (bt_navigator/DOCKING.md 16-8)
+# 다른 터미널에서, 로봇이 출발하면 길 위에 기둥을 세우고, 로봇이 그 앞에 선 것을 본 뒤 치운다:
+#   ros2 run simple_line_bringup obstacle.py put 0.0,-2.5
+#   ros2 run simple_line_bringup obstacle.py remove
+dock:dock_a 4.0,-2.5 3.85,1.0,0
+wait 5
+undock_precise:dock_a
+go 4.0,0.0 4.0,-2.5 -4.0,-2.5,0

@@ -546,8 +546,11 @@ BT::NodeStatus ArucoServo::onStart()
   scan_.start(ros_, check_behind_ ? cfg.text("ros", "scan_topic", "scan") : std::string());
   last_cmd_ = dock::Cmd{};
   accepted_ = rejected_ = held_cycles_ = 0;
-  last_border_ = 1e9;
+  last_border_ = 0.0;
   settled_since_.reset();
+  // 이 노드에서 아직 marker 를 보지 못했다: 첫 검출이 오기 전에는 설비 쪽으로 가지 않는다 (seen_marker_ 가 false).
+  // 예전에는 last_seen_ 을 지금으로 두어서, 가려진 채 다시 시도할 때마다 처음 0.5 초 동안 앞으로 갔다
+  seen_marker_ = false;
   start_ = last_seen_ = last_cmd_time_ = last_predict_ = std::chrono::steady_clock::now();
   RCLCPP_INFO(
     ros_.node->get_logger(), "[aruco] %s (stage %s): to %.0f mm from the docking face (%s target%s), up to %.2f/%.2f m/s",
@@ -613,6 +616,7 @@ BT::NodeStatus ArucoServo::onRunning()
       RCLCPP_WARN(ros_.node->get_logger(), "[aruco] %s: dock estimate re-initialized", name().c_str());
     }
     ++accepted_;
+    seen_marker_ = true;
     last_seen_ = std::chrono::steady_clock::now();
     last_border_ = d.border_px;
     estimate_pub_->publish(toPoseStamped(state_->filter.mean(), state_->global_frame));
@@ -649,8 +653,9 @@ BT::NodeStatus ArucoServo::onRunning()
            BT::NodeStatus::RUNNING;
   }
   settled_since_.reset();
-  // 설비 쪽으로 가는 것은 marker 를 방금 보았고 화면 안쪽에 있을 때만. 아니면 옆과 방향만 고친다
-  const bool sees = secondsSince(last_seen_) <= fresh_ && last_border_ >= min_border_;
+  // 설비 쪽으로 가는 것은 이 노드에서 marker 를 방금 보았고 화면 안쪽에 있을 때만. 아니면 옆과 방향만 고친다.
+  // (놓침 판정 lost_timeout 은 시작한 때부터 센다: 처음 검출이 올 때까지의 여유)
+  const bool sees = seen_marker_ && secondsSince(last_seen_) <= fresh_ && last_border_ >= min_border_;
   if (!sees && e.along > params_.tol_along) {
     ++held_cycles_;
   }

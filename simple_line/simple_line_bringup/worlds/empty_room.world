@@ -133,5 +133,9 @@
       </link>
     </model>
 
+    <!-- 모형의 참값 자세를 읽고 옮기는 서비스 (/get_entity_state, /set_entity_state): scripts/dock_truth.py 가 쓴다 -->
+    <plugin name="gazebo_ros_state" filename="libgazebo_ros_state.so">
+      <update_rate>1.0</update_rate>
+    </plugin>
   </world>
 </sdf>

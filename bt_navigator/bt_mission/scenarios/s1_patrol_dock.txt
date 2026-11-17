@@ -1,0 +1,10 @@
+# 시나리오 1: 점검 순회 -> 설비 A 도킹 -> 설비 작업 -> 정밀 undock -> 둘러보기 -> 출발점으로
+# 창고 월드, robot:=mecanum dock:=True dock_markers:=both (bt_navigator/DOCKING.md 16-2)
+#   ros2 run bt_mission task_client.py --file $(ros2 pkg prefix bt_mission)/share/bt_mission/scenarios/s1_patrol_dock.txt
+inspect:5 -1.0,-2.5 1.5,-2.0,90      # 선반 B 앞에서 선반을 보고 5 초 점검
+scan 4.0,-2.5 4.0,0.0                # 동쪽 통로를 지나며 0.5 m 마다 스캔 (선반 B 끝에서 0.5 m)
+dock:dock_a 3.85,1.0,0               # 설비 A (marker 하나) 앞 staging 에서 도킹
+wait 10                              # 설비 작업 10 초
+undock_precise:dock_a                # marker 를 보며 물러나 설비 기준 0.4 m 뒤에 선다
+look_around 2.0,0.3                  # 선반 사이 빈 곳에서 한 바퀴
+go -1.0,0.0 -1.0,-2.5 -4.0,-2.5,0    # 선반 B 를 돌아 출발점으로

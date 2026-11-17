@@ -177,7 +177,8 @@ private:
   double fresh_{0.5}, min_border_{10.0}, min_camera_distance_{0.10};
   double rear_{0.16}, half_width_{0.15}, clearance_{0.05};
   bool hold_if_closer_{false}, check_behind_{false};
-  double last_border_{1e9};
+  double last_border_{0.0};
+  bool seen_marker_{false};          // 이 노드가 시작한 뒤 marker 를 받아들인 적이 있다
   std::optional<dock::Pose2> last_robot_;   // 지난 예측 때 로봇의 odom 자세 (움직인 만큼 불확실도를 키운다)
   int accepted_{0}, rejected_{0}, held_cycles_{0};
   std::chrono::steady_clock::time_point start_, last_seen_, last_cmd_time_, last_predict_;
