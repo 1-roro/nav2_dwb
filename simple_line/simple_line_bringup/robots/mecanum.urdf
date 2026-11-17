@@ -33,52 +33,52 @@
       <material name="grey"/>
     </visual>
     <visual>
-      <origin xyz="0.031 0 0" rpy="-0.7854 0 0"/>
+      <origin xyz="0.031 0 0" rpy="0.7854 0 0"/>
       <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
       <material name="black"/>
     </visual>
     <visual>
-      <origin xyz="0.02508 0 0.01822" rpy="-0.7854 -0.62832 0"/>
+      <origin xyz="0.02508 0 0.01822" rpy="0.7854 -0.62832 0"/>
       <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
       <material name="black"/>
     </visual>
     <visual>
-      <origin xyz="0.00958 0 0.02948" rpy="-0.7854 -1.25664 0"/>
+      <origin xyz="0.00958 0 0.02948" rpy="0.7854 -1.25664 0"/>
       <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
       <material name="black"/>
     </visual>
     <visual>
-      <origin xyz="-0.00958 0 0.02948" rpy="2.35619 -1.25664 3.14159"/>
+      <origin xyz="-0.00958 0 0.02948" rpy="-2.35619 -1.25664 3.14159"/>
       <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
       <material name="black"/>
     </visual>
     <visual>
-      <origin xyz="-0.02508 0 0.01822" rpy="2.35619 -0.62832 3.14159"/>
+      <origin xyz="-0.02508 0 0.01822" rpy="-2.35619 -0.62832 3.14159"/>
       <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
       <material name="black"/>
     </visual>
     <visual>
-      <origin xyz="-0.031 0 0" rpy="2.35619 0 3.14159"/>
+      <origin xyz="-0.031 0 0" rpy="-2.35619 0 3.14159"/>
       <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
       <material name="black"/>
     </visual>
     <visual>
-      <origin xyz="-0.02508 0 -0.01822" rpy="2.35619 0.62832 3.14159"/>
+      <origin xyz="-0.02508 0 -0.01822" rpy="-2.35619 0.62832 3.14159"/>
       <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
       <material name="black"/>
     </visual>
     <visual>
-      <origin xyz="-0.00958 0 -0.02948" rpy="2.35619 1.25664 3.14159"/>
+      <origin xyz="-0.00958 0 -0.02948" rpy="-2.35619 1.25664 3.14159"/>
       <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
       <material name="black"/>
     </visual>
     <visual>
-      <origin xyz="0.00958 0 -0.02948" rpy="-0.7854 1.25664 0"/>
+      <origin xyz="0.00958 0 -0.02948" rpy="0.7854 1.25664 0"/>
       <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
       <material name="black"/>
     </visual>
     <visual>
-      <origin xyz="0.02508 0 -0.01822" rpy="-0.7854 0.62832 0"/>
+      <origin xyz="0.02508 0 -0.01822" rpy="0.7854 0.62832 0"/>
       <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
       <material name="black"/>
     </visual>
@@ -95,52 +95,52 @@
       <material name="grey"/>
     </visual>
     <visual>
-      <origin xyz="0.031 0 0" rpy="0.7854 0 0"/>
+      <origin xyz="0.031 0 0" rpy="-0.7854 0 0"/>
       <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
       <material name="black"/>
     </visual>
     <visual>
-      <origin xyz="0.02508 0 0.01822" rpy="0.7854 -0.62832 0"/>
+      <origin xyz="0.02508 0 0.01822" rpy="-0.7854 -0.62832 0"/>
       <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
       <material name="black"/>
     </visual>
     <visual>
-      <origin xyz="0.00958 0 0.02948" rpy="0.7854 -1.25664 0"/>
+      <origin xyz="0.00958 0 0.02948" rpy="-0.7854 -1.25664 0"/>
       <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
       <material name="black"/>
     </visual>
     <visual>
-      <origin xyz="-0.00958 0 0.02948" rpy="-2.35619 -1.25664 3.14159"/>
+      <origin xyz="-0.00958 0 0.02948" rpy="2.35619 -1.25664 3.14159"/>
       <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
       <material name="black"/>
     </visual>
     <visual>
-      <origin xyz="-0.02508 0 0.01822" rpy="-2.35619 -0.62832 3.14159"/>
+      <origin xyz="-0.02508 0 0.01822" rpy="2.35619 -0.62832 3.14159"/>
       <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
       <material name="black"/>
     </visual>
     <visual>
-      <origin xyz="-0.031 0 0" rpy="-2.35619 0 3.14159"/>
+      <origin xyz="-0.031 0 0" rpy="2.35619 0 3.14159"/>
       <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
       <material name="black"/>
     </visual>
     <visual>
-      <origin xyz="-0.02508 0 -0.01822" rpy="-2.35619 0.62832 3.14159"/>
+      <origin xyz="-0.02508 0 -0.01822" rpy="2.35619 0.62832 3.14159"/>
       <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
       <material name="black"/>
     </visual>
     <visual>
-      <origin xyz="-0.00958 0 -0.02948" rpy="-2.35619 1.25664 3.14159"/>
+      <origin xyz="-0.00958 0 -0.02948" rpy="2.35619 1.25664 3.14159"/>
       <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
       <material name="black"/>
     </visual>
     <visual>
-      <origin xyz="0.00958 0 -0.02948" rpy="0.7854 1.25664 0"/>
+      <origin xyz="0.00958 0 -0.02948" rpy="-0.7854 1.25664 0"/>
       <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
       <material name="black"/>
     </visual>
     <visual>
-      <origin xyz="0.02508 0 -0.01822" rpy="0.7854 0.62832 0"/>
+      <origin xyz="0.02508 0 -0.01822" rpy="-0.7854 0.62832 0"/>
       <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
       <material name="black"/>
     </visual>
@@ -151,68 +151,6 @@
     <axis xyz="0 1 0"/>
   </joint>
   <link name="wheel_rear_left_link">
-    <visual>
-      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
-      <geometry><cylinder radius="0.025" length="0.035"/></geometry>
-      <material name="grey"/>
-    </visual>
-    <visual>
-      <origin xyz="0.031 0 0" rpy="0.7854 0 0"/>
-      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
-      <material name="black"/>
-    </visual>
-    <visual>
-      <origin xyz="0.02508 0 0.01822" rpy="0.7854 -0.62832 0"/>
-      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
-      <material name="black"/>
-    </visual>
-    <visual>
-      <origin xyz="0.00958 0 0.02948" rpy="0.7854 -1.25664 0"/>
-      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
-      <material name="black"/>
-    </visual>
-    <visual>
-      <origin xyz="-0.00958 0 0.02948" rpy="-2.35619 -1.25664 3.14159"/>
-      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
-      <material name="black"/>
-    </visual>
-    <visual>
-      <origin xyz="-0.02508 0 0.01822" rpy="-2.35619 -0.62832 3.14159"/>
-      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
-      <material name="black"/>
-    </visual>
-    <visual>
-      <origin xyz="-0.031 0 0" rpy="-2.35619 0 3.14159"/>
-      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
-      <material name="black"/>
-    </visual>
-    <visual>
-      <origin xyz="-0.02508 0 -0.01822" rpy="-2.35619 0.62832 3.14159"/>
-      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
-      <material name="black"/>
-    </visual>
-    <visual>
-      <origin xyz="-0.00958 0 -0.02948" rpy="-2.35619 1.25664 3.14159"/>
-      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
-      <material name="black"/>
-    </visual>
-    <visual>
-      <origin xyz="0.00958 0 -0.02948" rpy="0.7854 1.25664 0"/>
-      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
-      <material name="black"/>
-    </visual>
-    <visual>
-      <origin xyz="0.02508 0 -0.01822" rpy="0.7854 0.62832 0"/>
-      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
-      <material name="black"/>
-    </visual>
-  </link>
-  <joint name="wheel_rear_right_joint" type="continuous">
-    <parent link="base_link"/><child link="wheel_rear_right_link"/>
-    <origin xyz="-0.11 -0.1325 0" rpy="0 0 0"/>
-    <axis xyz="0 1 0"/>
-  </joint>
-  <link name="wheel_rear_right_link">
     <visual>
       <origin xyz="0 0 0" rpy="1.5708 0 0"/>
       <geometry><cylinder radius="0.025" length="0.035"/></geometry>
@@ -265,6 +203,68 @@
     </visual>
     <visual>
       <origin xyz="0.02508 0 -0.01822" rpy="-0.7854 0.62832 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+  </link>
+  <joint name="wheel_rear_right_joint" type="continuous">
+    <parent link="base_link"/><child link="wheel_rear_right_link"/>
+    <origin xyz="-0.11 -0.1325 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+  <link name="wheel_rear_right_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry><cylinder radius="0.025" length="0.035"/></geometry>
+      <material name="grey"/>
+    </visual>
+    <visual>
+      <origin xyz="0.031 0 0" rpy="0.7854 0 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.02508 0 0.01822" rpy="0.7854 -0.62832 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.00958 0 0.02948" rpy="0.7854 -1.25664 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.00958 0 0.02948" rpy="-2.35619 -1.25664 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.02508 0 0.01822" rpy="-2.35619 -0.62832 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.031 0 0" rpy="-2.35619 0 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.02508 0 -0.01822" rpy="-2.35619 0.62832 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.00958 0 -0.02948" rpy="-2.35619 1.25664 3.14159"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.00958 0 -0.02948" rpy="0.7854 1.25664 0"/>
+      <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.02508 0 -0.01822" rpy="0.7854 0.62832 0"/>
       <geometry><cylinder radius="0.009" length="0.02435"/></geometry>
       <material name="black"/>
     </visual>

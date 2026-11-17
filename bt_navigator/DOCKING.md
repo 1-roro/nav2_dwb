@@ -2,7 +2,7 @@
 
 설비(기계)의 도킹 면에 붙인 **ArUco marker (60 mm 하나, 또는 둘)** 를 **RealSense D455** 의 컬러 카메라로 보고, 메카넘 로봇의 앞면을 설비에서 **15 cm** 떨어진 자리에 mm 단위로 세운다. 그 자리에서 설비 작업을 한 뒤 undock 한다. 작업은 `task_client.py` 로 보낸다: `dock:dock_a <staging 자리>`, `undock`, `undock_precise:dock_a`. `dock_a` 는 marker 하나(0번), `dock_b` 는 marker 둘(2번, 3번)을 붙인 설비다.
 
-이 문서 하나에 원리(ArUco marker, 자세 추정), 도킹 메커니즘, 구현 구조, 실제 로봇으로 옮기는 순서, 실험 결과, 시험 시나리오를 모두 정리했다. 처음 공부한다면 **[DOCKING_STUDY.md](DOCKING_STUDY.md)** 부터 읽는다: 좌표계, 카메라, 공분산, 최적화, 제어 같은 기초 개념부터 시작해, 영상 한 장이 속도 명령이 되기까지의 계산과 판단을 실제 코드로 계산한 숫자 예제로 한 단계씩 푼 공부 노트다. 미션 BT 의 다른 부분(작업 액션, 장애물 대기)은 [README.md](README.md).
+이 문서 하나에 원리(ArUco marker, 자세 추정), 도킹 메커니즘, 구현 구조, 실제 로봇으로 옮기는 순서, 실험 결과, 시험 시나리오를 모두 정리했다. 처음 공부한다면 **[DOCKING_STUDY.md](DOCKING_STUDY.md)** 부터 읽는다: 좌표계, 카메라, 공분산, 최적화, 제어 같은 기초 개념부터 시작해, 영상 한 장이 속도 명령이 되기까지의 계산과 판단을 실제 코드로 계산한 숫자 예제로 한 단계씩 푼 공부 노트다. 메카넘 바퀴가 어떻게 옆으로 가는지(구조, 힘, 바퀴 속도의 식, 실제의 한계)는 **[MECANUM_STUDY.md](MECANUM_STUDY.md)**. 미션 BT 의 다른 부분(작업 액션, 장애물 대기)은 [README.md](README.md).
 
 ![mecanum robot docked](../simple_line/doc/mecanum_robot.png)
 
@@ -24,6 +24,7 @@ Gazebo 결과 (참값. 카메라는 D455 의 화각, 848 x 480):
 | 알고 싶은 것 | 장 |
 |---|---|
 | 기초부터 차근차근 (공부 노트) | [DOCKING_STUDY.md](DOCKING_STUDY.md) |
+| 메카넘 바퀴는 어떻게 옆으로 가나 (공부 노트) | [MECANUM_STUDY.md](MECANUM_STUDY.md) |
 | 전체가 어떻게 생겼나, 무엇이 무엇과 이어지나 | 1 |
 | ArUco marker 가 무엇이고 어떻게 자세가 나오나 | 2 |
 | marker 를 본 것이 어떻게 "15 cm 앞에 서기" 가 되나 | 3 |
@@ -1214,11 +1215,13 @@ go 4.0,0.0 4.0,-2.5 -4.0,-2.5,0      # 출발점으로
 bt_navigator/
 ├── DOCKING.md                                    이 문서
 ├── DOCKING_STUDY.md                              공부 노트: 기초 개념부터 판단 로직까지, 숫자 예제
+├── MECANUM_STUDY.md                              공부 노트: 메카넘 바퀴의 구조, 힘, 운동학, 실제의 한계
 ├── docs/aruco_marker_dock_a.svg, .png            인쇄용 marker 하나 (SVG 를 100 % 로)
 ├── docs/aruco_marker_dock_b.svg, .png            인쇄용 marker 둘, A4 가로 한 장
 ├── docs/aruco_principle.png, docking_overview.png    원리와 구조 그림 (2장, 1-3)
 ├── docs/scenario_map.png                        시나리오의 경로와 장애물 자리 (16장)
 ├── docs/study_filter.png                         공부 노트 3-6 의 그림 (필터가 다가가며 좋아지는 모습)
+├── docs/mecanum_wheel.png, mecanum_motions.png, mecanum_limits.png    메카넘 공부 노트의 그림
 ├── docs/aruco_results.png, aruco_camera_debug.jpg, aruco_camera_debug_two.jpg    결과, 붙은 자리의 카메라 영상
 ├── bt_mission_msgs/msg/ArucoDetection.msg        marker 하나: 후보(DockHypothesis), 화면 끝 여유, 진단
 └── bt_mission/
@@ -1237,7 +1240,7 @@ bt_navigator/
     ├── launch/aruco_detector.launch.py
     ├── tools/make_aruco_dock.py                  인쇄용 SVG/PNG, Gazebo 설비 모형
     ├── scenarios/                                시험 시나리오 (task_client.py --file), s8_repeat.sh (16장)
-    ├── tools/study/                              공부 노트의 숫자를 다시 계산하는 스크립트
+    ├── tools/study/                              공부 노트의 숫자를 다시 계산하는 스크립트 (메카넘은 ex_mecanum.py)
     └── test/                                     test_docking_config, test_aruco_dock_control, test_dock_control (gtest),
                                                   test_aruco_detector.py (합성 영상, Gazebo 영상)
 
