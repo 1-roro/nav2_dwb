@@ -19,7 +19,8 @@ bt_navigator/
 ├── bt_mission/        미션 BT (task.xml), 직접 만든 BT 노드, 작업 액션 서버, 클라이언트
 ├── bt_mission_msgs/   작업 메시지와 액션 (Task.msg, ExecuteTask.action, ArucoDetection.msg)
 ├── docs/              시뮬레이션 기록 (창고 주행 영상, 지도와 costmap, 캡처, 도킹 결과)
-└── DOCKING.md         ArUco 도킹: marker 의 원리, 도킹 메커니즘, 구현, 실제 로봇으로 옮기는 순서, 실험
+├── DOCKING.md         ArUco 도킹: marker 의 원리, 도킹 메커니즘, 구현, 실제 로봇으로 옮기는 순서, 실험
+└── DOCKING_STUDY.md   ArUco 도킹 공부 노트: 기초 개념부터 판단 로직까지, 실제 코드로 계산한 숫자 예제
 ```
 
 | 하고 싶은 것 | 실행 | 장 |
@@ -1369,6 +1370,7 @@ docs/                                        시뮬레이션 기록 (README.md �
 ├── docking_overview.png                     도킹 구조: 좌표계, 단계, 지나가는 길 (DOCKING.md)
 └── scenario_map.png                         시험 시나리오의 경로와 장애물 자리 (DOCKING.md 16장)
 DOCKING.md                                   ArUco 도킹: 원리, 메커니즘, 구현, 옮기는 순서, 실험
+DOCKING_STUDY.md                             ArUco 도킹 공부 노트 (기초 개념 → 각 단계의 계산과 판단 → 종합)
 ```
 
 장애물 처리(controller 의 장애물 감속은 `simple_line/simple_line_controller`, collision_monitor 설정과 장애물 도구 `obstacle.py` 는 `simple_line/simple_line_bringup`)는 6-2 에 있다.
