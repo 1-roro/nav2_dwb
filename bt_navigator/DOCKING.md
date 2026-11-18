@@ -606,7 +606,7 @@ docks:
 | 메시지 (`ArucoDetection`) | | `marker_ids` (자세에 쓴 marker), `markers_total` (그 dock 의 marker 수) 가 더해졌다 |
 | 화면 끝 여유 `border_px` | 그 marker 의 여유 | 가장 여유 있는 marker 의 값. 하나가 화면 밖으로 나가도 다른 하나로 자세가 나오기 때문이다 |
 | `camera_distance` | | 카메라에서 marker 가 붙은 면까지의 수직 거리로 바꿨다. marker 가 정면에 없으면 marker 중심까지의 거리는 면까지의 거리보다 길다 |
-| 필터, 접근, 진입 (BT 노드) | | **바뀌지 않는다.** 받는 것은 여전히 "dock 의 자세와 공분산" 이다. 공분산이 작아진 만큼 필터가 저절로 더 믿는다 |
+| 필터, 접근, 진입 (BT 노드) | | **바뀌지 않는다.** 받는 것은 여전히 "dock 의 자세와 공분산" 이다. 공분산이 작아진 만큼 필터가 저절로 더 믿는다. 깔때기 값도 같다: 추정이 좁아진 만큼 덜 막힐 뿐이다 ([DOCKING_BIG_PICTURE.md 8-3](DOCKING_BIG_PICTURE.md#8-3-marker-가-둘이면-답이-하나로-정해지나-깔때기는)) |
 | 서서 재기 (`ArucoRefine`) | | 전부 보인 영상만 쓴다 (`stages.refine.all_markers: true`). 일부만 보고 푼 자세는 가르칠 때(전부 보고)와 다른 고정 오차를 가진다. 전부 보이지 않으면 실패한다. 하나로도 끝내게 하려면 `false` |
 | 가르치기 (`aruco_teach.py`) | | 전부 보인 영상만 쓰고, 본 marker 번호를 파일에 적는다. dock 의 marker 구성이 달라지면 그 파일은 쓰이지 않는다 |
 | 깊이 평면 (선택) | marker 둘레 | 두 marker 를 감싸는 영역 |
@@ -1224,7 +1224,7 @@ bt_navigator/
 ├── docs/scenario_map.png                        시나리오의 경로와 장애물 자리 (16장)
 ├── docs/study_filter.png                         공부 노트 3-6 의 그림 (필터가 다가가며 좋아지는 모습)
 ├── docs/mecanum_wheel.png, mecanum_motions.png, mecanum_limits.png    메카넘 공부 노트의 그림
-├── docs/bp_*.png                                 DOCKING_BIG_PICTURE.md 의 그림 12장
+├── docs/bp_*.png                                 DOCKING_BIG_PICTURE.md 의 그림 13장
 ├── docs/aruco_results.png, aruco_camera_debug.jpg, aruco_camera_debug_two.jpg    결과, 붙은 자리의 카메라 영상
 ├── bt_mission_msgs/msg/ArucoDetection.msg        marker 하나: 후보(DockHypothesis), 화면 끝 여유, 진단
 └── bt_mission/
@@ -1243,7 +1243,7 @@ bt_navigator/
     ├── launch/aruco_detector.launch.py
     ├── tools/make_aruco_dock.py                  인쇄용 SVG/PNG, Gazebo 설비 모형
     ├── scenarios/                                시험 시나리오 (task_client.py --file), s8_repeat.sh (16장)
-    ├── tools/study/                              공부 노트의 숫자를 다시 계산하는 스크립트 (메카넘 ex_mecanum.py, IPPE ex_ippe.py, 필터 비교 ex_why_filter.cpp)
+    ├── tools/study/                              공부 노트의 숫자를 다시 계산하는 스크립트 (메카넘 ex_mecanum.py, IPPE ex_ippe.py, marker 둘 ex_two_markers.py, 필터 비교 ex_why_filter.cpp)
     └── test/                                     test_docking_config, test_aruco_dock_control, test_dock_control (gtest),
                                                   test_aruco_detector.py (합성 영상, Gazebo 영상)
 
