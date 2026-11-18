@@ -20,6 +20,7 @@ bt_navigator/
 ├── bt_mission_msgs/   작업 메시지와 액션 (Task.msg, ExecuteTask.action, ArucoDetection.msg)
 ├── docs/              시뮬레이션 기록 (창고 주행 영상, 지도와 costmap, 캡처, 도킹 결과)
 ├── DOCKING.md         ArUco 도킹: marker 의 원리, 도킹 메커니즘, 구현, 실제 로봇으로 옮기는 순서, 실험
+├── DOCKING_BIG_PICTURE.md  그림으로 보는 정밀 도킹: 코드 지도, "왜" 의 사슬, 좌표계, odom, PnP·IPPE, 칼만 필터
 ├── DOCKING_STUDY.md   ArUco 도킹 공부 노트: 기초 개념부터 판단 로직까지, 실제 코드로 계산한 숫자 예제
 └── MECANUM_STUDY.md   메카넘 바퀴 공부 노트: 구조, 힘, 바퀴 속도의 식, 실제의 한계, 이 프로젝트에서의 쓰임
 ```
@@ -1371,8 +1372,10 @@ docs/                                        시뮬레이션 기록 (README.md �
 ├── docking_overview.png                     도킹 구조: 좌표계, 단계, 지나가는 길 (DOCKING.md)
 ├── scenario_map.png                         시험 시나리오의 경로와 장애물 자리 (DOCKING.md 16장)
 ├── study_filter.png                         도킹 공부 노트의 필터 그림 (DOCKING_STUDY.md 3-6)
-└── mecanum_*.png                            메카넘 공부 노트의 그림: 바퀴 구조, 기본 움직임, 속도 한계 (MECANUM_STUDY.md)
+├── mecanum_*.png                            메카넘 공부 노트의 그림: 바퀴 구조, 기본 움직임, 속도 한계 (MECANUM_STUDY.md)
+└── bp_*.png                                 큰 그림 문서의 그림: 코드 지도, 시간 흐름, 좌표계, odom, PnP·IPPE, 칼만 (DOCKING_BIG_PICTURE.md)
 DOCKING.md                                   ArUco 도킹: 원리, 메커니즘, 구현, 옮기는 순서, 실험
+DOCKING_BIG_PICTURE.md                       그림으로 보는 정밀 도킹 ("왜" 의 사슬 → 코드 지도 → 시간 흐름 → 좌표계, odom, PnP, IPPE, 칼만)
 DOCKING_STUDY.md                             ArUco 도킹 공부 노트 (기초 개념 → 각 단계의 계산과 판단 → 종합)
 MECANUM_STUDY.md                             메카넘 바퀴 공부 노트 (구조 → 힘 → 역기구학, 정기구학 → 한계 → 이 프로젝트에서)
 ```
