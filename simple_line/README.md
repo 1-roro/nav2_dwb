@@ -44,12 +44,15 @@ simple_line/
    교차할 때 나중 구간으로 건너뛰지 않도록).
    남은 경로 중 local costmap 범위(기본 3m x 3m → 반경 1.5m) 안의 점만 로봇 좌표계로 바꾼다.
 2. **carrot 선택**: 로봇에서 `lookahead_dist` 이상 떨어진 첫 점. 없으면 마지막 점.
+   goal 이 `lookahead_dist` 보다 가까우면 carrot 을 goal 너머 경로 방향으로 `lookahead_dist` 까지 늘인다. goal 점 자체를 쫓으면
+   가까워질수록 작은 옆 오차가 큰 각이 되어(2 cm 옆, 5 cm 앞 = 22°) 도착 직전에 한쪽으로 꺾는다. 다만 그 방향으로 가서
+   goal 에 닿을 때만 늘인다 (goal 이 그 방향으로 앞에 있고, 로봇이 마지막 직선에서 옆으로 도착 범위 안일 때)
 3. **명령 계산** (위에서부터 먼저 맞는 것):
    - goal 까지 남은 **경로 길이** ≤ goal checker 의 xy 허용오차 → 도착: 제자리에서 goal yaw 로 회전. 한 번 도착하면
-     위치가 조금 흔들려도 회전만 한다. 다만 방향까지 맞추고 섰는데 2 s 넘게 끝나지 않고 위치가 허용오차 밖이면
-     (goal checker 가 받아 주지 않는다: 도착 뒤 AMCL 이 위치를 고친 다음 Nav2 가 같은 goal 로 다시 시작했거나,
-     undock 처럼 Nav2 밖에서 움직인 뒤 같은 goal 을 받았다) 다시 다가간다. 예전에는 이때 서로 기다리며 멈춰 있었다
-     ([DOCKING.md 16-12](../bt_navigator/DOCKING.md#16-12-시나리오가-찾아낸-것))
+     위치가 조금 흔들려도 회전만 한다 (예전에는 AMCL 이 1 ~ 2 cm 흔들려 허용오차를 넘으면 goal 점 쪽으로 되돌아 돌았다).
+     goal yaw 는 goal checker 허용오차의 절반 안이면 더 맞추지 않는다 (끝에서 좌우로 떨지 않게). 다만 방향까지 맞추고
+     섰는데 2 s 넘게 끝나지 않고 위치가 허용오차 밖이면 (goal checker 가 받아 주지 않는다: 도착 뒤 AMCL 이 위치를 고친
+     다음 Nav2 가 같은 goal 로 다시 시작했거나, Nav2 밖에서 움직인 뒤 같은 goal 을 받았다) 다시 다가간다
    - 제자리 회전 중 → carrot 쪽으로 계속 회전. 방향 오차가 `rotate_to_heading_tolerance` 안으로 들어오고
      회전이 멈추면(`rotate_settled_angular_vel` 이하) 끝낸다
    - 그 외 → pure pursuit: 곡률 `k = 2·y / L²` (carrot 의 로봇 좌표 (x, y), `L² = x² + y²`), `w = v·k`
@@ -138,15 +141,6 @@ ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse slam:=Tru
 
 - Gazebo + TurtleBot3 waffle + Nav2 + RViz 가 뜬다. 빈 방이면 로봇은 (-2.0, -1.0), 창고면 (-4.0, -2.5) 에서
   +x 를 보고 시작하고, AMCL 초기 자세도 같은 값으로 준다.
-- `robot:=mecanum` 이면 waffle(바퀴 2개 + 캐스터, 차동 구동) 대신 **4바퀴 메카넘 로봇**이 뜬다 (아래 그림). 45° 롤러 바퀴 넷,
-  앞쪽 RealSense D455 컬러 카메라 (가로 화각 90°, 해상도는 `camera_resolution:=848x480`), 위 라이다. 옆으로도 가고(vx, vy, wz), Nav2 는 `holonomic:=True` 설정을 쓴다.
-  모양과 센서 자리는 `simple_line_bringup/robots/make_mecanum.py` 한 곳에서 정하고, 그것이 URDF(TF, RViz)와
-  Gazebo 모델을 같이 만든다. Gazebo 에서는 `planar_move` 가 명령한 속도를 몸체에 그대로 주고(롤러 마찰을 물리로 풀지 않는다)
-  바퀴는 돌지 않는다. RViz 에서는 odom 의 속도로 바퀴가 돈다. 도킹은 [bt_navigator/DOCKING.md](../bt_navigator/DOCKING.md).
-  메카넘 바퀴의 구조와 원리(롤러의 X 배치, 바퀴 속도의 식, 실제 로봇의 베이스 드라이버가 할 일)는
-  [bt_navigator/MECANUM_STUDY.md](../bt_navigator/MECANUM_STUDY.md).
-
-  ![mecanum robot](doc/mecanum_robot.png)
 - RViz 의 **Nav2 Goal** 로 목표를 찍으면 된다. 1초마다 현재 위치에서 직선을 다시 긋는다.
 - 터미널에서 보낼 때:
   ```bash

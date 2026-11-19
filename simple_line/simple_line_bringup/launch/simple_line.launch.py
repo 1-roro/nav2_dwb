@@ -1,14 +1,9 @@
 """
-시뮬레이션: Gazebo + 로봇 (TurtleBot3 waffle 또는 4바퀴 메카넘) + 내비게이션(navigation.launch.py) + RViz.
+시뮬레이션: Gazebo + TurtleBot3 waffle + 내비게이션(navigation.launch.py) + RViz.
 
   ros2 launch simple_line_bringup simple_line.launch.py                          # 빈 방, 저장된 지도로 주행
   ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse slam:=True   # 창고 지도 만들기
   ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse         # 창고 지도로 주행
-  # ArUco 도킹 (bt_navigator/DOCKING.md): 4바퀴 메카넘 로봇 + 카메라, 창고 벽 앞에 marker 가 붙은 설비 모형
-  ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse robot:=mecanum dock:=True
-  # 실제 로봇과의 차이를 일부러 넣어 보기
-  ros2 launch simple_line_bringup simple_line.launch.py world:=warehouse robot:=mecanum dock:=True \
-      mecanum_slip:=True camera_tf_error:=1.5,0.0,0.01
 
 실제 로봇이면 이 파일 대신 로봇 드라이버(속도 명령, odom, 레이저, robot_state_publisher)를 띄우고
 navigation.launch.py 를 띄운다. 이 파일에서 시뮬레이션만의 부분은 아래 '로봇' 묶음뿐이다.
@@ -16,103 +11,27 @@ navigation.launch.py 를 띄운다. 이 파일에서 시뮬레이션만의 부�
 world 에 이름만 주면 worlds/<이름>.world 를 쓰고, map 을 비우면 maps/<이름>.yaml 을 쓴다.
 스폰 위치를 비우면 월드마다 정해 둔 곳에 놓고, AMCL 초기 위치도 같은 값으로 준다.
 
-robot   waffle    TurtleBot3 waffle (차동 구동, 바퀴 2개 + 캐스터. nav2_bringup 의 waffle.model)
-        mecanum   4바퀴 메카넘 로봇 (robots/mecanum.urdf, mecanum.model. robots/make_mecanum.py 가 만든다):
-                  몸체 0.32 x 0.30 m, 45 도 롤러 바퀴 넷, 앞쪽 RealSense, 위 라이다. Gazebo 에서는 planar_move 가
-                  vx, vy, wz 를 그대로 몸체 속도로 준다. 내비게이션에 holonomic:=True 를 넘긴다 (params/holonomic.yaml).
-                  holonomic 이라고 써도 같다 (예전 이름)
-camera_resolution:=1280x720  컬러 카메라 해상도 (기본 848x480). 카메라는 RealSense D455 컬러의 화각(가로 90 도)이다.
-                    실제 로봇에서는 1280x720 을 권한다. 시뮬레이션에서는 GPU 없이 그리면 무거워서
-                    (Nav2 가 제어 주기를 놓친다) 기본을 낮게 두었다
-camera_depth:=True  컬러에 맞춘 깊이 카메라도 켠다 (기본은 끈다: 렌더링과 점구름 계산이 무겁다).
-                    detector 를 use_depth:=True 로 띄워 깊이로 dock 방향을 도울 때 쓴다
-dock:=True        월드마다 정해 둔 곳에 ArUco marker 가 붙은 설비 모형 (models/aruco_dock, tools/make_aruco_dock.py)을
-                  놓는다. 지도에는 없는 물체다. robot:=mecanum 이면 marker 검출 노드(bt_mission 의
-                  aruco_detector.launch.py)도 같이 띄운다 (aruco_detector:=False 이면 띄우지 않는다: 따로 띄울 때)
-dock_markers:=2   설비 모형을 marker 둘짜리로 바꾼다 (models/aruco_dock_two = docking.yaml 의 dock_b).
-                  작업은 dock:dock_b ... 로 보낸다
-dock_markers:=both  설비 두 대: marker 하나짜리 dock_a 는 원래 자리에, marker 둘짜리 dock_b 는 DOCK_B 자리에
-                  (창고: 동쪽 벽, y = -2.0). 시나리오 시험(bt_navigator/DOCKING.md 16장)이 쓴다
-Gazebo 의 모형 이름은 dock 이름과 같다 (dock_a, dock_b). 로봇은 turtlebot3_waffle.
-scripts/dock_truth.py 가 이 이름으로 참값을 읽는다
-실제 로봇과의 차이를 일부러 넣기 (robot:=mecanum, bt_navigator/DOCKING.md 13장)
-  mecanum_slip:=True       몸체가 명령보다 덜 가고(옆 90 %), 옆으로 가면 조금 돈다. odom 은 바퀴 odom 처럼 명령을
-                           적분해서 그만큼 틀린다 (scripts/mecanum_slip_sim.py)
-  camera_tf_error:=dyaw_deg,dx,dy
-                           TF(robot_state_publisher)의 카메라 자리를 Gazebo 의 실제 카메라와 다르게 둔다.
-                           "카메라를 도면과 조금 다르게 달았다" 를 흉내 낸다
-
 Gazebo 가 늦게 뜨지 않게 (처음 실행이 몇 분씩 걸리던 원인)
   - Gazebo 는 model:// 로 부른 모델을 GAZEBO_MODEL_PATH 에서 못 찾으면 온라인 모델 저장소
     (GAZEBO_MODEL_DATABASE_URI, 기본 models.gazebosim.org)에서 받으려 하고, 그동안 서버 시작이 멈춘다.
     지금 그 주소는 응답이 느리거나 없어서 연결 timeout 까지 기다린다.
   - 그래서 이 launch 는 GAZEBO_MODEL_DATABASE_URI 를 비워 온라인 저장소를 쓰지 않고, 필요한 모델 경로
-    (이 패키지의 models, turtlebot3_gazebo 의 models)를 GAZEBO_MODEL_PATH 에 직접 더한다.
+    (turtlebot3_gazebo 의 models: waffle 몸체의 mesh)를 GAZEBO_MODEL_PATH 에 직접 더한다.
     월드의 바닥과 해도 model:// 대신 월드 파일 안에 적었다.
 """
 
-import math
 import os
-import re
-import tempfile
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (AppendEnvironmentVariable, DeclareLaunchArgument, ExecuteProcess,
-                            IncludeLaunchDescription, LogInfo, OpaqueFunction, SetEnvironmentVariable)
+                            IncludeLaunchDescription, OpaqueFunction, SetEnvironmentVariable)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 # 월드마다 로봇을 놓는 곳 (x [m], y [m], yaw [rad])
 SPAWN = {'empty_room': (-2.0, -1.0, 0.0), 'warehouse': (-4.0, -2.5, 0.0)}
-# 월드마다 설비 모형(ArUco dock)을 놓는 곳: 도킹 면(marker 가 붙은 면)의 x, y, 방향(방 쪽). 동쪽 벽 앞에서 서쪽을 본다.
-# 설비 모형의 깊이가 0.35 m 라 도킹 면은 벽에서 0.45 m 떨어진다
-DOCK = {'empty_room': (2.65, 1.2, math.pi), 'warehouse': (4.55, 1.0, math.pi)}
-# dock_markers:=both 일 때 둘째 설비(marker 둘, dock_b)의 자리. 같은 동쪽 벽, 선반 B 의 끝과 남쪽 벽 사이
-DOCK_B = {'warehouse': (4.55, -2.0, math.pi)}
-
-
-def perturb_camera(urdf, error):
-    """URDF 의 camera_joint 를 "dyaw_deg,dx,dy" 만큼 옮긴다 (TF 만 바뀌고 Gazebo 의 카메라는 그대로)"""
-    dyaw, dx, dy = (float(v) for v in error.split(','))
-    m = re.search(r'(<joint name="camera_joint" type="fixed">\s*<origin xyz=")([^"]+)(" rpy=")([^"]+)(")', urdf)
-    if not m:
-        raise RuntimeError('camera_joint not found in the URDF')
-    x, y, z = (float(v) for v in m.group(2).split())
-    r, p, yw = (float(v) for v in m.group(4).split())
-    new = f'{m.group(1)}{x + dx} {y + dy} {z}{m.group(3)}{r} {p} {yw + math.radians(dyaw)}{m.group(5)}'
-    return urdf[:m.start()] + new + urdf[m.end():]
-
-
-def holonomic_model(model_file, slip, depth, resolution):
-    """시뮬레이션 로봇 모델을 옵션에 맞게 고친 파일.
-    slip: planar_move 가 cmd_vel_body 를 받고, 참값 odom 을 odom_truth 로 내고, TF 는 내지 않게 (mecanum_slip_sim.py 가 낸다)
-    depth: False 면 깊이 카메라를 뺀다
-    resolution: 컬러 카메라의 "가로x세로" (화각은 그대로 D455 의 90 도)"""
-    with open(model_file) as f:
-        sdf = f.read()
-    width, height = (int(v) for v in resolution.lower().split('x'))
-    sdf, n = re.subn(r'(<camera name="color">.*?<width>)\d+(</width>\s*<height>)\d+(</height>)',
-                     rf'\g<1>{width}\g<2>{height}\g<3>', sdf, count=1, flags=re.S)
-    if n != 1:
-        raise RuntimeError('colour camera not found in the holonomic model')
-    if slip:
-        old = '<remapping>/tf:=tf</remapping>'
-        if old not in sdf:
-            raise RuntimeError('unexpected holonomic model')
-        sdf = sdf.replace(old, old + '\n        <remapping>cmd_vel:=cmd_vel_body</remapping>'
-                          '\n        <remapping>odom:=odom_truth</remapping>', 1)
-        sdf = sdf.replace('<publish_odom_tf>true</publish_odom_tf>', '<publish_odom_tf>false</publish_odom_tf>', 1)
-    if not depth:
-        sdf, n = re.subn(r'\s*<!--[^>]*aligned_depth_to_color[^>]*-->\s*<sensor name="realsense_depth".*?</sensor>',
-                         '', sdf, flags=re.S)
-        if n != 1:
-            raise RuntimeError('depth camera not found in the holonomic model')
-    out = tempfile.NamedTemporaryFile(mode='w', prefix='mecanum_', suffix='.model', delete=False)
-    out.write(sdf)
-    out.close()
-    return out.name
 
 
 def launch_setup(context):
@@ -135,24 +54,9 @@ def launch_setup(context):
     y = float(arg('y_pose') or y)
     yaw = float(arg('yaw') or yaw)
 
-    robot_type = arg('robot')
-    if robot_type not in ('waffle', 'mecanum', 'holonomic'):
-        raise RuntimeError(f'robot:={robot_type} 는 없다 (waffle | mecanum)')
-    holonomic = robot_type in ('mecanum', 'holonomic')
-    urdf = (os.path.join(here, 'robots', 'mecanum.urdf') if holonomic
-            else os.path.join(nav2_bringup, 'urdf', 'turtlebot3_waffle.urdf'))
-    with open(urdf) as f:
+    with open(os.path.join(nav2_bringup, 'urdf', 'turtlebot3_waffle.urdf')) as f:
         robot_description = f.read()
-    if arg('camera_tf_error'):
-        robot_description = perturb_camera(robot_description, arg('camera_tf_error'))
-    model = (os.path.join(here, 'robots', 'mecanum.model') if holonomic
-             else os.path.join(nav2_bringup, 'worlds', 'waffle.model'))
-    slip = arg('mecanum_slip').lower() == 'true'
-    if slip and not holonomic:
-        raise RuntimeError('mecanum_slip:=True needs robot:=mecanum')
-    if holonomic:
-        model = holonomic_model(model, slip, arg('camera_depth').lower() == 'true', arg('camera_resolution'))
-    model_paths = [os.path.join(here, 'models')]
+    model_paths = []
     try:                                    # 로봇 몸체의 mesh (model://turtlebot3_common)
         model_paths.append(os.path.join(get_package_share_directory('turtlebot3_gazebo'), 'models'))
     except Exception:  # noqa: BLE001
@@ -168,41 +72,10 @@ def launch_setup(context):
         Node(package='robot_state_publisher', executable='robot_state_publisher', output='screen',
              parameters=[{'use_sim_time': True, 'robot_description': robot_description}]),
         Node(package='gazebo_ros', executable='spawn_entity.py', output='screen',
-             arguments=['-entity', 'turtlebot3_waffle', '-file', model,
+             arguments=['-entity', 'turtlebot3_waffle',
+                        '-file', os.path.join(nav2_bringup, 'worlds', 'waffle.model'),
                         '-x', str(x), '-y', str(y), '-z', '0.01', '-Y', str(yaw)]),
     ]
-    if arg('dock').lower() == 'true':
-        if name not in DOCK:
-            raise RuntimeError(f'{name} 월드에는 dock 자리를 정해 두지 않았다 (DOCK)')
-        # (모형 이름 = docking.yaml 의 dock 이름, 모형 폴더, 자리)
-        #   1: marker 하나 (dock_a, 0번), 2: 같은 자리에 marker 둘 (dock_b, 2번과 3번), both: 둘 다 (dock_b 는 DOCK_B)
-        which = arg('dock_markers')
-        if which not in ('1', '2', 'both'):
-            raise RuntimeError(f"dock_markers:={which}: 1, 2, both 가운데 하나")
-        if which == 'both' and name not in DOCK_B:
-            raise RuntimeError(f'{name} 월드에는 둘째 설비 자리를 정해 두지 않았다 (DOCK_B)')
-        docks = {'1': [('dock_a', 'aruco_dock', DOCK[name])],
-                 '2': [('dock_b', 'aruco_dock_two', DOCK[name])],
-                 'both': [('dock_a', 'aruco_dock', DOCK[name]), ('dock_b', 'aruco_dock_two', DOCK_B.get(name))]}[which]
-        for entity, folder, (dx, dy, dyaw) in docks:
-            robot.append(Node(
-                package='gazebo_ros', executable='spawn_entity.py', name=f'spawn_{entity}', output='screen',
-                arguments=['-entity', entity, '-file', os.path.join(here, 'models', folder, 'model.sdf'),
-                           '-x', str(dx), '-y', str(dy), '-z', '0', '-Y', str(dyaw)]))
-    if holonomic and arg('dock').lower() == 'true' and arg('aruco_detector').lower() == 'true':
-        # 도킹 BT 가 받는 dock/aruco. bt_mission 이 이 패키지에 기대므로 패키지 의존은 두지 않고, 있을 때만 띄운다
-        try:
-            detector = os.path.join(get_package_share_directory('bt_mission'), 'launch', 'aruco_detector.launch.py')
-            robot.append(IncludeLaunchDescription(PythonLaunchDescriptionSource(detector),
-                                                  launch_arguments={'use_sim_time': 'True'}.items()))
-        except Exception:  # noqa: BLE001
-            robot.append(LogInfo(msg='bt_mission is not built: start the ArUco detector yourself'))
-    if holonomic:                           # 바퀴 넷의 각 (RViz 의 바퀴, 바퀴 TF)
-        robot.append(Node(package='simple_line_bringup', executable='wheel_joint_publisher.py', output='screen',
-                          parameters=[{'use_sim_time': True}]))
-    if slip:
-        robot.append(Node(package='simple_line_bringup', executable='mecanum_slip_sim.py', output='screen',
-                          parameters=[{'use_sim_time': True}]))
     if arg('headless').lower() != 'true':
         robot.append(ExecuteProcess(cmd=['gzclient'], output='screen'))
 
@@ -216,7 +89,6 @@ def launch_setup(context):
             'initial_pose_x': str(x),
             'initial_pose_y': str(y),
             'initial_pose_yaw': str(yaw),
-            'holonomic': str(holonomic),
         }.items())
     actions = robot + [navigation]
     if arg('use_rviz').lower() == 'true':
@@ -240,21 +112,5 @@ def generate_launch_description():
         DeclareLaunchArgument('headless', default_value='False',
                               description='True: Gazebo 창을 띄우지 않는다'),
         DeclareLaunchArgument('use_rviz', default_value='True'),
-        DeclareLaunchArgument('robot', default_value='waffle',
-                              description='waffle (차동, 바퀴 2개) | mecanum (4바퀴 메카넘 + 컬러 카메라)'),
-        DeclareLaunchArgument('dock', default_value='False',
-                              description='True: ArUco marker 가 붙은 dock 을 월드에 놓는다'),
-        DeclareLaunchArgument('dock_markers', default_value='1',
-                              description='1: marker 하나짜리 설비 (dock_a) | 2: marker 둘 (dock_b) | both: 둘 다 (다른 자리)'),
-        DeclareLaunchArgument('aruco_detector', default_value='True',
-                              description='dock:=True robot:=mecanum 일 때 marker 검출 노드도 띄운다'),
-        DeclareLaunchArgument('camera_resolution', default_value='848x480',
-                              description='컬러 카메라 해상도 (robot:=mecanum). 화각은 D455 의 90 도. 실제 로봇의 권장은 1280x720'),
-        DeclareLaunchArgument('camera_depth', default_value='False',
-                              description='True: 깊이 카메라도 켠다 (robot:=mecanum)'),
-        DeclareLaunchArgument('mecanum_slip', default_value='False',
-                              description='True: 메카넘 미끄러짐과 바퀴 odom 오차를 흉내 낸다 (robot:=mecanum)'),
-        DeclareLaunchArgument('camera_tf_error', default_value='',
-                              description='dyaw_deg,dx,dy: TF 의 카메라 자리를 실제(Gazebo)와 다르게'),
         OpaqueFunction(function=launch_setup),
     ])

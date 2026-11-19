@@ -50,16 +50,6 @@ BT::Blackboard::Ptr createBlackboard(
   return blackboard;
 }
 
-std::string checkTask(const bt_mission_msgs::msg::Task & task)
-{
-  if (task.waypoints.empty() && task.action != bt_mission_msgs::msg::Task::ACTION_UNDOCK &&
-    task.action != bt_mission_msgs::msg::Task::ACTION_UNDOCK_PRECISE)
-  {
-    return "no waypoints";
-  }
-  return "";
-}
-
 std::string writeTask(
   const BT::Blackboard::Ptr & blackboard, bt_mission_msgs::msg::Task task, int count)
 {
@@ -73,7 +63,6 @@ std::string writeTask(
   blackboard->set("task_id", task_id);
   blackboard->set("action", task.action);
   blackboard->set("duration", task.duration);
-  blackboard->set("target", task.target);
   blackboard->set("waypoints_reached", 0);
   return task_id;
 }

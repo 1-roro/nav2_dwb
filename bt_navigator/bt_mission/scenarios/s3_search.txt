@@ -1,6 +1,0 @@
-# 시나리오 3: staging 에서 marker 가 화면 밖. 비스듬하고 조금 먼 자리 (설비 면에서 0.9 m, 옆 0.4 m, -50 도)
-# find_marker 가 레이저로 주변을 본 뒤 제자리에서 돌며 찾는다 (+30 도에서도 안 보이고 +60 도에서 보인다)
-# 창고 월드, robot:=mecanum dock:=True dock_markers:=both (bt_navigator/DOCKING.md 16-4)
-dock:dock_a 4.0,-2.5 4.0,0.0 3.65,0.6,-50     # 선반 B 모서리를 피해 (4.0, 0) 을 거친다 (planner 가 직선)
-undock_precise:dock_a
-go 4.0,0.0 4.0,-2.5 -4.0,-2.5,0

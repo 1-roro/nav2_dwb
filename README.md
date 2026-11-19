@@ -6,4 +6,6 @@ Nav2 개념을 단계별로 쌓아 가며 실습하는 저장소.
 - [`simple_line/`](simple_line/README.md): 직선 경로 planner + controller 최종 구현과 실행 설정 (ROS 2 Humble, C++)
   - [`simple_line/MULTI_GOAL.md`](simple_line/MULTI_GOAL.md): 명령 하나로 여러 goal 경유하기 (`NavigateThroughPoses`, `waypoint_follower`)
   - [`simple_line/AMR.md`](simple_line/AMR.md): 실제 AMR 로 옮기기 (지도 만들기와 AMCL, 부드러운 가감속, 장애물 감속, 실제 로봇 개발 방식)
-- [`bt_navigator/`](bt_navigator/README.md): Nav2 명령을 상위 작업 BT 로 조합한다. 작업(들를 점 + 할 일)을 액션으로 받아 점마다 멈추며 실행한다. 장애물이 있으면 멈췄다가 치우면 다시 간다 (Nav2 collision_monitor). 4바퀴 메카넘 로봇을 ArUco marker 하나로 설비 앞 15 cm 에 mm 단위로 붙이고 떨어진다 ([DOCKING.md](bt_navigator/DOCKING.md), 기초부터 공부하려면 [DOCKING_STUDY.md](bt_navigator/DOCKING_STUDY.md), 메카넘 바퀴의 원리는 [MECANUM_STUDY.md](bt_navigator/MECANUM_STUDY.md), 코드 전체와 "왜" 를 그림으로 보려면 [DOCKING_BIG_PICTURE.md](bt_navigator/DOCKING_BIG_PICTURE.md)). 아래층은 `simple_line` 을 쓴다
+- [`bt_navigator/`](bt_navigator/README.md): Nav2 명령을 상위 작업 BT 로 조합한다. 작업(들를 점 + 할 일)을 액션으로 받아 점마다 멈추며 실행한다. 장애물이 있으면 멈췄다가 치우면 다시 간다 (Nav2 collision_monitor). 아래층은 `simple_line` 을 쓴다
+
+이 저장소의 로봇은 TurtleBot3 waffle (차동 구동) 이다. 4바퀴 메카넘 로봇 **pmbot** 을 위해 시작한 부분(설비 앞 ArUco marker 정밀 도킹, 메카넘 로봇 모델, RealSense D455, 관련 문서와 도구)은 별도 저장소 [pm_project](https://github.com/1-roro/pm_project) 로 옮겼다. pm_project 는 이 저장소의 `simple_line` 과 `bt_navigator` 를 복사해 이름을 바꾼 패키지로 혼자 빌드된다.

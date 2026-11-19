@@ -1,8 +1,0 @@
-# 시나리오 9: 틀린 입력이 안전하게 실패하는가 (bt_navigator/DOCKING.md 16-10)
-# 이 파일은 실패하는 것이 정상이다: --keep-going 으로 돌려서 줄마다 결과를 본다
-#   ros2 run bt_mission task_client.py --keep-going --file .../s9_wrong_input.txt
-dock:dock_c 4.0,-2.5 3.85,1.0,0      # docking.yaml 에 없는 dock: staging 까지 가서 find_marker 가 실패한다
-dock:dock_b 3.85,1.0,0               # 다른 설비 앞: dock_a 의 marker 만 보여서 실패한다 (saw only other docks)
-undock_precise:dock_b                # 붙어 있지 않은데 정밀 undock: dock_b 가 안 보여 단순 undock 으로 0.4 m 물러난다
-inspect:abc 1,1                      # 형식이 틀린 줄: 보내지 않는다
-go 4.0,0.0 4.0,-2.5 -4.0,-2.5,0      # 출발점으로 (선반 B 모서리를 피해 (4.0, 0) 을 거친다)
