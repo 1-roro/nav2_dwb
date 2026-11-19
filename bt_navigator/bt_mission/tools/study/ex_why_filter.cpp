@@ -1,6 +1,7 @@
 // DOCKING_BIG_PICTURE.md 5장: "왜 칼만 필터가 필요한가" 를 실제 헤더(aruco_dock_control.hpp)로 비교한다.
 //   python3 gen_meas.py                                        # meas.txt (합성 영상 108장을 실제 detector 로 잰 것)
 //   g++ -std=c++17 -I../../include ex_why_filter.cpp -o ex_why_filter && ./ex_why_filter > why.csv
+//   python3 gen_meas.py dock_b && ./ex_why_filter meas_dock_b.txt > why_b.csv     # marker 둘 (8-3)
 //
 // 같은 길(staging 0.75 m → 붙는 자리 0.31 m)을 지나는 동안, 네 가지 방법이 "로봇이 dock 에 대해 어디 있다고
 // 생각하는지" 를 참값과 비교한다. 이 오차가 곧 제어가 0 으로 만들려는 오차라서, 끝에 남는 값이 도킹 오차가 된다.
@@ -40,12 +41,13 @@ struct Frame
   std::vector<ad::Measurement> rel;   // 로봇(base)에서 본 dock 후보 (detector 의 출력과 같은 것)
 };
 
-int main()
+int main(int argc, char ** argv)
 {
   const Pose2 D{4.55, 1.0, M_PI};
-  std::ifstream in("meas.txt");
+  const std::string file = argc > 1 ? argv[1] : "meas.txt";
+  std::ifstream in(file);
   if (!in) {
-    std::fprintf(stderr, "meas.txt not found: run gen_meas.py first\n");
+    std::fprintf(stderr, "%s not found: run gen_meas.py first\n", file.c_str());
     return 1;
   }
   std::vector<Frame> frames;
@@ -107,7 +109,7 @@ int main()
 
   std::printf("k,dist,phase,seen,raw_along,raw_lat,raw_yaw,once_along,once_lat,once_yaw,"
     "nopredict_along,nopredict_lat,nopredict_yaw,filter_along,filter_lat,filter_yaw,filter_sigma_yaw,"
-    "odom_along,odom_lat,odom_yaw,meas_sigma_yaw\n");
+    "odom_along,odom_lat,odom_yaw,meas_sigma_yaw,filter_sigma_along,filter_sigma_lat\n");
   Pose2 last_robot = odom[k - 1];
   double pending_dt = 0.0;
   int move_index = 0, rejected = 0;
@@ -140,11 +142,31 @@ int main()
           deg(ad::normalizeAngle(p.yaw - truth_in_D.yaw))};
       };
     const Pose2 er = err(raw), eo = err(once), en = err(nopredict.mean()), ef = err(filter.mean());
-    std::printf("%zu,%.4f,%s,%d,%.3f,%.3f,%.4f,%.3f,%.3f,%.4f,%.3f,%.3f,%.4f,%.3f,%.3f,%.4f,%.4f,%.3f,%.3f,%.4f,%.4f\n",
+    // 필터의 dock 불확실도가 "로봇이 D 에서 어디 있나" 의 불확실도로 얼마나 되나 (깔때기가 보는 값): J Σ Jᵀ, J 는 수치 미분
+    double jac[3][3];
+    for (int c = 0; c < 3; ++c) {
+      Pose2 a = filter.mean(), b = filter.mean();
+      double * pa = c == 0 ? &a.x : (c == 1 ? &a.y : &a.yaw);
+      double * pb = c == 0 ? &b.x : (c == 1 ? &b.y : &b.yaw);
+      *pa += 1e-6;
+      *pb -= 1e-6;
+      const Pose2 qa = ad::relative(a, odom[k]), qb = ad::relative(b, odom[k]);
+      jac[0][c] = (qa.x - qb.x) / 2e-6;
+      jac[1][c] = (qa.y - qb.y) / 2e-6;
+      jac[2][c] = ad::normalizeAngle(qa.yaw - qb.yaw) / 2e-6;
+    }
+    double var_along = 0.0, var_lat = 0.0;
+    for (int i = 0; i < 3; ++i) {
+      for (int j = 0; j < 3; ++j) {
+        var_along += jac[0][i] * filter.cov()[i * 3 + j] * jac[0][j];
+        var_lat += jac[1][i] * filter.cov()[i * 3 + j] * jac[1][j];
+      }
+    }
+    std::printf("%zu,%.4f,%s,%d,%.3f,%.3f,%.4f,%.3f,%.3f,%.4f,%.3f,%.3f,%.4f,%.3f,%.3f,%.4f,%.4f,%.3f,%.3f,%.4f,%.4f,%.3f,%.3f\n",
       k, f.dist, f.phase.c_str(), seen ? 1 : 0, er.x, er.y, er.yaw, eo.x, eo.y, eo.yaw, en.x, en.y, en.yaw,
       ef.x, ef.y, ef.yaw, deg(std::sqrt(filter.cov()[8])),
       (odom[k].x - f.truth.x) * 1000.0, (odom[k].y - f.truth.y) * 1000.0, deg(ad::normalizeAngle(odom[k].yaw - f.truth.yaw)),
-      deg(meas_sigma_yaw));
+      deg(meas_sigma_yaw), std::sqrt(var_along) * 1000.0, std::sqrt(var_lat) * 1000.0);
   }
   std::fprintf(stderr, "fused %d of %zu looks, filter rejected %d\n", used, look.size(), rejected);
   return 0;
