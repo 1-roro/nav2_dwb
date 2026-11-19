@@ -1,9 +1,0 @@
-# 시나리오 6: 붙어 있는 동안 로봇 뒤에 물건이 놓였다. undock 이 뒤를 보고 서는가
-# 창고 월드, robot:=mecanum dock:=True dock_markers:=both (bt_navigator/DOCKING.md 16-7)
-# 다른 터미널에서, 도킹이 끝나 wait 20 이 도는 동안 로봇 뒤 12 cm 에 기둥을 세운다:
-#   ros2 run simple_line_bringup obstacle.py put 3.90,1.0 --radius 0.06
-# undock 이 "something is behind the robot, stopped" 로 실패하고 파일이 멈추면 정상이다.
-# 기둥을 치우고 (obstacle.py remove) undock 을 다시 보낸다: ros2 run bt_mission task_client.py undock
-dock:dock_a 4.0,-2.5 3.85,1.0,0
-wait 20
-undock

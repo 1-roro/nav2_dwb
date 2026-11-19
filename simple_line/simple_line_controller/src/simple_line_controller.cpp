@@ -402,8 +402,8 @@ geometry_msgs::msg::TwistStamped SimpleLineController::computeVelocityCommands(
   } else if (arrived_ && arrived_idle_since_ && (now - *arrived_idle_since_).seconds() > 2.0) {
     // 도착해서 goal 방향까지 맞추고 서 있는데 2 s 넘게 끝나지 않는다: goal checker 가 받아 주지 않는다 (위치가
     // 허용오차 밖). 도착한 뒤 위치 추정이 바뀌었는데 Nav2 가 같은 goal 로 다시 시작해 goal checker 가 처음부터
-    // 보거나 (Failed to make progress 뒤), undock 처럼 Nav2 밖에서 움직인 뒤 같은 goal 을 받았을 때다.
-    // 그대로 두면 서로 기다리며 멈춰 있었다 (bt_navigator/DOCKING.md 16-12). 다시 다가간다
+    // 보거나 (Failed to make progress 뒤), Nav2 밖에서(다른 노드가 직접 cmd_vel 로) 움직인 뒤 같은 goal 을 받았을 때다.
+    // 그대로 두면 서로 기다리며 멈춰 있었다. 다시 다가간다
     arrived_ = false;
     RCLCPP_INFO(
       logger_, "goal is %.3f m away and not accepted (tolerance %.3f m): approaching it again", goal_dist,
